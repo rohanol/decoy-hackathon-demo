@@ -32,12 +32,15 @@ services:
       - "${LAB_HOST_IP}:8080:8080"
     environment:
       SENSOR_ID: web-decoy-01
+      LAB_RUN_ID: ${LAB_RUN_ID}
+      ATTACKER_IPS: ${ATTACKER_IPS}
       LOG_PATH: /logs/web.json
       BLOCKLIST_PATH: /state/blocklist.json
       HONEYTOKENS_PATH: /config/honeytokens.yaml
     volumes:
       - ./state/web-log:/logs
-      - ./state/blocklist.json:/state/blocklist.json:ro
+      # A directory mount observes atomic rename updates to blocklist.json.
+      - ./state:/state:ro
       - ../config/honeytokens.yaml:/config/honeytokens.yaml:ro
     user: "1000:1000"
     read_only: true
