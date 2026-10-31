@@ -142,14 +142,23 @@ def test_batching_limits():
 
 class FakeBackend:
     def __init__(self, fail_first=0, reject_indices=()):
-        self.received, self.fail_first, self.calls = [], fail_first, 0
+        self.received, self.heartbeats, self.fail_first, self.calls = [], [], fail_first, 0
         self.reject_indices = list(reject_indices)
         outer = self
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):
-                outer.calls += 1
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if self.path.endswith("/heartbeat"):
+                    outer.heartbeats.append(body)
+                    out = json.dumps({"ok": True}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+                    return
+                outer.calls += 1
                 if outer.calls <= outer.fail_first:
                     self.send_response(503)
                     self.end_headers()
@@ -262,3 +271,21 @@ def test_collector_health_updates_without_attack_activity(tmp_path):
     health = json.loads((tmp_path / "health.json").read_text())
     assert health["status"] == "healthy" and health["last_poll_at"]
     assert health["last_poll_delivered"] == 0
+
+
+def test_heartbeat_matches_proposed_api_and_posts_while_idle(tmp_path, backend):
+    empty = tmp_path / "cowrie.json"
+    empty.write_text("")
+    assert run_once(tmp_path, backend.url) == 0
+    health = json.loads((tmp_path / "health.json").read_text())
+    assert health["heartbeat_api"] == "ok"
+    assert len(backend.heartbeats) == 2
+    heartbeat = next(item for item in backend.heartbeats if item["sensor_id"] == "ssh-decoy-01")
+    assert set(heartbeat) == {"collector_id", "sensor_id", "sent_at", "sensor_process", "last_read_at",
+        "last_ingest_ok_at", "backlog_lines", "oldest_backlog_age_s", "errors_total", "rejected_total",
+        "quarantined_total"}
+    assert heartbeat["collector_id"] == "adapter-laptop-b" and heartbeat["sensor_process"] == "up"
+    assert heartbeat["backlog_lines"] == 0 and heartbeat["rejected_total"] == 0
+    local = next(item for item in health["heartbeats"] if item["sensor_id"] == "ssh-decoy-01")
+    assert health["heartbeat_results"]["ssh-decoy-01"] is True
+    assert local == heartbeat

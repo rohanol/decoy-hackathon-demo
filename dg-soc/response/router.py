@@ -13,7 +13,8 @@ Scope is one exact lab IP on web-decoy-01, nothing else. Targets must be listed 
 Route handlers are plain `def` so FastAPI runs them in a thread pool. That matters: the default
 incident lookup calls the backend's own GET /api/incidents/{id} over loopback, which would
 deadlock inside an `async def` handler on a single worker. M3 may instead call
-`configure(incident_lookup=fn)` where fn(incident_id) -> src_ip string or None.
+`configure(eligibility_lookup=fn)` where fn(incident_id) returns the authoritative backend
+response-eligibility document. An IP-only incident lookup is deliberately not supported.
 """
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ from fastapi import APIRouter, Body
 from fastapi.responses import JSONResponse
 
 PREVIEW_TTL_SECONDS = 60
+ELIGIBILITY_MAX_AGE = timedelta(minutes=10)
 DEFAULT_BLOCK_TTL = 120
 MIN_BLOCK_TTL, MAX_BLOCK_TTL = 10, 600
 ACTIVE = ("applied", "verified")
@@ -51,7 +53,12 @@ def _iso(ts: datetime) -> str:
 
 
 def _parse(ts: str) -> datetime:
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if not isinstance(ts, str):
+        raise ValueError("timestamp must be a string")
+    parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timestamp must include timezone")
+    return parsed.astimezone(timezone.utc)
 
 
 def _parse_env_file(path: str) -> Dict[str, str]:
@@ -84,7 +91,7 @@ class ResponseService:
         self,
         state_dir: str,
         allowed_ips: List[str],
-        incident_lookup: Callable[[str], Optional[str]],
+        eligibility_lookup: Callable[[str], Optional[Dict[str, Any]]],
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
         live_context: Optional[Callable[[], Dict[str, Any]]] = None,
     ):
@@ -98,7 +105,7 @@ class ResponseService:
             if canon and canon not in NEVER_BLOCK and not ipaddress.IPv4Address(canon).is_loopback:
                 safe.append(canon)
         self.allowed_ips = safe
-        self.incident_lookup = incident_lookup
+        self.eligibility_lookup = eligibility_lookup
         self.now = now
         self.live_context = live_context or (lambda: {})
         self._lock = threading.RLock()
@@ -132,6 +139,17 @@ class ResponseService:
                 saved = json.load(fh)
             actions = saved.get("actions", {})
             self._actions = actions if isinstance(actions, dict) else {}
+            # Migrate the short-lived M2 field name to M3's proposed contract name.
+            for action in self._actions.values():
+                if isinstance(action, dict) and "verification_mismatches" in action:
+                    old = action.pop("verification_mismatches")
+                    action.setdefault("verification_rejects", [
+                        {"event_id": item.get("event_id") if isinstance(item, dict) else None,
+                         "reason": item.get("reason", "legacy_verification_mismatch") if isinstance(item, dict) else "legacy_verification_mismatch"}
+                        for item in old
+                    ] if isinstance(old, list) else [])
+                if isinstance(action, dict) and isinstance(action.get("verification_rejects"), list):
+                    action["verification_rejects"] = action["verification_rejects"][-20:]
             self._version = int(saved.get("version", 0))
         except (OSError, ValueError, AttributeError, TypeError):
             pass
@@ -151,8 +169,7 @@ class ResponseService:
             entry = entries_by_id.get(action_id)
             if not entry or entry.get("ip") != action.get("target_ip") or entry.get("expires_at") != action.get("until"):
                 action["status"] = "reconciliation_required"
-                action.setdefault("verification_mismatches", []).append({"event_id": None,
-                    "received_at": _iso(self.now()), "reason": "active_action_missing_or_changed_in_policy_after_restart"})
+                self._append_verification_reject(action, None, "active_action_missing_or_changed_in_policy_after_restart")
                 changed = True
         now = self.now()
         for action_id, entry in entries_by_id.items():
@@ -219,10 +236,8 @@ class ResponseService:
         run_id = context.get("lab_run_id")
         if not isinstance(run_id, str) or not run_id:
             raise ApiError(409, "run_unavailable", "live lab run context is unavailable")
-        src = self.incident_lookup(incident_id)
-        if src is None:
-            raise ApiError(404, "not_found", "incident not found")
-        target = _valid_single_ipv4(src)
+        eligibility = self._eligible_incident(incident_id, context)
+        target = _valid_single_ipv4(eligibility["target_ip"])
         if target is None or target not in self.allowed_ips:
             raise ApiError(400, "target_not_allowed", "target is not an allowed lab attacker IP")
         with self._lock:
@@ -256,6 +271,9 @@ class ResponseService:
                 raise ApiError(409, "run_unavailable", "live lab run context is unavailable")
             if run_id != pv["lab_run_id"] or self._current_policy_version() != pv["policy_revision"]:
                 raise ApiError(409, "preview_stale", "run or policy changed; request a new preview")
+            eligibility = self._eligible_incident(pv["incident_id"], context)
+            if eligibility["target_ip"] != target or eligibility["lab_run_id"] != run_id:
+                raise ApiError(409, "preview_stale", "incident eligibility changed; request a new preview")
             policy_revision = max(self._version, self._current_policy_version()) + 1
             if any(a["target_ip"] == target and a["status"] in ACTIVE for a in self._actions.values()):
                 raise ApiError(409, "already_blocked", "an active block already exists for this IP")
@@ -289,7 +307,7 @@ class ResponseService:
             self.expire()
             items = [
                 {k: a[k] for k in ("action_id", "target_ip", "status", "reason", "created_at", "until", "verified_by_event_id")}
-                | {"verification_mismatches": a.get("verification_mismatches", [])}
+                | {"verification_rejects": a.get("verification_rejects", [])}
                 for a in sorted(self._actions.values(), key=lambda x: x["created_at"], reverse=True)
             ]
             return {"items": items}
@@ -347,11 +365,8 @@ class ResponseService:
                 )
                 if not valid:
                     # Keep a rejected verification attempt visible in the durable audit trail.
-                    a.setdefault("verification_mismatches", []).append({
-                        "event_id": event_id if isinstance(event_id, str) else None,
-                        "received_at": context.get("received_at"),
-                        "reason": "verification_context_mismatch",
-                    })
+                    self._append_verification_reject(a, event_id if isinstance(event_id, str) else None,
+                                                     "verification_context_mismatch")
                     self._atomic_write(self.actions_path, {"version": self._version, "actions": self._actions})
                     return
                 a["status"] = "verified"
@@ -368,6 +383,47 @@ class ResponseService:
             fh.write(json.dumps(record, separators=(",", ":")) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
+
+    @staticmethod
+    def _append_verification_reject(action: Dict[str, Any], event_id: Optional[str], reason: str) -> None:
+        rejects = action.setdefault("verification_rejects", [])
+        rejects.append({"event_id": event_id, "reason": reason})
+        del rejects[:-20]
+
+    def _eligible_incident(self, incident_id: str, live: Dict[str, Any]) -> Dict[str, Any]:
+        """Require a fresh, authoritative, live case decision at each response transition."""
+        try:
+            eligibility = self.eligibility_lookup(incident_id)
+        except (OSError, ValueError, TypeError, KeyError):
+            eligibility = None
+        if eligibility is None:
+            raise ApiError(404, "not_found", "incident not found")
+        if not isinstance(eligibility, dict):
+            raise ApiError(503, "eligibility_unavailable", "authoritative response eligibility is unavailable")
+        required = ("eligible", "target_ip", "lab_run_id", "capture_mode", "reasons",
+                    "last_web_observation_at", "checked_at")
+        if any(key not in eligibility for key in required):
+            raise ApiError(503, "eligibility_unavailable", "authoritative response eligibility is incomplete")
+        if eligibility.get("eligible") is not True or eligibility.get("reasons") != []:
+            raise ApiError(409, "not_eligible", "incident is not eligible for a live response")
+        target = _valid_single_ipv4(eligibility.get("target_ip"))
+        run_id = eligibility.get("lab_run_id")
+        if (target is None
+                or eligibility.get("capture_mode") != "live"
+                or not isinstance(run_id, str) or not run_id
+                or run_id != live.get("lab_run_id")
+                or live.get("capture_mode") != "live"):
+            raise ApiError(409, "not_eligible", "incident mode, run, or target is not eligible")
+        try:
+            checked = _parse(eligibility["checked_at"])
+            observed = _parse(eligibility["last_web_observation_at"])
+            now = self.now()
+        except (TypeError, ValueError):
+            raise ApiError(503, "eligibility_unavailable", "authoritative response eligibility has invalid timestamps")
+        if (checked > now or now - checked > timedelta(seconds=30)
+                or observed > now or now - observed >= ELIGIBILITY_MAX_AGE):
+            raise ApiError(409, "not_eligible", "incident evidence is stale")
+        return eligibility
 
     def _policy_revision(self, action_id: str) -> Optional[int]:
         try:
@@ -390,12 +446,17 @@ class ResponseService:
 
 
 # ---- default wiring --------------------------------------------------
-def _default_lookup_factory(backend_url: str) -> Callable[[str], Optional[str]]:
-    def lookup(incident_id: str) -> Optional[str]:
+def _default_eligibility_factory(backend_url: str) -> Callable[[str], Optional[Dict[str, Any]]]:
+    def lookup(incident_id: str) -> Optional[Dict[str, Any]]:
         safe = urllib.parse.quote(incident_id, safe="")
         try:
-            with urllib.request.urlopen(f"{backend_url}/api/incidents/{safe}", timeout=3) as resp:
-                return json.load(resp).get("src_ip")
+            with urllib.request.urlopen(f"{backend_url}/api/incidents/{safe}/response-eligibility", timeout=3) as resp:
+                value = json.load(resp)
+                return value if isinstance(value, dict) else None
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                raise ApiError(404, "not_found", "incident not found") from None
+            return None
         except (urllib.error.URLError, OSError, ValueError):
             return None
     return lookup
@@ -406,7 +467,7 @@ _service_lock = threading.Lock()
 
 
 def configure(state_dir: Optional[str] = None, env_file: Optional[str] = None,
-              incident_lookup: Optional[Callable[[str], Optional[str]]] = None,
+              eligibility_lookup: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
               now: Optional[Callable[[], datetime]] = None,
               live_context: Optional[Callable[[], Dict[str, Any]]] = None) -> ResponseService:
     """Build the service. Defaults read deployment/lab.env and use deployment/state."""
@@ -419,7 +480,7 @@ def configure(state_dir: Optional[str] = None, env_file: Optional[str] = None,
     with _service_lock:
         _service = ResponseService(
             state_dir or os.path.join(root, "deployment", "state"), allowed,
-            incident_lookup or _default_lookup_factory(backend), now or (lambda: datetime.now(timezone.utc)),
+            eligibility_lookup or _default_eligibility_factory(backend), now or (lambda: datetime.now(timezone.utc)),
             live_context or (lambda: {"lab_run_id": run_id, "capture_mode": env.get("CAPTURE_MODE", "live")}),
         )
     return _service

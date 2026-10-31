@@ -7,8 +7,8 @@ Suggested PR title: `[M2] collection reliability and trustworthy response`
 
 - Collector reads complete Cowrie and web JSONL records with inode-aware offsets, restart reconciliation, batching, bounded retries, and SHA-256 source IDs. Raw passwords are hashed and removed.
 - Invalid and permanently rejected records are written to `deployment/state/rejected-events.jsonl` as sanitized audit entries before the checkpoint can advance. Batch HTTP 400/413/422 responses quarantine affected events; backend per-record rejection indices are quarantined individually.
-- `deployment/state/collector-health.json` gets a heartbeat even when both sensors are idle. It reports source-file presence, last poll, last successful ingest, deliveries and sender errors.
-- Response preview and apply require a live run and exact target eligibility. Apply rechecks preview run/mode and policy revision. Verification requires an action ID, web sensor, target peer IP, same active live run, policy revision, backend-persisted event identity, and event/receive times between apply and expiry. Mismatches are retained without marking the action verified.
+- `deployment/state/collector-health.json` updates while sensors are idle and retains the Linux preflight fields. Its `heartbeats` array contains the exact proposed M3 v1.1 request per sensor (`collector_id`, `sensor_id`, `sent_at`, process, read/ingest times, backlog and per-sensor error/rejection/quarantine totals); `heartbeat_results` reports each backend delivery and `heartbeat_api` summarizes delivery independently of event-delivery status.
+- Response preview and apply call the authoritative M3 `GET /api/incidents/{incident_id}/response-eligibility`; no IP-only lookup fallback exists. The checks require eligible case status/mode, active live run, allowed exact target, empty rejection reasons and a web observation under 10 minutes old. Apply repeats eligibility and preview run/mode and policy revision checks immediately before writing policy. Verification requires an action ID, web sensor, target peer IP, same active live run, policy revision, backend-persisted event identity, and event/receive times between apply and expiry. Mismatches are stored as M3's capped `verification_rejects` without marking the action verified.
 - Startup reconciliation recovers an action when the atomic policy file was written before a crash interrupted action-history persistence. If action history claims an active block that is missing or changed in policy, the action becomes `reconciliation_required` and is auditable.
 - Blocklist entries carry the policy revision and recovery metadata needed by the enforcement sensor. The web decoy reads action ID and revision from the same atomic policy snapshot. The directory mount preserves atomic rename visibility.
 - Cowrie stays in `backend=shell` emulated mode with the restricted command registry, canned network handlers, private binds and the manual web-only response. The dispatched canned network handler now emits a session-attributed `dgsoc.network.denied` record; the adapter maps it to a `command_input` with `network_attempt_outcome=denied` and `real_execution=false`.
@@ -16,7 +16,7 @@ Suggested PR title: `[M2] collection reliability and trustworthy response`
 
 ## Rohan integration included for review
 
-`backend/integrations.py` now supplies trusted provenance after `db.ingest` commits an event and assigns its backend ID. It calls the verifier with:
+`backend/integrations.py` supplies trusted provenance after `db.ingest` commits an event and assigns its backend ID. It calls the verifier with:
 
 ```python
 on_event(event, {
@@ -26,7 +26,7 @@ on_event(event, {
 })
 ```
 
-Review the small change in `backend/integrations.py` and its hook test with Rohan. Keep `/api/response` reachable only from loopback. The additive `API.md` change documents response audit fields and the trusted callback context.
+Review the trusted callback in `backend/integrations.py`, the response-eligibility and heartbeat API compatibility notes in `contracts/API.md`, and proposed v1.1 field names with Rohan. Keep `/api/response` reachable only from loopback. The web policy bridge change should be reviewed with Prajwal: canonical policy errors now produce 503 while action ID and revision still come from one snapshot.
 
 ## Verification performed here
 

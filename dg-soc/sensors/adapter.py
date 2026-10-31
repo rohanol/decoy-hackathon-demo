@@ -313,10 +313,17 @@ class Sender:
         self.last_successful_ingest_at: Optional[str] = None
         self.accepted_count = self.duplicate_count = self.rejected_count = 0
         self.quarantine_count = self.retry_count = 0
+        self.sensor_totals: Dict[str, Dict[str, int]] = {}
+        self.heartbeat_url = self.url.rsplit("/", 1)[0] + "/heartbeat"
+
+    def _totals(self, sensor_id: str) -> Dict[str, int]:
+        return self.sensor_totals.setdefault(sensor_id, {"errors_total": 0, "rejected_total": 0,
+                                                          "quarantined_total": 0})
 
     def post(self, events: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Return backend rejections; None means retries ran out and checkpoint must not advance."""
         body = json.dumps({"events": events}).encode()
+        sensors = {ev.get("sensor_id") for ev in events if ev.get("sensor_id") in SENSOR_IDS}
         delay = 0.5
         for attempt in range(1, self.max_retries + 1):
             try:
@@ -330,23 +337,45 @@ class Sender:
                 if rejected:
                     log.warning("backend rejected %d events", len(rejected))
                     self.rejected_count += len(rejected)
+                    for item in rejected:
+                        index = item.get("index") if isinstance(item, dict) else None
+                        if isinstance(index, int) and 0 <= index < len(events):
+                            self._totals(events[index]["sensor_id"])["rejected_total"] += 1
                 log.info("sent %d events: accepted=%s duplicates=%s", len(events), result.get("accepted"), result.get("duplicates"))
                 return rejected if isinstance(rejected, list) else []
             except urllib.error.HTTPError as exc:
                 if exc.code in (400, 413, 422):  # our batch is bad; retrying will not help
                     log.error("backend returned %s for a batch of %d; quarantining", exc.code, len(events))
                     self.rejected_count += len(events)
+                    for event in events:
+                        self._totals(event["sensor_id"])["rejected_total"] += 1
                     return [{"index": i, "reason": f"backend_http_{exc.code}"} for i in range(len(events))]
                 log.warning("backend HTTP %s (attempt %d)", exc.code, attempt)
                 self.error_count += 1
                 self.retry_count += 1
+                for sensor in sensors:
+                    self._totals(sensor)["errors_total"] += 1
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 log.warning("backend unreachable: %s (attempt %d)", exc, attempt)
                 self.error_count += 1
                 self.retry_count += 1
+                for sensor in sensors:
+                    self._totals(sensor)["errors_total"] += 1
             self.sleep(delay)
             delay = min(delay * 2, 8)
         return None
+
+    def post_heartbeat(self, payload: Dict[str, Any]) -> bool:
+        """Send the proposed M3 v1.1 heartbeat independently of event delivery."""
+        try:
+            req = urllib.request.Request(self.heartbeat_url, data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                result = json.load(resp)
+            return resp.status == 200 and isinstance(result, dict) and result.get("ok") is True
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log.warning("heartbeat unavailable for %s: %s", payload.get("sensor_id"), exc)
+            return False
 
 
 def quarantine(path: str, sensor: str, source_record_id: str, reason: str,
@@ -386,9 +415,13 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                 if getattr(mapper, "last_record_ignored", False):
                     continue
                 if quarantine_path:
-                    quarantine(quarantine_path, getattr(mapper, "sensor_id", "unknown"), sha256_hex(line), "unmapped_or_malformed_record")
+                    sensor = getattr(mapper, "sensor_id", "unknown")
+                    quarantine(quarantine_path, sensor, sha256_hex(line), "unmapped_or_malformed_record")
                     sender.quarantine_count += 1
                     sender.rejected_count += 1
+                    if sensor in SENSOR_IDS:
+                        sender._totals(sensor)["rejected_total"] += 1
+                        sender._totals(sensor)["quarantined_total"] += 1
                 continue
             problem = validate(ev)
             if problem:
@@ -397,6 +430,10 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                     quarantine(quarantine_path, ev.get("sensor_id", "unknown"), ev.get("source_record_id", ""), problem, ev)
                     sender.quarantine_count += 1
                     sender.rejected_count += 1
+                    sensor = ev.get("sensor_id")
+                    if sensor in SENSOR_IDS:
+                        sender._totals(sensor)["rejected_total"] += 1
+                        sender._totals(sensor)["quarantined_total"] += 1
                 continue
             events.append(ev)
         for batch in batches(events):
@@ -411,6 +448,7 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                         quarantine(quarantine_path, event["sensor_id"], event["source_record_id"],
                                    item.get("reason", "backend_rejected"), event)
                         sender.quarantine_count += 1
+                        sender._totals(event["sensor_id"])["quarantined_total"] += 1
             delivered += len(batch) - len(rejected)
         offset = new_offset
         state = mapper.export_state() if hasattr(mapper, "export_state") else None
@@ -432,6 +470,42 @@ def parse_env_file(path: str) -> Dict[str, str]:
     return out
 
 
+def _pending_lines(path: str, ckpt: Checkpoint) -> Tuple[int, Optional[int]]:
+    try:
+        inode = os.stat(path).st_ino
+        offset = ckpt.get(path, inode)
+        lines, _ = read_new_lines(path, offset)
+        ages = []
+        now = datetime.now(timezone.utc)
+        for line in lines:
+            try:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    continue
+                timestamp = norm_ts(record.get("timestamp") or record.get("occurred_at"))
+                if timestamp:
+                    occurred = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    ages.append(max(0, int((now - occurred).total_seconds())))
+            except (TypeError, ValueError):
+                continue
+        return len(lines), max(ages) if ages else (None if lines else 0)
+    except OSError:
+        return 0, None
+
+
+def _heartbeat_payloads(sources, ckpt, sender, collector_id, now_text):
+    payloads = []
+    for path, mapper in sources:
+        sensor = mapper.sensor_id
+        totals = sender._totals(sensor)
+        backlog, oldest_age = _pending_lines(path, ckpt)
+        payloads.append({"collector_id": collector_id, "sensor_id": sensor, "sent_at": now_text,
+            "sensor_process": "up", "last_read_at": now_text if os.path.isfile(path) else None,
+            "last_ingest_ok_at": sender.last_successful_ingest_at, "backlog_lines": backlog,
+            "oldest_backlog_age_s": oldest_age, **totals})
+    return payloads
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     env = parse_env_file(os.path.join(ROOT, "deployment", "lab.env"))
     state = os.path.join(ROOT, "deployment", "state")
@@ -444,6 +518,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--checkpoint", default=os.path.join(state, "adapter-checkpoint.json"))
     ap.add_argument("--quarantine", default=os.path.join(state, "rejected-events.jsonl"))
     ap.add_argument("--health", default=os.path.join(state, "collector-health.json"))
+    ap.add_argument("--collector-id", default=os.environ.get("COLLECTOR_ID", "adapter-laptop-b"))
     ap.add_argument("--honeytokens", default=os.path.join(ROOT, "config", "honeytokens.yaml"))
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--once", action="store_true")
@@ -456,6 +531,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         (args.web_log, WebMapper(args.lab_run_id, args.capture_mode, tokens)),
     ]
     ckpt, sender = Checkpoint(args.checkpoint), Sender(args.backend)
+    last_heartbeat = 0.0
+    last_api_heartbeats = []
+    heartbeat_results = {}
+    heartbeat_api_status = "not_sent"
     log.info("adapter up: backend=%s run=%s mode=%s honeytokens=%d", args.backend, args.lab_run_id, args.capture_mode, len(tokens))
     while True:
         errors_before = sender.error_count
@@ -465,11 +544,23 @@ def main(argv: Optional[List[str]] = None) -> int:
         counters_after = (sender.accepted_count, sender.duplicate_count, sender.rejected_count,
                           sender.quarantine_count, sender.retry_count)
         accepted, duplicates, rejected, quarantined, retries = (a - b for a, b in zip(counters_after, counters_before))
+        poll_time = datetime.now(timezone.utc)
+        poll_at = poll_time.isoformat()
+        api_heartbeats = []
+        should_heartbeat = args.once or time.monotonic() - last_heartbeat >= 10
+        if should_heartbeat:
+            last_api_heartbeats = _heartbeat_payloads(sources, ckpt, sender, args.collector_id, poll_at)
+            heartbeat_results = {h["sensor_id"]: sender.post_heartbeat(h) for h in last_api_heartbeats}
+            heartbeat_api_status = "ok" if all(heartbeat_results.values()) else "unavailable"
+            last_heartbeat = time.monotonic()
         health = {"status": "degraded" if sender.error_count > errors_before else "healthy",
-                  "last_poll_at": datetime.now(timezone.utc).isoformat(), "last_successful_ingest_at": sender.last_successful_ingest_at,
+                  "last_poll_at": poll_at, "last_successful_ingest_at": sender.last_successful_ingest_at,
                   "last_poll_delivered": total, "accepted": accepted, "duplicates": duplicates,
                   "rejected": rejected, "quarantined": quarantined, "retries": retries,
                   "error_count": sender.error_count,
+                  "heartbeat_api": heartbeat_api_status,
+                  "heartbeats": last_api_heartbeats,
+                  "heartbeat_results": heartbeat_results,
                   "sources": [{"name": os.path.basename(path), "present": os.path.isfile(path)} for path, _ in sources]}
         tmp_health = args.health + ".tmp"
         os.makedirs(os.path.dirname(args.health) or ".", exist_ok=True)

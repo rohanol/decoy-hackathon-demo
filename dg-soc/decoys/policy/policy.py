@@ -10,6 +10,7 @@ effect on the very next request, and the file is tiny.
 from __future__ import annotations
 
 import json
+import ipaddress
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -31,9 +32,8 @@ def _parse_ts(value: str) -> Optional[datetime]:
 def check(ip: str, path: Optional[str] = None, now: Optional[datetime] = None) -> Optional[str]:
     """Return the action_id blocking `ip`, or None if the IP is not blocked.
 
-    Fails open (returns None) when the file is missing or unreadable: a broken blocklist must never
-    take the decoy down. The preflight script checks the file is valid JSON before every run.
-    Entries with a missing or unparseable expires_at are ignored (a block always needs an expiry).
+    Invalid or unreadable enforcement state raises, allowing the web decoy to return 503. A malformed
+    policy must never turn a denied request into an allow response.
     """
     action_id, _revision = check_with_revision(ip, path, now)
     return action_id
@@ -46,19 +46,28 @@ def check_with_revision(ip: str, path: Optional[str] = None,
     try:
         with open(path or DEFAULT_PATH, "r", encoding="utf-8") as fh:
             data = json.load(fh)
-        entries = data.get("entries", [])
-        version = data.get("version")
-    except (OSError, ValueError, AttributeError):
-        return None, None
-    if not isinstance(entries, list):
-        return None, None
+    except (OSError, ValueError) as exc:
+        raise ValueError("Invalid or unavailable blocklist policy") from exc
+    if (not isinstance(data, dict) or type(data.get("version")) is not int
+            or data["version"] < 0 or not isinstance(data.get("entries"), list)):
+        raise ValueError("Invalid blocklist policy")
+    entries, version = data["entries"], data["version"]
+    parsed = []
     for entry in entries:
-        if not isinstance(entry, dict) or entry.get("ip") != ip:
-            continue
-        expires = _parse_ts(entry.get("expires_at", ""))
-        if expires is not None and expires > now:
-            action_id = entry.get("action_id")
-            if isinstance(action_id, str) and action_id:
-                revision = entry.get("policy_revision", version)
-                return action_id, revision if isinstance(revision, int) and not isinstance(revision, bool) else None
-    return None, version if isinstance(version, int) and not isinstance(version, bool) else None
+        if not isinstance(entry, dict):
+            raise ValueError("Invalid blocklist entry")
+        try:
+            address = str(ipaddress.IPv4Address(entry.get("ip")))
+        except (ipaddress.AddressValueError, TypeError):
+            raise ValueError("Invalid blocklist entry IP") from None
+        expires = _parse_ts(entry.get("expires_at"))
+        action_id = entry.get("action_id")
+        revision = entry.get("policy_revision", version)
+        if (expires is None or not isinstance(action_id, str) or not action_id
+                or type(revision) is not int or revision < 0):
+            raise ValueError("Invalid blocklist entry")
+        parsed.append((address, action_id, revision, expires))
+    for address, action_id, revision, expires in parsed:
+        if address == ip and expires > now:
+            return action_id, revision
+    return None, version
