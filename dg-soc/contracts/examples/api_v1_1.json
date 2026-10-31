@@ -112,21 +112,21 @@
       "last_web_observation_at": null, "checked_at": "2026-11-01T04:33:10.000Z" }
   },
   "heartbeat_request": {
-    "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40Z",
-    "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z", "last_ingest_at": "2026-11-01T04:31:38Z",
-    "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
-    "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 }
+    "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40.120000+00:00",
+    "sensor_process": "up", "last_read_at": "2026-11-01T04:31:40.120000+00:00",
+    "last_ingest_ok_at": "2026-11-01T04:31:38.900000+00:00", "backlog_lines": 0, "oldest_backlog_age_s": 0,
+    "errors_total": 0, "rejected_total": 1, "quarantined_total": 1
   },
   "health": {
     "ok": true,
     "sensors": { "ssh-decoy-01": "2026-11-01T04:31:40Z", "web-decoy-01": "2026-11-01T04:31:30Z" },
     "sensor_health": {
-      "ssh-decoy-01": { "service": "up", "collection": "ok", "activity": "recent",
-                        "heartbeat_at": "2026-11-01T04:31:40Z", "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z",
-                        "last_ingest_at": "2026-11-01T04:31:38Z", "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
-                        "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 },
+      "ssh-decoy-01": { "service": "up", "collection": "ok", "activity": "recent", "collector_id": "adapter-laptop-b",
+                        "heartbeat_at": "2026-11-01T04:31:39.720Z", "process_state": "running", "last_read_at": "2026-11-01T04:31:40.120000+00:00",
+                        "last_ingest_at": "2026-11-01T04:31:38.900000+00:00", "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+                        "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": null },
                         "clock_skew_s": 0.4, "last_event_at": "2026-11-01T04:31:40Z" },
-      "web-decoy-01": { "service": "unknown", "collection": "never", "activity": "recent",
+      "web-decoy-01": { "service": "unknown", "collection": "never", "activity": "recent", "collector_id": null,
                         "heartbeat_at": null, "process_state": null, "last_read_at": null, "last_ingest_at": null,
                         "backlog_records": null, "oldest_backlog_age_s": null, "error_count": null, "ingest": null,
                         "clock_skew_s": null, "last_event_at": "2026-11-01T04:31:30Z" }

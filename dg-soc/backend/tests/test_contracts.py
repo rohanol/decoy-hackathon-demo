@@ -146,6 +146,25 @@ def test_no_raw_secrets_in_examples():
     assert "DGLAB-" not in text and "DemoPass" not in text
 
 
+INDICATOR_VECTORS = load("examples/input_indicator_vectors.json")["vectors"]
+INDICATOR_ENUM = set(EVENT_SCHEMA["$defs"]["input_features"]["properties"]["indicators"]["items"]["enum"])
+
+
+@pytest.mark.parametrize("vec", INDICATOR_VECTORS, ids=lambda v: v["value"][:32])
+def test_indicator_vectors_match_written_semantics(vec):
+    """The table in API.md, read literally (tests/indicator_reference.py), gives exactly the labelled indicators."""
+    from backend.tests.indicator_reference import indicators
+    assert set(vec["indicators"]) <= INDICATOR_ENUM
+    assert indicators(vec["value"]) == set(vec["indicators"])
+
+
+def test_indicator_vectors_cover_both_review_cases():
+    by_value = {v["value"]: v for v in INDICATOR_VECTORS}
+    assert by_value["John's quarterly report--"]["classes"] == []
+    assert by_value["UNION SELECT name FROM users"]["classes"] == ["sqli"]
+    assert sum(1 for v in INDICATOR_VECTORS if not v["classes"]) >= 10   # benign inputs dominate
+
+
 # ---- 2. review gaps, reproduced against today's backend ----
 def v10(ev):
     """The v1.1 example rewritten to 1.0 so today's backend accepts it (gap tests only)."""

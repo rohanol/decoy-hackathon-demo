@@ -104,7 +104,7 @@
       "attributes": { "method": "POST", "path": "/search", "query_redacted": "", "user_agent": "sqlmap/1.8", "status_code": 500,
                       "response_class": "fake_error", "request_id": "req_a_post_search",
                       "input_features": { "source": "form", "field_count": 1, "field_names": ["q"], "max_value_length": 48,
-                                          "indicators": ["sql_quote", "sql_keyword", "sql_comment"], "truncated": false },
+                                          "indicators": ["sql_quote", "sql_keyword", "sql_comment", "sql_tautology"], "truncated": false },
                       "processing": { "parse_status": "parsed", "body_bytes": 52, "body_consumed": true, "redaction_version": "redact@1", "producer_version": "web@2" } } },
     { "schema_version": "1.1", "source_record_id": "a-web-req-3", "sensor_id": "web-decoy-01", "event_type": "http_request",
       "occurred_at": "2026-11-01T04:31:20Z", "src_ip": "192.168.77.10", "src_port": 51002, "session_id": null,
