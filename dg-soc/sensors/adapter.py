@@ -33,11 +33,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SENSOR_IDS = {"ssh-decoy-01", "web-decoy-01"}
 EVENT_TYPES = {
     "connection_open", "auth_failure", "auth_success", "command_input", "connection_close",
-    "http_request", "synthetic_file_access", "blocked_request",
+    "http_request", "synthetic_file_access", "blocked_request", "bait_served",
 }
 TOP_LEVEL_KEYS = {
     "schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip",
-    "src_port", "session_id", "lab_run_id", "capture_mode", "attributes",
+    "src_port", "session_id", "lab_run_id", "capture_mode", "attributes", "origin_record_id",
 }
 COWRIE_TYPES = {
     "cowrie.session.connect": "connection_open",
@@ -210,7 +210,8 @@ class WebMapper:
 
 def validate(ev: Dict[str, Any]) -> Optional[str]:
     """Return a reason string if the event would be rejected by the backend, else None."""
-    if ev.get("schema_version") != "1.0":
+    version = ev.get("schema_version")
+    if version not in ("1.0", "1.1"):
         return "schema_version"
     if ev.get("sensor_id") not in SENSOR_IDS:
         return "sensor_id"
@@ -226,6 +227,84 @@ def validate(ev: Dict[str, Any]) -> Optional[str]:
         return "capture_mode"
     if not isinstance(ev.get("lab_run_id"), str) or not ev["lab_run_id"]:
         return "lab_run_id"
+    attrs = ev.get("attributes", {})
+    if not isinstance(attrs, dict):
+        return "attributes"
+    if version == "1.0":
+        if ev.get("event_type") == "bait_served":
+            return "event_type: bait_served requires schema_version 1.1"
+        if "origin_record_id" in ev:
+            return "origin_record_id: needs schema_version 1.1"
+        return None
+
+    origin = ev.get("origin_record_id")
+    if origin is not None and (not isinstance(origin, str) or not 0 < len(origin) <= 128):
+        return "origin_record_id"
+    if ev.get("capture_mode") == "live" and origin is not None:
+        return "origin_record_id: live events cannot refer to an origin record"
+    if ev.get("event_type") == "bait_served":
+        token_ids = attrs.get("honeytoken_ids")
+        if not all(isinstance(attrs.get(key), str) and attrs[key] for key in
+                   ("asset_id", "issuance_id")):
+            return "attributes: bait_served needs asset_id and issuance_id"
+        if (not isinstance(token_ids, list) or not 1 <= len(token_ids) <= 16
+                or any(not isinstance(token, str) or not token or len(token) > 128 for token in token_ids)
+                or len(set(token_ids)) != len(token_ids)):
+            return "attributes: bait_served needs unique honeytoken_ids"
+        if attrs.get("evidence_basis") not in ("sensor_response", "session_output_log"):
+            return "attributes: bait_served needs evidence_basis"
+        if attrs.get("evidence_role") not in (None, "bait"):
+            return "attributes.evidence_role: bait_served must be bait evidence"
+    problem = _validate_v11_features(attrs)
+    if problem:
+        return problem
+    return None
+
+
+def _validate_v11_features(attrs: Dict[str, Any]) -> Optional[str]:
+    """Validate M4's v1.1 nested evidence without changing or dropping it."""
+    indicators_allowed = {"sql_quote", "sql_keyword", "sql_comment", "script_tag", "event_handler", "js_scheme",
+        "path_traversal", "sensitive_file_path", "php_wrapper", "remote_url_in_param",
+        "shell_metachar_command", "command_substitution", "null_byte", "encoded_payload"}
+    features = attrs.get("input_features")
+    if features is not None:
+        if not isinstance(features, dict) or set(features) - {"source", "field_count", "field_names",
+                "max_value_length", "indicators", "truncated"}:
+            return "attributes.input_features"
+        indicators = features.get("indicators")
+        if (features.get("source") not in ("query", "form", "json", "multipart", "none")
+                or type(features.get("field_count")) is not int or not 0 <= features["field_count"] <= 256
+                or not isinstance(indicators, list) or len(indicators) > 16
+                or any(not isinstance(item, str) or item not in indicators_allowed for item in indicators)
+                or len(set(indicators)) != len(indicators)):
+            return "attributes.input_features"
+        names = features.get("field_names", [])
+        if (not isinstance(names, list) or len(names) > 32
+                or any(not isinstance(name, str) or len(name) > 64 for name in names)):
+            return "attributes.input_features.field_names"
+        max_length = features.get("max_value_length")
+        if max_length is not None and (type(max_length) is not int or max_length < 0):
+            return "attributes.input_features.max_value_length"
+        truncated = features.get("truncated")
+        if truncated is not None and not isinstance(truncated, bool):
+            return "attributes.input_features.truncated"
+    processing = attrs.get("processing")
+    if processing is not None:
+        keys = {"parse_status", "body_bytes", "body_consumed", "redaction_version", "producer_version"}
+        if not isinstance(processing, dict) or set(processing) - keys:
+            return "attributes.processing"
+        if processing.get("parse_status") not in ("parsed", "no_body", "rejected_too_large", "unsupported_type", "malformed"):
+            return "attributes.processing.parse_status"
+        body_bytes = processing.get("body_bytes")
+        if body_bytes is not None and (type(body_bytes) is not int or body_bytes < 0):
+            return "attributes.processing.body_bytes"
+        body_consumed = processing.get("body_consumed")
+        if body_consumed is not None and not isinstance(body_consumed, bool):
+            return "attributes.processing.body_consumed"
+        for key in ("redaction_version", "producer_version"):
+            value = processing.get(key)
+            if value is not None and (not isinstance(value, str) or len(value) > 32):
+                return f"attributes.processing.{key}"
     return None
 
 
@@ -313,12 +392,12 @@ class Sender:
         self.last_successful_ingest_at: Optional[str] = None
         self.accepted_count = self.duplicate_count = self.rejected_count = 0
         self.quarantine_count = self.retry_count = 0
-        self.sensor_totals: Dict[str, Dict[str, int]] = {}
+        self.sensor_totals: Dict[str, Dict[str, Any]] = {}
         self.heartbeat_url = self.url.rsplit("/", 1)[0] + "/heartbeat"
 
-    def _totals(self, sensor_id: str) -> Dict[str, int]:
-        return self.sensor_totals.setdefault(sensor_id, {"errors_total": 0, "rejected_total": 0,
-                                                          "quarantined_total": 0})
+    def _totals(self, sensor_id: str) -> Dict[str, Any]:
+        return self.sensor_totals.setdefault(sensor_id, {"error_count": 0,
+            "ingest": {"accepted": 0, "duplicate": 0, "rejected": 0, "quarantined": 0, "retry": 0}})
 
     def post(self, events: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Return backend rejections; None means retries ran out and checkpoint must not advance."""
@@ -332,35 +411,48 @@ class Sender:
                     result = json.load(resp)
                 self.last_successful_ingest_at = datetime.now(timezone.utc).isoformat()
                 rejected = result.get("rejected", [])
-                self.accepted_count += int(result.get("accepted", 0) or 0)
-                self.duplicate_count += int(result.get("duplicates", 0) or 0)
+                accepted_count = int(result.get("accepted", 0) or 0)
+                duplicate_count = int(result.get("duplicates", 0) or 0)
+                self.accepted_count += accepted_count
+                self.duplicate_count += duplicate_count
+                for sensor in sensors:
+                    counts = self._totals(sensor)["ingest"]
+                    counts["accepted"] += accepted_count
+                    counts["duplicate"] += duplicate_count
                 if rejected:
                     log.warning("backend rejected %d events", len(rejected))
                     self.rejected_count += len(rejected)
                     for item in rejected:
                         index = item.get("index") if isinstance(item, dict) else None
                         if isinstance(index, int) and 0 <= index < len(events):
-                            self._totals(events[index]["sensor_id"])["rejected_total"] += 1
+                            self._totals(events[index]["sensor_id"])["ingest"]["rejected"] += 1
                 log.info("sent %d events: accepted=%s duplicates=%s", len(events), result.get("accepted"), result.get("duplicates"))
                 return rejected if isinstance(rejected, list) else []
             except urllib.error.HTTPError as exc:
                 if exc.code in (400, 413, 422):  # our batch is bad; retrying will not help
                     log.error("backend returned %s for a batch of %d; quarantining", exc.code, len(events))
                     self.rejected_count += len(events)
+                    for sensor in sensors:
+                        self._totals(sensor)["error_count"] += 1
                     for event in events:
-                        self._totals(event["sensor_id"])["rejected_total"] += 1
+                        totals = self._totals(event["sensor_id"])
+                        totals["ingest"]["rejected"] += 1
                     return [{"index": i, "reason": f"backend_http_{exc.code}"} for i in range(len(events))]
                 log.warning("backend HTTP %s (attempt %d)", exc.code, attempt)
                 self.error_count += 1
                 self.retry_count += 1
                 for sensor in sensors:
-                    self._totals(sensor)["errors_total"] += 1
+                    totals = self._totals(sensor)
+                    totals["error_count"] += 1
+                    totals["ingest"]["retry"] += 1
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 log.warning("backend unreachable: %s (attempt %d)", exc, attempt)
                 self.error_count += 1
                 self.retry_count += 1
                 for sensor in sensors:
-                    self._totals(sensor)["errors_total"] += 1
+                    totals = self._totals(sensor)
+                    totals["error_count"] += 1
+                    totals["ingest"]["retry"] += 1
             self.sleep(delay)
             delay = min(delay * 2, 8)
         return None
@@ -420,8 +512,9 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                     sender.quarantine_count += 1
                     sender.rejected_count += 1
                     if sensor in SENSOR_IDS:
-                        sender._totals(sensor)["rejected_total"] += 1
-                        sender._totals(sensor)["quarantined_total"] += 1
+                        counts = sender._totals(sensor)["ingest"]
+                        counts["rejected"] += 1
+                        counts["quarantined"] += 1
                 continue
             problem = validate(ev)
             if problem:
@@ -432,8 +525,9 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                     sender.rejected_count += 1
                     sensor = ev.get("sensor_id")
                     if sensor in SENSOR_IDS:
-                        sender._totals(sensor)["rejected_total"] += 1
-                        sender._totals(sensor)["quarantined_total"] += 1
+                        counts = sender._totals(sensor)["ingest"]
+                        counts["rejected"] += 1
+                        counts["quarantined"] += 1
                 continue
             events.append(ev)
         for batch in batches(events):
@@ -448,7 +542,7 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
                         quarantine(quarantine_path, event["sensor_id"], event["source_record_id"],
                                    item.get("reason", "backend_rejected"), event)
                         sender.quarantine_count += 1
-                        sender._totals(event["sensor_id"])["quarantined_total"] += 1
+                        sender._totals(event["sensor_id"])["ingest"]["quarantined"] += 1
             delivered += len(batch) - len(rejected)
         offset = new_offset
         state = mapper.export_state() if hasattr(mapper, "export_state") else None
@@ -500,9 +594,10 @@ def _heartbeat_payloads(sources, ckpt, sender, collector_id, now_text):
         totals = sender._totals(sensor)
         backlog, oldest_age = _pending_lines(path, ckpt)
         payloads.append({"collector_id": collector_id, "sensor_id": sensor, "sent_at": now_text,
-            "sensor_process": "up", "last_read_at": now_text if os.path.isfile(path) else None,
-            "last_ingest_ok_at": sender.last_successful_ingest_at, "backlog_lines": backlog,
-            "oldest_backlog_age_s": oldest_age, **totals})
+            "process_state": "running", "last_read_at": now_text if os.path.isfile(path) else None,
+            "last_ingest_at": sender.last_successful_ingest_at, "backlog_records": backlog,
+            "oldest_backlog_age_s": oldest_age, "error_count": totals["error_count"],
+            "ingest": dict(totals["ingest"])})
     return payloads
 
 

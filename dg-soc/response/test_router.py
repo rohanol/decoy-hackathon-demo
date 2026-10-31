@@ -148,7 +148,7 @@ def test_verified_only_after_blocked_request_event(env):
     r.on_event({**base, "attributes": {"block_action_id": "act_other", "policy_revision": 1}}, received)
     assert c.get("/api/response/actions").json()["items"][0]["status"] == "applied"
     unmatched = json.loads((tmp / "response-verification-audit.jsonl").read_text().splitlines()[0])
-    assert unmatched["reason"] == "unknown_action_id" and unmatched["event_id"] == "evt_x"
+    assert unmatched["reason"] == "unknown_action" and unmatched["event_id"] == "evt_x"
     for field, wrong in (("sensor_id", "ssh-decoy-01"), ("src_ip", "192.168.77.11"),
                          ("lab_run_id", "run-old"), ("capture_mode", "replay")):
         r.on_event({**base, field: wrong, "event_id": "evt_bad_" + field}, received)
@@ -163,10 +163,18 @@ def test_verified_only_after_blocked_request_event(env):
     assert c.get("/api/response/actions").json()["items"][0]["status"] == "applied"
     r.on_event(base, {})  # no trusted backend ingestion timestamp
     assert c.get("/api/response/actions").json()["items"][0]["status"] == "applied"
-    assert len(json.loads((tmp / "response-actions.json").read_text())["actions"][res["action_id"]]["verification_rejects"]) == 8
+    mismatches = json.loads((tmp / "response-actions.json").read_text())["actions"][res["action_id"]]["verification_mismatches"]
+    assert len(mismatches) == 8
+    assert [m["reason"] for m in mismatches] == ["wrong_sensor", "wrong_source", "wrong_run", "replay_mode",
+        "outside_window", "outside_window", "stale_policy_revision", "outside_window"]
+    assert mismatches[0] == {"event_id": "evt_bad_sensor_id", "received_at": action["created_at"],
+        "sensor_id": "ssh-decoy-01", "src_ip": "192.168.77.10", "capture_mode": "live", "reason": "wrong_sensor"}
     r.on_event({**base, "event_id": "evt_z"}, {**received, "persisted_event_id": "evt_z"})
     item = c.get("/api/response/actions").json()["items"][0]
     assert item["status"] == "verified" and item["verified_by_event_id"] == "evt_z"
+    r.on_event({**base, "event_id": "evt_duplicate"}, {**received, "persisted_event_id": "evt_duplicate"})
+    item = c.get("/api/response/actions").json()["items"][0]
+    assert item["status"] == "verified" and item["verification_mismatches"][-1]["reason"] == "duplicate"
 
 
 def test_apply_requires_live_context(env):
@@ -248,8 +256,25 @@ def test_restart_audits_active_action_missing_from_policy(env):
                 live_context=lambda: {"lab_run_id": "run-01", "capture_mode": "live"})
     action = json.loads((tmp / "response-actions.json").read_text())["actions"][result["action_id"]]
     assert action["status"] == "reconciliation_required"
-    assert action["verification_rejects"][-1]["reason"] == "active_action_missing_or_changed_in_policy_after_restart"
-    assert c.get("/api/response/actions").json()["items"][0]["verification_rejects"]
+    assert action["verification_mismatches"][-1]["reason"] == "stale_policy_revision"
+    assert c.get("/api/response/actions").json()["items"][0]["verification_mismatches"]
+
+
+def test_restart_migrates_verification_rejects_to_shared_mismatch_shape(env):
+    c, clock, tmp, _ = env
+    result = apply(c, preview(c).json()["preview_id"]).json()
+    state_path = tmp / "response-actions.json"
+    state = json.loads(state_path.read_text())
+    action = state["actions"][result["action_id"]]
+    action.pop("verification_mismatches", None)
+    action["verification_rejects"] = [{"event_id": "evt_old", "reason": "verification_context_mismatch"}]
+    state_path.write_text(json.dumps(state))
+    r.configure(state_dir=str(tmp), eligibility_lookup=lambda _: None, now=clock,
+                live_context=lambda: {"lab_run_id": "run-01", "capture_mode": "live"})
+    restored = json.loads(state_path.read_text())["actions"][result["action_id"]]
+    assert "verification_rejects" not in restored
+    assert restored["verification_mismatches"] == [{"event_id": "evt_old", "received_at": None,
+        "sensor_id": None, "src_ip": None, "capture_mode": None, "reason": "outside_window"}]
 
 
 class EligibilityBackend:

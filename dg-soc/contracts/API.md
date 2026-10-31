@@ -70,7 +70,7 @@ Link:
 | `POST /api/response/preview` | `{ "incident_id", "ttl_seconds": 120 }` | `{ "preview_id", "target_ip", "scope": "web-decoy-01 only", "ttl_seconds", "expires_at" }` preview valid 60 s. 400 if target is not an allowed lab IP |
 | `POST /api/response/apply` | `{ "preview_id", "reason": "min 5 chars", "confirm": true }` | `{ "action_id", "status": "applied", "until": "..." }` |
 | `POST /api/response/{action_id}/revoke` | `{}` | `{ "action_id", "status": "revoked" }` |
-| `GET /api/response/actions` | | `{ "items": [ { "action_id", "target_ip", "status": "applied|verified|expired|revoked|reconciliation_required", "reason", "created_at", "until", "verified_by_event_id", "verification_rejects": [] } ] }` |
+| `GET /api/response/actions` | | `{ "items": [ { "action_id", "target_ip", "status": "applied|verified|expired|revoked|reconciliation_required", "reason", "created_at", "until", "verified_by_event_id", "verification_mismatches": [] } ] }` |
 
 The M2 response router consumes M3's proposed v1.1 `GET /api/incidents/{incident_id}/response-eligibility` on both preview and apply. A missing, malformed or unavailable eligibility document fails closed; the IP-only incident detail route is not a fallback. `eligible` must be true with no `reasons`, the case mode and run must match the active live context, the target must be an allowed exact attacker IP, and the last web observation must be less than 10 minutes old. Apply repeats the check immediately before writing policy. The backend eligibility decision includes case status (a dissolved case is ineligible).
 
@@ -82,9 +82,18 @@ response verifier also checks `sensor_id=web-decoy-01`, the exact target `src_ip
 policy revision. The backend integration calls `on_event(event, trusted_context)` only after commit,
 where `trusted_context` is backend-created: `{ "source": "backend_ingest", "persisted_event_id": event["event_id"],
 "received_at": event["ingested_at"] }`. Never build this context from sensor payload fields. A mismatch is
-retained in `verification_rejects` (at most 20 `{ "event_id", "reason" }` records per action) and does not verify the action.
+retained in `verification_mismatches` (at most 20 `{ "event_id", "received_at", "sensor_id", "src_ip", "capture_mode", "reason" }` records per action) and does not verify the action. Reasons use M1's shared codes: `wrong_sensor`, `wrong_source`, `replay_mode`, `wrong_run`, `outside_window`, `stale_policy_revision`, or `duplicate`. Unknown action IDs are written to the separate verification audit with reason `unknown_action`.
 
-Collector heartbeat integration follows the proposed M3 v1.1 `POST /api/ingest/heartbeat` body in PR #9. The adapter keeps `deployment/state/collector-health.json` for Linux preflight and stores the exact per-sensor request payloads under `heartbeats`, with delivery results in `heartbeat_results`; backend heartbeat delivery is reported separately from event-delivery health.
+Collector heartbeat integration follows the current M3 `POST /api/ingest/heartbeat` body in PR #11:
+
+```json
+{ "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "...",
+  "process_state": "running", "last_read_at": "...", "last_ingest_at": "...",
+  "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+  "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 } }
+```
+
+The adapter keeps `deployment/state/collector-health.json` for Linux preflight and stores the exact per-sensor request payloads under `heartbeats`, with delivery results in `heartbeat_results`; backend heartbeat delivery is reported separately from event-delivery health.
 
 Allowed targets: exactly the IPs in `deployment/lab.env` `ATTACKER_IPS` (default `192.168.77.10`). Never `192.168.77.20`, `127.0.0.1`, or a range.
 

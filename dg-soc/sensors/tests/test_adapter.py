@@ -39,6 +39,30 @@ def test_cowrie_mapping_types_and_validation():
     assert '"password"' not in fixture and "123456" not in fixture and "DemoPass-2026" not in fixture
 
 
+def test_generated_m4_v10_and_v11_records_validate_and_keep_v11_evidence():
+    fixtures = FIX.parent
+    for version in ("1_0", "1_1"):
+        path = fixtures / f"m4_web_events_v{version}.jsonl"
+        mapper = ad.WebMapper("fallback-run", "live", TOKENS)
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+        events = [mapper.map(line) for line in raw_lines]
+        assert len(events) == 20 and all(event is not None for event in events)
+        assert all(ad.validate(event) is None for event in events)
+        assert all(event["schema_version"] == version.replace("_", ".") for event in events)
+
+        if version == "1_1":
+            bait = next(event for event in events if event["event_type"] == "bait_served")
+            assert bait["attributes"]["evidence_role"] == "bait"
+            assert bait["attributes"]["input_features"]
+            assert bait["attributes"]["processing"]
+            replay = {**bait, "capture_mode": "replay", "origin_record_id": "original-web-event-01"}
+            replay = ad.WebMapper("fallback-run", "replay", TOKENS).map(json.dumps(replay))
+            assert ad.validate(replay) is None
+            assert replay["origin_record_id"] == "original-web-event-01"
+            assert replay["attributes"]["input_features"] == bait["attributes"]["input_features"]
+            assert replay["attributes"]["processing"] == bait["attributes"]["processing"]
+
+
 def test_sanitized_web_fixture_maps_request_bait_read_and_block():
     p = FIX.parent / "web_sample.jsonl"
     mapper = ad.WebMapper("run-t", "replay", TOKENS)
@@ -118,6 +142,10 @@ def test_validate_rejects_bad_events():
     assert ad.validate({**ev, "event_type": "nope"}) == "event_type"
     assert ad.validate({**ev, "sensor_id": "x"}) == "sensor_id"
     assert ad.validate({**ev, "src_ip": "999.1.1.1"}) == "src_ip: not an ipv4"
+    bait = next(json.loads(line) for line in (FIX.parent / "m4_web_events_v1_1.jsonl").read_text().splitlines()
+                if json.loads(line)["event_type"] == "bait_served")
+    assert ad.validate({**bait, "schema_version": "1.0"}).startswith("event_type: bait_served")
+    assert ad.validate({**bait, "origin_record_id": "origin", "capture_mode": "live"}).startswith("origin_record_id")
 
 
 def test_read_new_lines_partial_line_and_truncation(tmp_path):
@@ -201,6 +229,10 @@ def run_once(tmp_path, url, extra=()):
 def test_end_to_end_delivers_and_restart_does_not_resend(tmp_path, backend):
     assert run_once(tmp_path, backend.url) == 0
     assert len(backend.received) == 6
+    health = json.loads((tmp_path / "health.json").read_text())
+    ssh_heartbeat = next(item for item in health["heartbeats"] if item["sensor_id"] == "ssh-decoy-01")
+    assert ssh_heartbeat["ingest"]["accepted"] == 6
+    assert ssh_heartbeat["ingest"]["duplicate"] == 0
     run_once(tmp_path, backend.url)  # restart: checkpoint must prevent resend
     assert len(backend.received) == 6
     with open(tmp_path / "cowrie.json", "a") as fh:
@@ -223,6 +255,21 @@ def test_pending_client_version_survives_collector_restart(tmp_path, backend):
     assert run_once(tmp_path, backend.url) == 0
     assert backend.received[0]["attributes"]["client_version"] == "SSH-2.0-fixture"
     assert "in-memory-secret" not in json.dumps(backend.received)
+
+
+def test_generated_m4_v11_records_reach_backend_without_quarantine(tmp_path, backend):
+    (tmp_path / "cowrie.json").write_text("")
+    (tmp_path / "web.json").write_text((FIX.parent / "m4_web_events_v1_1.jsonl").read_text(encoding="utf-8"))
+    assert run_once(tmp_path, backend.url) == 0
+    assert len(backend.received) == 20
+    assert all(event["schema_version"] == "1.1" for event in backend.received)
+    bait = next(event for event in backend.received if event["event_type"] == "bait_served")
+    assert bait["attributes"]["input_features"] and bait["attributes"]["processing"]
+    assert bait["attributes"]["evidence_role"] == "bait"
+    assert not (tmp_path / "rejected.jsonl").exists()
+    health = json.loads((tmp_path / "health.json").read_text())
+    web_heartbeat = next(item for item in health["heartbeats"] if item["sensor_id"] == "web-decoy-01")
+    assert web_heartbeat["ingest"]["accepted"] == 20 and web_heartbeat["ingest"]["rejected"] == 0
 
 
 def test_retry_then_success(tmp_path, monkeypatch):
@@ -281,11 +328,12 @@ def test_heartbeat_matches_proposed_api_and_posts_while_idle(tmp_path, backend):
     assert health["heartbeat_api"] == "ok"
     assert len(backend.heartbeats) == 2
     heartbeat = next(item for item in backend.heartbeats if item["sensor_id"] == "ssh-decoy-01")
-    assert set(heartbeat) == {"collector_id", "sensor_id", "sent_at", "sensor_process", "last_read_at",
-        "last_ingest_ok_at", "backlog_lines", "oldest_backlog_age_s", "errors_total", "rejected_total",
-        "quarantined_total"}
-    assert heartbeat["collector_id"] == "adapter-laptop-b" and heartbeat["sensor_process"] == "up"
-    assert heartbeat["backlog_lines"] == 0 and heartbeat["rejected_total"] == 0
+    assert set(heartbeat) == {"collector_id", "sensor_id", "sent_at", "process_state", "last_read_at",
+        "last_ingest_at", "backlog_records", "oldest_backlog_age_s", "error_count", "ingest"}
+    assert heartbeat["collector_id"] == "adapter-laptop-b" and heartbeat["process_state"] == "running"
+    assert heartbeat["backlog_records"] == 0 and heartbeat["error_count"] == 0
+    assert set(heartbeat["ingest"]) == {"accepted", "duplicate", "rejected", "quarantined", "retry"}
+    assert heartbeat["ingest"]["accepted"] == 0 and heartbeat["ingest"]["rejected"] == 0
     local = next(item for item in health["heartbeats"] if item["sensor_id"] == "ssh-decoy-01")
     assert health["heartbeat_results"]["ssh-decoy-01"] is True
     assert local == heartbeat

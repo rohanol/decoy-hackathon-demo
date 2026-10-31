@@ -139,17 +139,19 @@ class ResponseService:
                 saved = json.load(fh)
             actions = saved.get("actions", {})
             self._actions = actions if isinstance(actions, dict) else {}
-            # Migrate the short-lived M2 field name to M3's proposed contract name.
+            # Normalize records written under the brief verification_rejects spelling.
             for action in self._actions.values():
-                if isinstance(action, dict) and "verification_mismatches" in action:
-                    old = action.pop("verification_mismatches")
-                    action.setdefault("verification_rejects", [
-                        {"event_id": item.get("event_id") if isinstance(item, dict) else None,
-                         "reason": item.get("reason", "legacy_verification_mismatch") if isinstance(item, dict) else "legacy_verification_mismatch"}
-                        for item in old
-                    ] if isinstance(old, list) else [])
-                if isinstance(action, dict) and isinstance(action.get("verification_rejects"), list):
-                    action["verification_rejects"] = action["verification_rejects"][-20:]
+                if not isinstance(action, dict):
+                    continue
+                legacy_rejects = action.pop("verification_rejects", None)
+                old_mismatches = action.get("verification_mismatches", [])
+                if isinstance(old_mismatches, list) or isinstance(legacy_rejects, list):
+                    old = list(old_mismatches) if isinstance(old_mismatches, list) else []
+                    old.extend(legacy_rejects if isinstance(legacy_rejects, list) else [])
+                    normalized = [self._normalize_mismatch(item) for item in old][-20:]
+                    if legacy_rejects is not None or normalized != action.get("verification_mismatches", []):
+                        action["verification_mismatches"] = normalized
+                        changed = True
             self._version = int(saved.get("version", 0))
         except (OSError, ValueError, AttributeError, TypeError):
             pass
@@ -169,7 +171,8 @@ class ResponseService:
             entry = entries_by_id.get(action_id)
             if not entry or entry.get("ip") != action.get("target_ip") or entry.get("expires_at") != action.get("until"):
                 action["status"] = "reconciliation_required"
-                self._append_verification_reject(action, None, "active_action_missing_or_changed_in_policy_after_restart")
+                self._append_verification_mismatch(action, None, _iso(self.now()), None, None, None,
+                                                   "stale_policy_revision")
                 changed = True
         now = self.now()
         for action_id, entry in entries_by_id.items():
@@ -307,7 +310,7 @@ class ResponseService:
             self.expire()
             items = [
                 {k: a[k] for k in ("action_id", "target_ip", "status", "reason", "created_at", "until", "verified_by_event_id")}
-                | {"verification_rejects": a.get("verification_rejects", [])}
+                | {"verification_mismatches": a.get("verification_mismatches", [])}
                 for a in sorted(self._actions.values(), key=lambda x: x["created_at"], reverse=True)
             ]
             return {"items": items}
@@ -335,7 +338,7 @@ class ResponseService:
         with self._lock:
             a = self._actions.get(action_id) if isinstance(action_id, str) else None
             if a is None:
-                self._write_unmatched_verification(event_id, action_id, context)
+                self._write_unmatched_verification(event, event_id, action_id, context)
                 return
             if a is not None:
                 now = self.now()
@@ -347,48 +350,90 @@ class ResponseService:
                 except (TypeError, ValueError):
                     occurred = received = action_created = action_until = None
                 live = self.live_context()
-                valid = (
-                    a["status"] == "applied"
-                    and sensor_id == "web-decoy-01" and src_ip == a["target_ip"]
-                    and run_id == a["lab_run_id"] and run_id == live.get("lab_run_id")
-                    and capture_mode == "live" and a.get("capture_mode") == "live"
-                    and live.get("capture_mode", "live") == "live"
-                    and revision == a.get("policy_revision") == self._policy_revision(action_id)
-                    and occurred is not None and received is not None
-                    and context.get("source") == "backend_ingest"
-                    and context.get("persisted_event_id") == event_id
-                    and action_created is not None and action_until is not None
-                    and action_created <= occurred <= action_until
-                    and action_created <= received <= action_until
-                    and now <= action_until
-                    and isinstance(event_id, str) and bool(event_id)
-                )
-                if not valid:
-                    # Keep a rejected verification attempt visible in the durable audit trail.
-                    self._append_verification_reject(a, event_id if isinstance(event_id, str) else None,
-                                                     "verification_context_mismatch")
+                reason = self._verification_mismatch_reason(a, sensor_id, src_ip, run_id, capture_mode,
+                    live, revision, occurred, received, action_created, action_until, now, event_id, context)
+                if reason is not None:
+                    self._append_verification_mismatch(a,
+                        event_id if isinstance(event_id, str) else None,
+                        context.get("received_at") if isinstance(context.get("received_at"), str) else None,
+                        sensor_id if isinstance(sensor_id, str) else None,
+                        src_ip if isinstance(src_ip, str) else None,
+                        capture_mode if isinstance(capture_mode, str) else None,
+                        reason)
                     self._atomic_write(self.actions_path, {"version": self._version, "actions": self._actions})
                     return
                 a["status"] = "verified"
                 a["verified_by_event_id"] = event_id
                 self._atomic_write(self.actions_path, {"version": self._version, "actions": self._actions})
 
-    def _write_unmatched_verification(self, event_id: Any, action_id: Any, context: Dict[str, Any]) -> None:
+    def _write_unmatched_verification(self, event: Any, event_id: Any, action_id: Any,
+                                      context: Dict[str, Any]) -> None:
         os.makedirs(os.path.dirname(self.verification_audit_path), exist_ok=True)
-        record = {"event_id": event_id if isinstance(event_id, str) else None,
-                  "block_action_id": action_id[:128] if isinstance(action_id, str) else None,
-                  "received_at": context.get("received_at") if isinstance(context.get("received_at"), str) else None,
-                  "reason": "unknown_action_id"}
+        get = event.get if isinstance(event, dict) else lambda k, d=None: getattr(event, k, d)
+        record = self._mismatch_record(event_id, context.get("received_at"), get("sensor_id"),
+                                       get("src_ip"), get("capture_mode"), "unknown_action")
+        record["block_action_id"] = action_id[:128] if isinstance(action_id, str) else None
         with open(self.verification_audit_path, "a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, separators=(",", ":")) + "\n")
             fh.flush()
             os.fsync(fh.fileno())
 
     @staticmethod
-    def _append_verification_reject(action: Dict[str, Any], event_id: Optional[str], reason: str) -> None:
-        rejects = action.setdefault("verification_rejects", [])
-        rejects.append({"event_id": event_id, "reason": reason})
-        del rejects[:-20]
+    def _mismatch_record(event_id: Any, received_at: Any, sensor_id: Any, src_ip: Any,
+                         capture_mode: Any, reason: str) -> Dict[str, Any]:
+        return {"event_id": event_id if isinstance(event_id, str) else None,
+                "received_at": received_at if isinstance(received_at, str) else None,
+                "sensor_id": sensor_id if isinstance(sensor_id, str) else None,
+                "src_ip": src_ip if isinstance(src_ip, str) else None,
+                "capture_mode": capture_mode if isinstance(capture_mode, str) else None,
+                "reason": reason}
+
+    @classmethod
+    def _normalize_mismatch(cls, item: Any) -> Dict[str, Any]:
+        if not isinstance(item, dict):
+            return cls._mismatch_record(None, None, None, None, None, "outside_window")
+        reason = item.get("reason")
+        if reason in ("unknown_action_id",):
+            reason = "unknown_action"
+        elif reason in (None, "verification_context_mismatch", "active_action_missing_or_changed_in_policy_after_restart"):
+            reason = "stale_policy_revision" if reason == "active_action_missing_or_changed_in_policy_after_restart" else "outside_window"
+        elif reason not in {"wrong_sensor", "wrong_source", "replay_mode", "wrong_run", "outside_window",
+                            "stale_policy_revision", "duplicate", "unknown_action"}:
+            reason = "outside_window"
+        return cls._mismatch_record(item.get("event_id"), item.get("received_at"), item.get("sensor_id"),
+                                    item.get("src_ip"), item.get("capture_mode"), reason)
+
+    @classmethod
+    def _append_verification_mismatch(cls, action: Dict[str, Any], event_id: Optional[str],
+                                      received_at: Optional[str], sensor_id: Optional[str], src_ip: Optional[str],
+                                      capture_mode: Optional[str], reason: str) -> None:
+        mismatches = action.setdefault("verification_mismatches", [])
+        mismatches.append(cls._mismatch_record(event_id, received_at, sensor_id, src_ip, capture_mode, reason))
+        del mismatches[:-20]
+
+    def _verification_mismatch_reason(self, action, sensor_id, src_ip, run_id, capture_mode, live,
+                                      revision, occurred, received, action_created, action_until, now,
+                                      event_id, context):
+        if action.get("status") == "verified":
+            return "duplicate"
+        if sensor_id != "web-decoy-01":
+            return "wrong_sensor"
+        if src_ip != action.get("target_ip"):
+            return "wrong_source"
+        if capture_mode != "live" or action.get("capture_mode") != "live" or live.get("capture_mode") != "live":
+            return "replay_mode"
+        if run_id != action.get("lab_run_id") or run_id != live.get("lab_run_id"):
+            return "wrong_run"
+        if revision != action.get("policy_revision") or revision != self._policy_revision(action["action_id"]):
+            return "stale_policy_revision"
+        if (action.get("status") != "applied" or occurred is None or received is None
+                or context.get("source") != "backend_ingest" or context.get("persisted_event_id") != event_id
+                or not isinstance(event_id, str) or not event_id
+                or action_created is None or action_until is None
+                or not action_created <= occurred <= action_until
+                or not action_created <= received <= action_until or now > action_until):
+            return "outside_window"
+        return None
 
     def _eligible_incident(self, incident_id: str, live: Dict[str, Any]) -> Dict[str, Any]:
         """Require a fresh, authoritative, live case decision at each response transition."""
