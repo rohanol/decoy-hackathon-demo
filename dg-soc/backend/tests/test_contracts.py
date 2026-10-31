@@ -169,10 +169,10 @@ def post(client, *events):
     return r.json()
 
 
-@pytest.mark.xfail(strict=True, reason="gap: backend accepts schema 1.0 only (fixed in PR 2)")
-def test_gap_backend_accepts_v11_events(client):
-    r = post(client, *[e for e in EVENTS_V11["events"] if e["event_type"] != "bait_served"])
-    assert r["rejected"] == []
+def test_backend_accepts_every_v11_example(client):
+    """Was a strict xfail in PR 1; fixed by PR 2 (ingest v1.1)."""
+    r = post(client, *EVENTS_V11["events"])
+    assert r["rejected"] == [] and r["accepted"] == len(EVENTS_V11["events"])
 
 
 @pytest.mark.xfail(strict=True, reason="gap F1/T01: two SSH sessions on one IP share one incident (fixed in PR 3)")
@@ -189,8 +189,8 @@ def test_gap_web_not_absorbed_before_confirmation(client):
     assert ids["ssh-decoy-01"] != ids["web-decoy-01"]
 
 
-@pytest.mark.xfail(strict=True, reason="gap F2/T02: one run accepts live and replay events (fixed in PR 2)")
-def test_gap_mixed_live_replay_rejected(client):
+def test_mixed_live_replay_rejected(client):
+    """Review F2/T02. Was a strict xfail in PR 1; fixed by PR 2 (one capture mode per run)."""
     live = v10(by_id("a-ssh-h1-fail"))
     replay = dict(live, source_record_id="mixed-replay-1", capture_mode="replay")
     r = post(client, live, replay)

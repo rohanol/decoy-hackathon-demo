@@ -146,30 +146,45 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             raise HTTPException(413, f"more than {MAX_BATCH} events in one request")
 
         valid: list[IngestEvent] = []
+        valid_index: list[int] = []  # position of each valid event in the request
         rejected: list[dict] = []
         for i, item in enumerate(items):
             try:
                 valid.append(IngestEvent.model_validate(item))
+                valid_index.append(i)
             except ValidationError as e:
                 rejected.append({"index": i, "reason": reason_for(e)})
 
         async with write_order:
             result = await run_in_threadpool(db.ingest, valid)  # commits; everything below runs after it
-            accepted = [s for s in result["stored"] if s is not None]
+            accepted, duplicates = [], 0
+            for i, (status, payload) in zip(valid_index, result["outcomes"]):
+                if status == "stored":
+                    accepted.append(payload)
+                elif status == "duplicate":
+                    duplicates += 1
+                else:  # rejected by storage rules, e.g. a run that already has the other capture mode
+                    rejected.append({"index": i, "reason": payload})
             for ev in accepted:
                 await hub.send({"seq": ev["seq"], "type": "event", "data": ev})
             await publish(result["findings"], result["links"], result["incidents"])
             for ev in accepted:
                 await hooks.on_event(ev)
-        return {"accepted": len(accepted), "duplicates": len(result["stored"]) - len(accepted),
-                "rejected": rejected}
+        return {"accepted": len(accepted), "duplicates": duplicates,
+                "rejected": sorted(rejected, key=lambda r: r["index"])}
 
     # ---- reads ----
     @app.get("/api/events")
     def events(incident_id: Optional[str] = Query(None, max_length=64),
                sensor_id: Optional[str] = Query(None, max_length=64),
+               lab_run_id: Optional[str] = Query(None, max_length=128),
+               capture_mode: Optional[Literal["live", "replay"]] = None,
                since_seq: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
-        return db.list_events(incident_id, sensor_id, since_seq, limit)
+        return db.list_events(incident_id, sensor_id, since_seq, limit, lab_run_id, capture_mode)
+
+    @app.get("/api/runs")
+    def runs():
+        return {"items": db.list_runs()}
 
     @app.get("/api/incidents")
     def incidents():

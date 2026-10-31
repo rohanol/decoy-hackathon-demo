@@ -161,7 +161,11 @@ Links now name the cases they join (additive): `from_incident_id` and `to_incide
 - A run's mode is fixed by its first accepted event. A later event for that `lab_run_id` with the other `capture_mode` is rejected per record, for example `"reason": "lab_run_id: run run-x is live; replay events need their own run"`. Mixed input therefore can never reach one case (review T02).
 - The dedup namespace is `live` for live events and `replay:<lab_run_id>` for replay events. Replaying the same fixture into two replay runs works. Replaying into the same replay run is deduplicated. Replay never touches live dedup.
 - Replay events should carry `origin_record_id`, which is the original record's `source_record_id`. Live events must not carry one.
-- `GET /api/runs` returns `{ "items": [ { "lab_run_id", "capture_mode", "first_seen", "last_seen", "events", "active" } ] }`. `active` is true for at most one live run: the live run with the newest event, and only if that event is younger than 15 minutes.
+- `GET /api/runs` returns `{ "items": [ { "lab_run_id", "capture_mode", "first_seen", "last_seen", "last_ingested_at", "events", "legacy_mixed", "active" } ] }`, newest first.
+  - `active` is true for at most one live run: the run that received the newest live event (by `seq`), and only if that event reached the backend less than 15 minutes ago.
+  - `legacy_mixed` is true only for runs that already mixed modes before the v1 migration.
+- Event reads (`GET /api/events`, WebSocket `event`) add `schema_version` (as sent), `ingest_namespace`, `origin_record_id`, `observation_kind` and `evidence_role`. The derived fields sit next to `attributes`; the producer's attributes are stored as sent. `GET /api/events` also filters by `lab_run_id` and `capture_mode`.
+- IncidentSummary adds `capture_mode`, taken from the run.
 - Replay cases are read-only evidence. They never enable a response.
 
 ### Request, result and bait evidence

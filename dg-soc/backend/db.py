@@ -1,6 +1,7 @@
 """SQLite (WAL) storage. One writer behind a lock; one read connection per thread."""
 import json
 import os
+import shutil
 import sqlite3
 import threading
 import uuid
@@ -11,7 +12,7 @@ from typing import Optional
 
 from . import links as linking
 from .config import Config, load_config
-from .models import IngestEvent, to_rfc3339
+from .models import IngestEvent, evidence_role, observation_kind, to_rfc3339
 from .rules import evaluate_incident
 from .scoring import score_incident
 
@@ -44,9 +45,23 @@ CREATE TABLE IF NOT EXISTS events (
     capture_mode     TEXT NOT NULL,
     attributes       TEXT NOT NULL,
     incident_id      TEXT NOT NULL REFERENCES incidents(incident_id),
-    UNIQUE (sensor_id, source_record_id)
+    schema_version   TEXT NOT NULL DEFAULT '1.0',
+    ingest_namespace TEXT NOT NULL DEFAULT 'live',
+    origin_record_id TEXT,
+    observation_kind TEXT NOT NULL DEFAULT 'network_input',
+    UNIQUE (ingest_namespace, sensor_id, source_record_id)
 );
 CREATE INDEX IF NOT EXISTS idx_events_incident ON events(incident_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(lab_run_id, seq);
+CREATE TABLE IF NOT EXISTS runs (
+    lab_run_id       TEXT PRIMARY KEY,
+    capture_mode     TEXT NOT NULL,
+    first_seen       TEXT NOT NULL,
+    last_seen        TEXT NOT NULL,
+    last_ingested_at TEXT NOT NULL,
+    events           INTEGER NOT NULL DEFAULT 0,
+    legacy_mixed     INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS findings (
     finding_id  TEXT PRIMARY KEY,
     incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
@@ -70,6 +85,72 @@ CREATE TABLE IF NOT EXISTS links (
     to_incident_id   TEXT NOT NULL,
     created_at       TEXT NOT NULL
 );
+"""
+
+# PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (contract v1.1, PR 2).
+DB_VERSION = 1
+ACTIVE_RUN_MINUTES = 15
+
+# v0 -> v1. SQLite cannot drop the old UNIQUE(sensor_id, source_record_id) in place, so the
+# events table is rebuilt once: every row is copied unchanged, seq included. Runs that already
+# mixed live and replay before this migration are kept and flagged legacy_mixed.
+MIGRATE_V0_V1 = """
+BEGIN;
+CREATE TABLE events_v1 (
+    seq              INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id         TEXT NOT NULL UNIQUE,
+    sensor_id        TEXT NOT NULL,
+    source_record_id TEXT NOT NULL,
+    event_type       TEXT NOT NULL,
+    occurred_at      TEXT NOT NULL,
+    ingested_at      TEXT NOT NULL,
+    src_ip           TEXT NOT NULL,
+    src_port         INTEGER,
+    session_id       TEXT,
+    lab_run_id       TEXT NOT NULL,
+    capture_mode     TEXT NOT NULL,
+    attributes       TEXT NOT NULL,
+    incident_id      TEXT NOT NULL REFERENCES incidents(incident_id),
+    schema_version   TEXT NOT NULL DEFAULT '1.0',
+    ingest_namespace TEXT NOT NULL DEFAULT 'live',
+    origin_record_id TEXT,
+    observation_kind TEXT NOT NULL DEFAULT 'network_input',
+    UNIQUE (ingest_namespace, sensor_id, source_record_id)
+);
+INSERT INTO events_v1 (seq, event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at,
+                       src_ip, src_port, session_id, lab_run_id, capture_mode, attributes, incident_id,
+                       schema_version, ingest_namespace, origin_record_id, observation_kind)
+SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at,
+       src_ip, src_port, session_id, lab_run_id, capture_mode, attributes, incident_id,
+       '1.0',
+       CASE WHEN capture_mode = 'replay' THEN 'replay:' || lab_run_id ELSE 'live' END,
+       NULL,
+       CASE event_type WHEN 'command_input' THEN 'command_input'
+                       WHEN 'synthetic_file_access' THEN 'emulated_result'
+                       WHEN 'blocked_request' THEN 'policy_result'
+                       ELSE 'network_input' END
+FROM events ORDER BY seq;
+DROP TABLE events;
+ALTER TABLE events_v1 RENAME TO events;
+CREATE INDEX IF NOT EXISTS idx_events_incident ON events(incident_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_run ON events(lab_run_id, seq);
+CREATE TABLE IF NOT EXISTS runs (
+    lab_run_id       TEXT PRIMARY KEY,
+    capture_mode     TEXT NOT NULL,
+    first_seen       TEXT NOT NULL,
+    last_seen        TEXT NOT NULL,
+    last_ingested_at TEXT NOT NULL,
+    events           INTEGER NOT NULL DEFAULT 0,
+    legacy_mixed     INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO runs (lab_run_id, capture_mode, first_seen, last_seen, last_ingested_at, events, legacy_mixed)
+SELECT e.lab_run_id,
+       (SELECT f.capture_mode FROM events f WHERE f.lab_run_id = e.lab_run_id ORDER BY f.seq LIMIT 1),
+       MIN(e.occurred_at), MAX(e.occurred_at), MAX(e.ingested_at), COUNT(*),
+       COUNT(DISTINCT e.capture_mode) > 1
+FROM events e GROUP BY e.lab_run_id;
+PRAGMA user_version = 1;
+COMMIT;
 """
 
 SENSORS = ("ssh-decoy-01", "web-decoy-01")
@@ -103,7 +184,7 @@ class Database:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._writer = self._connect()
         self._writer.execute("PRAGMA journal_mode=WAL")
-        self._writer.executescript(SCHEMA)
+        self._migrate()
         self._write_lock = threading.Lock()
         self._local = threading.local()
         self._readers: list[sqlite3.Connection] = []
@@ -128,6 +209,22 @@ class Database:
                 self._readers.append(conn)
         return conn
 
+    def _migrate(self) -> None:
+        """Bring the file to DB_VERSION. Back up a v0 file before touching it."""
+        c = self._writer
+        has_events = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone() is not None
+        version = c.execute("PRAGMA user_version").fetchone()[0]
+        if has_events and version == 0:
+            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # the .bak must hold everything
+            backup = f"{self.path}.v0.bak"
+            if not os.path.exists(backup):
+                shutil.copy2(self.path, backup)
+            c.executescript(MIGRATE_V0_V1)
+        c.executescript(SCHEMA)  # creates whatever is missing; no-op on an up-to-date file
+        if not has_events:
+            c.execute(f"PRAGMA user_version = {DB_VERSION}")
+
     def close(self) -> None:
         with self._readers_lock:
             for conn in self._readers:
@@ -151,12 +248,13 @@ class Database:
     # ---- writes ----
     def ingest(self, events: list[IngestEvent]) -> dict:
         """Insert events, then links, rules and scores, all in ONE transaction.
-        Returns {"stored": [event dict or None for a duplicate], "links": [new links],
-        "findings": [new or changed findings], "incidents": [touched incident ids]}.
+        Returns {"outcomes": [("stored", event) | ("duplicate", None) | ("rejected", reason)],
+        "links": [new links], "findings": [new or changed findings], "incidents": [touched ids]}.
         The caller broadcasts afterwards."""
         def work(c):
             touched: set[str] = set()
-            stored = [self._insert_one(c, ev, touched) for ev in events]
+            outcomes = [self._insert_one(c, ev, touched) for ev in events]
+            stored = [payload for status, payload in outcomes if status == "stored"]
             # Load each touched incident's events once; links and rules both use them.
             loaded = {inc: self._incident_events(c, inc) for inc in sorted(touched)}
             new_links = self._refresh_links(c, loaded)
@@ -164,8 +262,8 @@ class Database:
             for l in new_links:
                 affected.update((l["from_incident_id"], l["to_incident_id"]))
             changed = [f for inc in sorted(affected) for f in self._sync_incident(c, inc, loaded.get(inc))]
-            return {"stored": stored, "links": new_links, "findings": changed,
-                    "incidents": sorted(affected) if any(stored) or new_links else []}
+            return {"outcomes": outcomes, "links": new_links, "findings": changed,
+                    "incidents": sorted(affected) if stored or new_links else []}
         return self._write(work)
 
     def decide_link(self, link_id: str, decision: str, rationale: str) -> Optional[dict]:
@@ -183,14 +281,27 @@ class Database:
             return {"link": link, "findings": changed, "incidents": affected}
         return self._write(work)
 
-    def _insert_one(self, c: sqlite3.Connection, ev: IngestEvent, touched: set[str]) -> Optional[dict]:
+    def _insert_one(self, c: sqlite3.Connection, ev: IngestEvent, touched: set[str]) -> tuple:
+        run = c.execute("SELECT capture_mode FROM runs WHERE lab_run_id=?", (ev.lab_run_id,)).fetchone()
+        if run and run["capture_mode"] != ev.capture_mode:
+            return ("rejected", f"lab_run_id: run {ev.lab_run_id} is {run['capture_mode']}; "
+                                f"{ev.capture_mode} events need their own run")
+        namespace = "live" if ev.capture_mode == "live" else f"replay:{ev.lab_run_id}"
         dup = c.execute(
-            "SELECT 1 FROM events WHERE sensor_id=? AND source_record_id=?",
-            (ev.sensor_id, ev.source_record_id),
+            "SELECT 1 FROM events WHERE ingest_namespace=? AND sensor_id=? AND source_record_id=?",
+            (namespace, ev.sensor_id, ev.source_record_id),
         ).fetchone()
         if dup:
-            return None
+            return ("duplicate", None)
         occurred = to_rfc3339(ev.occurred_at)
+        ingested = _now()
+        c.execute(
+            "INSERT INTO runs (lab_run_id, capture_mode, first_seen, last_seen, last_ingested_at, events) "
+            "VALUES (?,?,?,?,?,1) ON CONFLICT(lab_run_id) DO UPDATE SET "
+            "first_seen=MIN(first_seen, excluded.first_seen), last_seen=MAX(last_seen, excluded.last_seen), "
+            "last_ingested_at=excluded.last_ingested_at, events=events+1",
+            (ev.lab_run_id, ev.capture_mode, occurred, occurred, ingested),
+        )
         row = c.execute(
             "SELECT incident_id FROM incidents WHERE src_ip=? AND lab_run_id=?",
             (ev.src_ip, ev.lab_run_id),
@@ -212,16 +323,18 @@ class Database:
             c.execute("UPDATE incidents SET incident_id=? WHERE rowid=?", (incident_id, cur.lastrowid))
         touched.add(incident_id)
         event_id = "evt_" + uuid.uuid4().hex[:12]
-        attrs = ev.attributes.model_dump(exclude_none=True)
+        attrs = ev.attributes.model_dump(mode="json", exclude_none=True)
         cur = c.execute(
             "INSERT INTO events (event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at, "
-            "src_ip, src_port, session_id, lab_run_id, capture_mode, attributes, incident_id) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (event_id, ev.sensor_id, ev.source_record_id, ev.event_type, occurred, _now(),
+            "src_ip, src_port, session_id, lab_run_id, capture_mode, attributes, incident_id, "
+            "schema_version, ingest_namespace, origin_record_id, observation_kind) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (event_id, ev.sensor_id, ev.source_record_id, ev.event_type, occurred, ingested,
              ev.src_ip, ev.src_port, ev.session_id, ev.lab_run_id, ev.capture_mode,
-             json.dumps(attrs), incident_id),
+             json.dumps(attrs), incident_id, ev.schema_version, namespace, ev.origin_record_id,
+             observation_kind(ev.event_type, attrs)),
         )
-        return self._event_dict(c.execute("SELECT * FROM events WHERE seq=?", (cur.lastrowid,)).fetchone())
+        return ("stored", self._event_dict(c.execute("SELECT * FROM events WHERE seq=?", (cur.lastrowid,)).fetchone()))
 
     def _incident_events(self, c, incident_id: str) -> list[dict]:
         return [self._event_dict(r) for r in
@@ -295,8 +408,9 @@ class Database:
     # ---- reads ----
     @staticmethod
     def _event_dict(r: sqlite3.Row) -> dict:
+        attributes = json.loads(r["attributes"])
         return {
-            "schema_version": "1.0",
+            "schema_version": r["schema_version"],
             "event_id": r["event_id"],
             "seq": r["seq"],
             "ingested_at": r["ingested_at"],
@@ -310,15 +424,26 @@ class Database:
             "session_id": r["session_id"],
             "lab_run_id": r["lab_run_id"],
             "capture_mode": r["capture_mode"],
-            "attributes": json.loads(r["attributes"]),
+            "ingest_namespace": r["ingest_namespace"],
+            "origin_record_id": r["origin_record_id"],
+            "observation_kind": r["observation_kind"],
+            "evidence_role": evidence_role(r["event_type"], attributes),
+            "attributes": attributes,
         }
 
     @staticmethod
     def public_link(link: dict) -> dict:
         return {k: link[k] for k in LINK_FIELDS}
 
-    def list_events(self, incident_id=None, sensor_id=None, since_seq=0, limit=200) -> dict:
+    def list_events(self, incident_id=None, sensor_id=None, since_seq=0, limit=200,
+                    lab_run_id=None, capture_mode=None) -> dict:
         sql, args = "SELECT * FROM events WHERE seq > ?", [since_seq]
+        if lab_run_id:
+            sql += " AND lab_run_id=?"
+            args.append(lab_run_id)
+        if capture_mode:
+            sql += " AND capture_mode=?"
+            args.append(capture_mode)
         if incident_id:
             sql += " AND incident_id=?"
             args.append(incident_id)
@@ -333,6 +458,27 @@ class Database:
     def max_seq(self) -> int:
         return self.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
 
+    def list_runs(self) -> list[dict]:
+        """Every run, newest first. `active` marks at most one live run: the one that received
+        the newest live event, if that arrived less than ACTIVE_RUN_MINUTES ago (backend clock).
+        "Newest" is by event seq, so runs filled in the same millisecond still order correctly."""
+        rows = [dict(r) for r in self.conn.execute(
+            "SELECT r.*, (SELECT MAX(e.seq) FROM events e WHERE e.lab_run_id = r.lab_run_id) AS last_seq "
+            "FROM runs r ORDER BY last_seq DESC")]
+        newest_live = next((r for r in rows if r["capture_mode"] == "live"), None)
+        now = datetime.now(timezone.utc)
+        for r in rows:
+            r["active"] = bool(
+                r is newest_live
+                and (now - _ts(r["last_ingested_at"])).total_seconds() < ACTIVE_RUN_MINUTES * 60)
+            r["legacy_mixed"] = bool(r["legacy_mixed"])
+            del r["last_seq"]
+        return rows
+
+    def run_mode(self, lab_run_id: str) -> Optional[str]:
+        r = self.conn.execute("SELECT capture_mode FROM runs WHERE lab_run_id=?", (lab_run_id,)).fetchone()
+        return r["capture_mode"] if r else None
+
     def incident_exists(self, incident_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM incidents WHERE incident_id=?", (incident_id,)).fetchone() is not None
 
@@ -341,6 +487,7 @@ class Database:
         return {
             "incident_id": r["incident_id"], "src_ip": r["src_ip"], "lab_run_id": r["lab_run_id"],
             "score": r["score"], "severity": r["severity"],
+            "capture_mode": self.run_mode(r["lab_run_id"]),
             "stages_observed": self._stages(incident_id),
             "first_seen": r["first_seen"], "last_seen": r["last_seen"], "event_count": r["event_count"],
         }
