@@ -705,12 +705,30 @@ Attack Graph                                    [ All incidents ▾ ]   1 open l
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Library: **React Flow**, pinned. Nothing heavier (`AGENTS.md` §9 — no new heavy deps).
+**No graph library — inline SVG.** The layout here is fixed and deterministic by design, so
+React Flow's layout engine, pan/zoom and edge routing would all go unused: roughly 50KB
+gzipped for a static diagram. `prompts/M1_frontend.md` says "keep libraries minimal", and
+zero libraries serves that better than one. Hand-rolled SVG also gives exact control over
+the confirm animation, which is the demo's visual climax. Revisit only if the graph ever
+needs real layout — with at most a handful of lab source IPs, it will not.
 
-Layout is **fixed, not force-directed**: attacker node left-centre, `ssh-decoy-01` upper
-right, `web-decoy-01` lower right. Three nodes, deterministic positions. A physics
-simulation that jiggles under a projector helps nobody, and it must look identical in every
-rehearsal. Pan and zoom on, with a Reset view button.
+Layout is **fixed, not force-directed**: attacker nodes down the left, `ssh-decoy-01` upper
+right, `web-decoy-01` lower right. Deterministic positions. A physics simulation that
+jiggles under a projector helps nobody, and it must look identical in every rehearsal.
+
+**No pan or zoom.** The SVG is responsive and always fits its container, growing downward as
+sources are added, so there is nothing to pan to. Dropping it removes a control nobody would
+touch and a way to get lost mid-demo.
+
+**Edges are evidence, not inference.** A traffic edge is drawn only when the API confirms
+that source was seen on that sensor, asked precisely as
+`GET /api/events?incident_id=&sensor_id=&limit=1` per pair rather than inferred from a
+capped page. Topology is a claim like any other.
+
+Known limitation: `Link` has no `incident_id` (open question 2), so with two or more source
+IPs each holding links, the decoy-to-decoy edges cannot be attributed to a particular
+source. With the single source of the P3 demo it is unambiguous. Adding `incident_id` to
+`Link` would fix it.
 
 ### 11.1 Nodes
 

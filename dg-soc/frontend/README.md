@@ -115,6 +115,10 @@ around it in the UI.
   API rather than an optimistic restyle
 - Incident list: severity-bordered cards sorted by newest activity, each with
   the compact kill-chain strip, updating live from `type: "incident"` messages
+- Attack graph: inline SVG with no graph library, fixed deterministic layout,
+  traffic edges drawn only where the API confirms that source on that sensor,
+  and the cross-decoy link turning from dashed candidate to solid
+  analyst-confirmed in place
 - Transcript replay: terminal-styled, mandatory non-dismissible banner, a dim
   prompt prefix separating our chrome from attacker text, per-line timestamps
   and clickable event ids, and a stepper with play/pause, speed and full
@@ -122,10 +126,12 @@ around it in the UI.
 
 ## Known gaps
 
-- Screens 1, 6 and 7 are stubs that name their spec section and build order
+- Screens 1 and 7 are stubs that name their spec section and build order
 - The incident list has no rule chips or "awaiting decision" flag:
   `IncidentSummary` carries no findings and `Link` has no `incident_id`, so
   neither has an honest source at that endpoint (open question 2)
+- The attack graph cannot attribute a cross-decoy link to a particular source
+  when more than one source IP has links, for the same reason
 - The incident Block button is disabled until M2's response router exists
 - Export needs the live backend, so it is disabled in fixture mode
 - The drawer closes on `Esc` and autofocuses, but does not fully trap focus yet

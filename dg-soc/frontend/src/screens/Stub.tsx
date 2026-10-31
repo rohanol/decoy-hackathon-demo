@@ -41,13 +41,6 @@ export const Overview = () => (
 
 
 
-export const AttackGraph = () => (
-  <Stub
-    title="Attack Graph"
-    specSection="section 11"
-    buildOrder="Build order 6 of 7. Needs GET /api/links from M3."
-  />
-);
 
 export const ResponseCenter = () => (
   <Stub
