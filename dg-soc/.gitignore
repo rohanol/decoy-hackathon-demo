@@ -13,6 +13,8 @@ dist/
 deployment/state/cowrie-log/*
 deployment/state/web-log/*
 deployment/state/blocklist.json
+deployment/state/response-actions.json
+deployment/state/.tmp-*
 deployment/state/adapter-checkpoint.json
 !deployment/state/**/.gitkeep
 captures/
