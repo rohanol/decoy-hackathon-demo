@@ -135,9 +135,9 @@ around it in the UI.
   the compact kill-chain strip, updating live from `type: "incident"` messages
 - Response Center and the block flow: preview, approve with a written reason
   and an acknowledged scope, then a polled wait for verification, with undo.
-  Built against a mock of M2's router; the real backend answers 503
-  `response_unavailable` until `response/router.py` lands, which the screen
-  states plainly rather than treating as a failure
+  Verified end to end against M2's real router (DESIGN_SPEC.md §13.5), and it
+  held at `APPLIED` for 6s with no blocked request before flipping to
+  `VERIFIED` in 500ms once one arrived
 - Overview: the noise-reduction counter, time to first alert, findings by
   rule with every rule visible at zero, and active incidents with their
   kill-chain silhouettes
@@ -152,9 +152,12 @@ around it in the UI.
 
 ## Known gaps
 
-- The block flow is verified against the fixture mock only. M2's
-  `response/router.py` does not exist yet, so `/api/response/*` returns 503 on
-  the real backend and the flow has never run against it
+- The block flow cannot run against the repository as it stands. M2's
+  `response/router.py` is written and tested but lives in
+  `m2/m2-upload/dg-soc/`, not `dg-soc/`, so `backend/integrations.py` does not
+  find it and `/api/response/*` returns 503. It was verified by copying the
+  router into place locally; no frontend change is expected once that merge
+  lands
 
 - Screen 7 (Response Center) is a stub that name their spec section and build order
 - The incident list has no rule chips or "awaiting decision" flag:

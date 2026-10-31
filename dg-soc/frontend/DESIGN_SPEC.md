@@ -1090,18 +1090,41 @@ with the clickable cited-ID chips rendered beneath it.
 
 ---
 
-## 13.5 Built against a mock
+## 13.5 Verified against M2's router
 
-M2's `response/router.py` does not exist yet, so the real backend answers every
-`/api/response/*` call with `503 response_unavailable`. The flow is therefore built and
-verified against a fixture mock that throws the same `ApiError` type the real client does,
-so the failure paths are exercised rather than assumed. `ApiError` moved to `src/api/error.ts`
-to make that possible without a circular import: a mock that fails differently from the real
-thing is a mock that hides bugs.
+**Built against a mock, then verified against the real thing.**
 
-The Response Center treats the 503 as a dependency that has not landed, not as an error:
-it names the file, its owner and the mount point, and says the flow is ready to wire. That
-is more useful to the team than a red error card, and more honest than hiding the screen.
+M2's `response/router.py` exists and is tested, but it lives in `m2/m2-upload/dg-soc/` and
+has not been merged into `dg-soc/`, which is where `backend/integrations.py` looks for it.
+So against the repository as it stands the backend still answers every `/api/response/*`
+call with `503 response_unavailable`, and this screen still has to handle that.
+
+The flow was therefore built against a fixture mock that throws the same `ApiError` type the
+real client does, so failure paths are exercised rather than assumed. `ApiError` moved to
+`src/api/error.ts` to make that possible without a circular import: a mock that fails
+differently from the real thing is a mock that hides bugs. That lesson was already paid for
+once — see §16b on event ordering.
+
+**Run on 2026-10-31** with M2's router copied into place locally (copies deleted afterwards;
+they are his files, not ours to commit). The whole chain worked with no change on either
+side — frontend → M3's backend → M2's router → blocklist → ingest → verification:
+
+| Step | Result |
+|---|---|
+| Preview | `prv_5f8a386afc44`, target `192.168.77.10`, scope `web-decoy-01 only`, 120 s |
+| Apply | `act_dfd13a8f`, pill `APPLIED` |
+| Held 6 s with no blocked request | **stayed `APPLIED`** |
+| Injected a `blocked_request` carrying that `action_id` | `accepted: 1` |
+| UI poll | flipped to `VERIFIED` in 500 ms, citing the real `evt_9055adc2da1d` |
+
+The third row is the one that matters. The UI refused to claim verification until a blocked
+request actually arrived — the honesty guard holding against real infrastructure rather than
+against a mock written to make it pass.
+
+Until the merge lands, the Response Center treats the 503 as a dependency that has not
+arrived, not as an error: it names the file, its owner and the mount point, and says the
+flow is ready to wire. That is more useful to the team than a red error card, and more
+honest than hiding the screen.
 
 One bug this found: the verification poll was being torn down and restarted by the modal's
 own 1s clock tick, so it never survived long enough to fire. Verification took 12.5s against
