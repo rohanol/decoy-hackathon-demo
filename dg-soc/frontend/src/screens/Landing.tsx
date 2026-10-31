@@ -43,10 +43,17 @@ function DecoyStatus() {
   return (
     <ul className="landing__facts">
       {rows.map((row) => {
-        const seen = health && health !== 'down' ? health.sensors[row.id] : null;
-        const tone = health === 'down' ? 'off' : seen ? 'on' : 'idle';
+        // Backend reachability only. A sensor's last event is attacker activity,
+        // not proof the decoy is up (review F9), so it never lights a dot here.
+        const tone = health === 'down' ? 'off' : 'idle';
+        const title =
+          health === 'down'
+            ? 'Backend unreachable'
+            : health === null
+              ? 'Checking the backend'
+              : 'Backend answering · decoy health not reported in v1.0';
         return (
-          <li key={row.id}>
+          <li key={row.id} title={title}>
             <span className={`landing__dot landing__dot--${tone}`} />
             {row.label}
             <span className="landing__port">{row.port}</span>
@@ -55,7 +62,7 @@ function DecoyStatus() {
       })}
       <li>
         <span className="landing__dot landing__dot--idle" />
-        AI explains. Analysts decide.
+        Rules explain. Analysts decide.
       </li>
     </ul>
   );

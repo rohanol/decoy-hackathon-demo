@@ -1,18 +1,25 @@
 /**
- * Sensors. The decoys the backend hears from, what each one has sent, and how
- * fresh it is. Sensor management is still being built (M2), so this page only
- * reads: GET /api/health for freshness, the live store for counts.
+ * Sensors. The decoys the backend hears from and what each one has sent.
+ * Sensor management is still being built (M2), so this page only reads.
+ *
+ * Health and activity are separate (review section 13, F9). GET /api/health
+ * in v1.0 reports only each sensor's last event time, which is attacker
+ * activity: it says nothing about whether a collector is alive. So the health
+ * panel shows service liveness, says collection health is not reported, and
+ * lists activity on its own.
  */
 
 import { ArrowRight } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { sensorState } from '../components/Shell';
+import { sensorActivity, sensorHealth } from '../components/Shell';
+import { HealthDimensions } from '../components/evidence/HealthDimensions';
+import { healthFromV1 } from '../evidence/fromV1';
 import { Dot } from '../components/primitives';
 import { EVENT_TYPE_LABEL } from '../copy';
 import { number, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
-import type { EventType } from '../types/api';
+import { SENSOR_IDS, type EventType } from '../types/api';
 
 interface SensorDef {
   id: string;
@@ -49,7 +56,7 @@ const SENSORS: SensorDef[] = [
 ];
 
 export function Sensors() {
-  const { events, health } = useLiveStore();
+  const { events, health, healthCheckedAt, status } = useLiveStore();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 5000);
@@ -76,11 +83,20 @@ export function Sensors() {
         <span className="pill">Read-only · management in progress</span>
       </div>
 
+      <section className="panel" style={{ marginBottom: 'var(--s4)', padding: 'var(--s4)' }}>
+        <HealthDimensions
+          view={healthFromV1(health, healthCheckedAt, SENSOR_IDS)}
+          stream={status.state}
+          now={now}
+        />
+      </section>
+
       <div className="sensorgrid">
         {SENSORS.map((sensor) => {
           const state = sensor.planned
-            ? { tone: 'neutral' as const, text: 'not deployed', lastSeen: null }
-            : sensorState(health, sensor.id, now);
+            ? { tone: 'neutral' as const, text: 'not deployed' }
+            : sensorHealth(health);
+          const activity = sensor.planned ? null : sensorActivity(health, sensor.id, now);
           const stats = bySensor.get(sensor.id);
           const types = stats ? [...stats.types.entries()].sort((a, b) => b[1] - a[1]) : [];
           const max = Math.max(1, ...types.map(([, count]) => count));
@@ -91,14 +107,16 @@ export function Sensors() {
               className={sensor.planned ? 'sensorcard sensorcard--planned' : 'sensorcard'}
             >
               <header className="sensorcard__head">
-                <Dot tone={state.tone} animate={state.tone === 'ok' ? 'pulse' : undefined} />
+                <Dot tone={state.tone} />
                 <div>
                   <h2 className="sensorcard__name">{sensor.name}</h2>
                   <div className="sensorcard__id">
                     {sensor.id} · :{sensor.port}
                   </div>
                 </div>
-                <span className="sensorcard__status">{state.text}</span>
+                <span className="sensorcard__status" title="Service and collection health">
+                  {state.text}
+                </span>
               </header>
 
               <p className="sensorcard__what">
@@ -107,6 +125,11 @@ export function Sensors() {
 
               {sensor.planned ? null : (
                 <>
+                  {activity ? (
+                    <p className="sensorcard__activity" title="Attacker activity, not health">
+                      <span className="activity__mark" aria-hidden="true" /> Activity: {activity.text}
+                    </p>
+                  ) : null}
                   <div className="sensorcard__stat">
                     <span className="sensorcard__num">{number(stats?.total ?? 0)}</span>
                     <span className="sensorcard__unit">events in this window</span>

@@ -4,7 +4,7 @@
  * (DESIGN_SPEC.md law 1).
  */
 
-import { API_BASE, EVENTS_PAGE_LIMIT } from './config';
+import { API_BASE, EVENTS_PAGE_LIMIT, MAX_SNAPSHOT_PAGES } from './config';
 import { ApiError } from './error';
 
 /**
@@ -12,7 +12,7 @@ import { ApiError } from './error';
  * import.meta.env right here so the bundler can see it is false in a normal
  * build and drop the mock and its demo events from the release bundle.
  */
-const MOCK = import.meta.env['VITE_USE_FIXTURES'] === '1';
+const MOCK = import.meta.env.VITE_USE_FIXTURES === '1';
 const fixtures = () => import('./fixtures');
 import type {
   ApiErrorBody,
@@ -101,6 +101,24 @@ export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
   if (query.since_seq !== undefined) params.set('since_seq', String(query.since_seq));
   params.set('limit', String(query.limit ?? EVENTS_PAGE_LIMIT));
   return get<EventsPage>(`/api/events?${params.toString()}`);
+}
+
+/**
+ * Every event matching a query, paging forward with since_seq. GET /api/events
+ * returns ascending pages and next_seq is a forward cursor, so one call only
+ * returns the oldest page. Bounded by MAX_SNAPSHOT_PAGES.
+ */
+export async function fetchAllEvents(query: Omit<EventsQuery, 'since_seq' | 'limit'> = {}) {
+  const collected: EventsPage['items'] = [];
+  let cursor = 0;
+  for (let guard = 0; guard < MAX_SNAPSHOT_PAGES; guard += 1) {
+    const page = await fetchEvents({ ...query, since_seq: cursor, limit: EVENTS_PAGE_LIMIT });
+    collected.push(...page.items);
+    if (page.items.length < EVENTS_PAGE_LIMIT) break;
+    if (page.next_seq === undefined || page.next_seq <= cursor) break;
+    cursor = page.next_seq;
+  }
+  return collected;
 }
 
 export function fetchHealth(): Promise<Health> {

@@ -20,6 +20,40 @@ React + TypeScript + Vite. Owner: Pashmee (M1), with Rohan. Design source of tru
   model file to download.
 - three.js loads only when ChakraView or the hat is shown.
 
+### Evidence, health and response (review sections 4, 12-15)
+
+- **Evidence structure** on the incident page: the source profile (an observed
+  endpoint, never a person), each decoy session as its own case, relations with
+  "proposed because" and an uncertainty caveat, bait provenance, and an approved
+  cross-decoy parent only after an analyst confirms. Mapping rationale under the
+  findings. The hero score is labelled **Source score · v1.0**: v1.0 pools
+  every case behind an address.
+- **Health** is three things kept apart: service (backend, stream), collection
+  (not reported in v1.0: no heartbeat) and attacker activity. Activity never
+  colours a dot green.
+- **Response**: policy committed → pending verification → verified denial →
+  expired/revoked, with mismatch reasons when the backend supplies them. Block
+  actions are withheld for replay or mixed sources (a UI guard; the backend
+  still decides).
+- **Live Feed** filters by run, mode, session and request (request is disabled
+  until events carry `request_id`); rows show outcome facets.
+- `src/evidence/model.ts` is the PROPOSED display model, `fromV1.ts` reshapes
+  today's API into it (regrouping only), and `devScenarios.ts` holds
+  proposed-shape fixtures shown on **Evidence lab · dev** (`/dev/evidence`,
+  fixture build only). Every panel carries a `contract v1.0` or
+  `PROPOSED · dev fixture` tag. Swap `fromV1` inputs for the agreed endpoints
+  once Rohan's contract lands.
+- Snapshot/live reconciliation (`src/state/reconcile.ts`): live events that
+  arrive while a snapshot loads are buffered and merged by `event_id`, so a
+  reconnect can neither lose nor duplicate an event.
+
+### Tests
+
+```bash
+npm test          # node:test, type stripping (Node 22.6+): reconciliation, v1.0 reshaping
+npm run test:e2e  # Playwright against the real backend + live dev server; see each file's header
+```
+
 ### Sign-in
 
 Supabase Auth, Google plus email and password (`src/auth/AuthProvider.tsx`).
@@ -179,6 +213,13 @@ around it in the UI.
   keyboard control (`←` `→` `Space` `Home` `End`)
 
 ## Known gaps
+
+- Evidence views run on v1.0 data until the shared contract lands: no
+  per-case or parent scores, no `bait_served`, no collector heartbeat, no
+  verification tuple or rejection reasons, no backend eligibility. Each panel
+  says which. See `docs/demo/DEMO_NOTES.md`.
+- `GET /api/response/actions` has no run or incident id, so an incident shows
+  every action on its address and says so.
 
 - The block flow cannot run against the repository as it stands. M2's
   `response/router.py` is written and tested but lives in

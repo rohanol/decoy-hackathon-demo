@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, ErrorCard, SkeletonRows, AttackerText } from '../components/primitives';
 import { RawEventDrawer } from '../components/RawEventDrawer';
+import { EventFacets, ModeBadge } from '../components/evidence/bits';
+import { facetOf } from '../evidence/model';
 import { COPY, EVENT_TYPE_DESCRIPTION, EVENT_TYPE_LABEL, SENSOR_LABEL } from '../copy';
 import { FEED_MAX_ROWS } from '../api/config';
 import { EVENT_STYLE } from '../lib/eventStyle';
@@ -150,6 +152,7 @@ function EventRow({
   return (
     <tr
       className={classes}
+      data-event-id={event.event_id}
       onClick={onSelect}
       tabIndex={0}
       onKeyDown={(keyEvent) => {
@@ -175,6 +178,8 @@ function EventRow({
       <td>
         <div className="cell-detail">
           <DetailCell event={event} />
+          {event.capture_mode === 'replay' ? <ModeBadge mode="replay" /> : null}
+          <EventFacets event={event} />
           <div className="cell-detail__ids">
             <span>{event.event_id}</span>
             {event.incident_id ? (
@@ -247,19 +252,43 @@ export function LiveFeed() {
   );
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [ipFilter, setIpFilter] = useState<string>('');
+  // Review section 15: filters by run, mode, session and request. Deep-linkable,
+  // so a session case can open the feed already narrowed to itself.
+  const [runFilter, setRunFilter] = useState<string>(() => searchParams.get('run') ?? '');
+  const [modeFilter, setModeFilter] = useState<string>(() => searchParams.get('mode') ?? '');
+  const [sessionFilter, setSessionFilter] = useState<string>(() => searchParams.get('session') ?? '');
+  const [requestFilter, setRequestFilter] = useState<string>(() => searchParams.get('request') ?? '');
   const [selected, setSelected] = useState<SocEvent | null>(null);
+
+  /** Runs present in the loaded window, newest first. Offered, never assumed. */
+  const runs = useMemo(() => [...new Set(events.map((event) => event.lab_run_id))], [events]);
+  /** request_id is a proposed field; the filter is enabled once events carry it. */
+  const requestIdsAvailable = useMemo(() => events.some((event) => facetOf(event).request_id !== null), [events]);
 
   const filtered = useMemo(() => {
     const ip = ipFilter.trim();
+    const session = sessionFilter.trim();
+    const request = requestFilter.trim();
     return events.filter((event) => {
       if (sensorFilter && event.sensor_id !== sensorFilter) return false;
       if (typeFilter && event.event_type !== typeFilter) return false;
       if (ip && !event.src_ip.includes(ip)) return false;
+      if (runFilter && event.lab_run_id !== runFilter) return false;
+      if (modeFilter && event.capture_mode !== modeFilter) return false;
+      if (session && !(event.session_id ?? '').includes(session)) return false;
+      if (request && !(facetOf(event).request_id ?? '').includes(request)) return false;
       return true;
     });
-  }, [events, sensorFilter, typeFilter, ipFilter]);
+  }, [events, sensorFilter, typeFilter, ipFilter, runFilter, modeFilter, sessionFilter, requestFilter]);
 
-  const filtersActive = sensorFilter !== '' || typeFilter !== '' || ipFilter.trim() !== '';
+  const filtersActive =
+    sensorFilter !== '' ||
+    typeFilter !== '' ||
+    ipFilter.trim() !== '' ||
+    runFilter !== '' ||
+    modeFilter !== '' ||
+    sessionFilter.trim() !== '' ||
+    requestFilter.trim() !== '';
   const trimmed = receivedCount > FEED_MAX_ROWS;
   const newest = events[0] ?? null;
   const { arrived, jumpToTop } = useArrivedAbove(newest?.seq ?? 0);
@@ -325,6 +354,53 @@ export function LiveFeed() {
           onChange={(changeEvent) => setIpFilter(changeEvent.target.value)}
         />
 
+        <select
+          className="select"
+          aria-label="Filter by lab run"
+          value={runFilter}
+          onChange={(changeEvent) => setRunFilter(changeEvent.target.value)}
+        >
+          <option value="">All runs</option>
+          {runs.map((run) => (
+            <option key={run} value={run}>
+              {run}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="select"
+          aria-label="Filter by capture mode"
+          value={modeFilter}
+          onChange={(changeEvent) => setModeFilter(changeEvent.target.value)}
+        >
+          <option value="">Live and replay</option>
+          <option value="live">Live only</option>
+          <option value="replay">Replay only</option>
+        </select>
+
+        <input
+          className="input"
+          aria-label="Filter by session id"
+          placeholder="Session id"
+          value={sessionFilter}
+          onChange={(changeEvent) => setSessionFilter(changeEvent.target.value)}
+        />
+
+        <input
+          className="input"
+          aria-label="Filter by request id"
+          placeholder={requestIdsAvailable ? 'Request id' : 'Request id · not in v1.0'}
+          title={
+            requestIdsAvailable
+              ? undefined
+              : 'request_id is a proposed field. Contract v1.0 events do not carry it yet.'
+          }
+          disabled={!requestIdsAvailable && requestFilter === ''}
+          value={requestFilter}
+          onChange={(changeEvent) => setRequestFilter(changeEvent.target.value)}
+        />
+
         <span className="toolbar__spacer" />
         <span className="toolbar__count">
           {number(filtered.length)}
@@ -343,6 +419,10 @@ export function LiveFeed() {
               setSensorFilter('');
               setTypeFilter('');
               setIpFilter('');
+              setRunFilter('');
+              setModeFilter('');
+              setSessionFilter('');
+              setRequestFilter('');
               setSearchParams({}, { replace: true });
             }}
           >

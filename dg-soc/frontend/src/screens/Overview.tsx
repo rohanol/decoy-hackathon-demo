@@ -289,14 +289,20 @@ export function Overview() {
           label="Time to first alert"
           value={stats?.first_alert_seconds ?? null}
           format={(value) => seconds(value)}
-          hint={stats?.first_alert_seconds == null ? 'no findings yet' : 'first event → first finding'}
+          hint={
+            stats?.first_alert_seconds == null
+              ? 'no findings yet'
+              : 'backend arrival → first finding, one incident; not end-to-end latency'
+          }
         />
       </div>
 
       <div className="ovgrid2">
         <section className="panel">
           <header className="panel__head">
-            <h2 className="panel__title">Noise reduction</h2>
+            <h2 className="panel__title" title="Grouping compression, not detection accuracy">
+              Event grouping
+            </h2>
           </header>
           {stats ? <NoiseFunnel stats={stats} /> : null}
         </section>

@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  FlaskConical,
   LayoutGrid,
   LogOut,
   Orbit,
@@ -82,28 +83,35 @@ function UtcClock() {
 
 export type SensorTone = 'ok' | 'warn' | 'danger' | 'neutral';
 
-/** Health of one sensor from GET /api/health, shared by the sidebar and the Sensors page. */
-export function sensorState(
+/**
+ * Attacker ACTIVITY for one sensor, from GET /api/health (last event time).
+ * This is not health: a quiet decoy can be healthy and a dead collector can
+ * have a recent last event (review F9). Callers label it as activity.
+ */
+export function sensorActivity(
   health: Health | null,
   sensorId: string,
   now: Date,
-): { tone: SensorTone; text: string; lastSeen: string | null } {
-  if (health === null) return { tone: 'danger', text: 'unreachable', lastSeen: null };
-  const lastSeen = health.sensors[sensorId] ?? null;
-  if (lastSeen === null) return { tone: 'neutral', text: 'no events yet', lastSeen };
-  const ageSeconds = Math.max(0, (now.getTime() - new Date(lastSeen).getTime()) / 1000);
-  const tone = ageSeconds < 60 ? 'ok' : ageSeconds < 300 ? 'warn' : 'neutral';
-  return {
-    tone,
-    text: `${tone === 'warn' ? 'stale · ' : ''}${relativeFromNow(lastSeen, now)}`,
-    lastSeen,
-  };
+): { text: string; lastSeen: string | null } {
+  const lastSeen = health?.sensors[sensorId] ?? null;
+  if (lastSeen === null) return { text: 'no events yet', lastSeen };
+  return { text: `last event ${relativeFromNow(lastSeen, now)}`, lastSeen };
+}
+
+/**
+ * Service and collection HEALTH for one sensor. Contract v1.0 reports no
+ * collector heartbeat, so with the backend up this is honestly "not reported"
+ * (neutral), never green because traffic happened to arrive.
+ */
+export function sensorHealth(health: Health | null): { tone: SensorTone; text: string } {
+  if (health === null) return { tone: 'danger', text: 'backend unreachable' };
+  return { tone: 'neutral', text: 'collection health not reported (v1.0)' };
 }
 
 /**
  * The cheapest insurance in the build: when the demo misbehaves this says
- * instantly whether the problem is the decoy, the backend or the UI. In the
- * sidebar it is one dot per sensor on the Sensors nav item.
+ * instantly whether the backend is answering. One dot per sensor on the
+ * Sensors nav item; the tooltip adds attacker activity, labelled as activity.
  */
 function SensorDots() {
   const { health } = useLiveStore();
@@ -116,9 +124,13 @@ function SensorDots() {
   return (
     <span className="navitem__dots">
       {SENSOR_IDS.map((sensorId) => {
-        const state = sensorState(health, sensorId, now);
+        const state = sensorHealth(health);
+        const activity = sensorActivity(health, sensorId, now);
         return (
-          <span key={sensorId} title={`${SENSOR_LABEL[sensorId] ?? sensorId}: ${state.text}`}>
+          <span
+            key={sensorId}
+            title={`${SENSOR_LABEL[sensorId] ?? sensorId}: ${state.text} · activity: ${activity.text}`}
+          >
             <Dot tone={state.tone} />
           </span>
         );
@@ -135,6 +147,11 @@ const NAV = [
   { to: '/response', label: 'Response', end: false, icon: ShieldCheck },
   { to: '/sensors', label: 'Sensors', end: false, icon: Radar },
 ] as const;
+
+/** Fixture builds only: the proposed-shape evidence scenarios. */
+const NAV_ITEMS: ReadonlyArray<{ to: string; label: string; end: boolean; icon: typeof Radar }> = USE_FIXTURES
+  ? [...NAV, { to: '/dev/evidence', label: 'Evidence lab · dev', end: false, icon: FlaskConical }]
+  : NAV;
 
 /** Enter animation per section; query-string changes do not replay it. */
 function AnimatedOutlet() {
@@ -166,7 +183,7 @@ export function Shell() {
         </div>
 
         <div className="sidebar__nav">
-          {NAV.map((item) => (
+          {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}

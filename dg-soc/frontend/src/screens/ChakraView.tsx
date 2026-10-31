@@ -935,10 +935,14 @@ function ChordPanel({
       </ol>
 
       {chord.provenance === 'bait_read' ? (
-        <p className="cverdict cverdict--strong">
-          The planted-side event is a read of the very file that holds this token. The credential
-          presented on the {SENSOR_LABEL[link.to_sensor] ?? link.to_sensor} existed only inside
-          that file.
+        // Amber, not green: v1.0 records the read command being submitted, not
+        // the file being served (review F3 and section 11). The token itself
+        // exists only in that file, which is why this is still the strongest
+        // v1.0 link, but it is not proof of a read.
+        <p className="cverdict cverdict--weak">
+          The planted-side event is a command submitted to read the file that holds this token,
+          and that token exists nowhere else in the lab. Contract v1.0 does not record the file
+          being served, so this is consistent with the planted trail, not proof of a read.
         </p>
       ) : chord.provenance === 'bait_not_read' ? (
         <p className="cverdict cverdict--weak">
