@@ -176,11 +176,13 @@
         "indicators": {
           "type": "array", "maxItems": 16, "uniqueItems": true,
           "items": {
-            "enum": ["sql_quote", "sql_keyword", "sql_comment", "script_tag", "event_handler", "js_scheme",
+            "enum": ["sql_quote", "sql_keyword", "sql_comment",
+                     "sql_quote_breakout", "sql_union_select", "sql_tautology", "sql_stacked_query", "sql_time_function",
+                     "script_tag", "event_handler", "js_scheme",
                      "path_traversal", "sensitive_file_path", "php_wrapper", "remote_url_in_param",
                      "shell_metachar_command", "command_substitution", "null_byte", "encoded_payload"]
           },
-          "description": "Fixed vocabulary computed by the producer on decoded input. The backend owns the classification it derives from these."
+          "description": "Fixed vocabulary computed by the producer on each decoded value (contracts/API.md, Indicator semantics). sql_quote, sql_keyword, sql_comment, null_byte and encoded_payload are supporting only. The backend owns classification."
         },
         "truncated": { "type": "boolean", "description": "True if feature extraction stopped at a limit." }
       }
