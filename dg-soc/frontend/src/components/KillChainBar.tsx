@@ -12,6 +12,44 @@
 import { STAGE_LABEL, STAGE_NOT_OBSERVED } from '../copy';
 import { KILL_CHAIN_STAGES, type Finding, type Severity, type Stage } from '../types/api';
 
+/**
+ * Compact variant for the incident list: the same five segments and the same
+ * order, without the rule codes. The silhouette has to be comparable across
+ * cards at a glance, so it uses the identical grid.
+ */
+export function KillChainStrip({
+  stagesObserved,
+  severity,
+}: {
+  stagesObserved: Stage[];
+  severity: Severity;
+}) {
+  const observed = new Set(stagesObserved);
+  return (
+    <div className="killchain killchain--compact">
+      {KILL_CHAIN_STAGES.map((stage) => {
+        const isObserved = observed.has(stage);
+        const classes = [
+          'killchain__seg',
+          isObserved
+            ? `killchain__seg--observed killchain__seg--${severity}`
+            : 'killchain__seg--unobserved',
+        ].join(' ');
+        return (
+          <div
+            key={stage}
+            className={classes}
+            title={`${STAGE_LABEL[stage]}: ${isObserved ? 'observed' : STAGE_NOT_OBSERVED}`}
+          >
+            <span className="killchain__fill" aria-hidden="true" />
+            <span className="killchain__name">{STAGE_LABEL[stage]}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function KillChainBar({
   stagesObserved,
   findings,

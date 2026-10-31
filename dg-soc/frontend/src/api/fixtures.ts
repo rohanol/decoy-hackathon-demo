@@ -390,6 +390,10 @@ export function openFixtureSocket(onMessage: (message: WsMessage) => void): Fixt
     const event = ALL_EVENTS[index];
     if (!event) {
       clearInterval(timer);
+      // A real backend pushes after each DB commit, so the incident summary
+      // lands on the wire too. Emitting it here keeps the incident list's
+      // live-update path exercised in fixture mode.
+      onMessage({ seq: releasedSeq + 1, type: 'incident', data: incidentSummary() });
       return;
     }
     index += 1;

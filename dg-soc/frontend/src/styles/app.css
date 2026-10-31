@@ -1393,3 +1393,116 @@ button.killchain__seg:hover {
   opacity: 0.45;
   pointer-events: none;
 }
+
+/* ---------- incident list ---------- */
+
+.inclist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.inccard {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  padding: var(--s4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border-strong);
+  border-radius: var(--r-md);
+  color: inherit;
+}
+
+.inccard:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-raised);
+  text-decoration: none;
+}
+
+.inccard--low {
+  border-left-color: var(--sev-low);
+}
+.inccard--medium {
+  border-left-color: var(--sev-medium);
+}
+.inccard--high {
+  border-left-color: var(--sev-high);
+}
+.inccard--critical {
+  border-left-color: var(--sev-critical);
+}
+
+.inccard--updated {
+  animation: card-flash 1200ms ease-out;
+}
+
+@keyframes card-flash {
+  0% {
+    border-color: var(--accent);
+    background: var(--accent-weak);
+  }
+  100% {
+    border-color: var(--border);
+    background: var(--bg-surface);
+  }
+}
+
+.inccard__top {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.inccard__score {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.inccard__score--low {
+  color: var(--sev-low-text);
+}
+.inccard__score--medium {
+  color: var(--sev-medium-text);
+}
+.inccard__score--high {
+  color: var(--sev-high-text);
+}
+.inccard__score--critical {
+  color: var(--sev-critical-text);
+}
+
+.inccard__ip {
+  font-size: 16px;
+  color: var(--text-primary);
+}
+
+.inccard__count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.inccard__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.killchain--compact {
+  gap: var(--s1);
+}
+
+.killchain--compact .killchain__seg {
+  padding: var(--s1) var(--s2);
+  gap: 2px;
+}
+
+.killchain--compact .killchain__name {
+  font-size: 11px;
+}
+
+.killchain--compact .killchain__fill {
+  height: 4px;
+}

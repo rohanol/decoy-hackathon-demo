@@ -23,7 +23,7 @@ import {
 import { ApiError, fetchEvents, fetchHealth } from '../api/client';
 import { createEventStream, type ConnectionStatus, type EventStream } from '../api/socket';
 import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS } from '../api/config';
-import type { CaptureMode, Health, SocEvent } from '../types/api';
+import type { CaptureMode, Health, SocEvent, WsMessage } from '../types/api';
 
 interface LiveStoreValue {
   /** Newest first, capped at FEED_MAX_ROWS. */
@@ -46,6 +46,12 @@ interface LiveStoreValue {
   setPaused: (paused: boolean) => void;
   retryNow: () => void;
   reload: () => void;
+  /**
+   * Listen to every /ws/events message, not just events. Screens that own
+   * findings, incidents, links or actions subscribe here rather than opening a
+   * second socket. Returns an unsubscribe function.
+   */
+  subscribe: (handler: (message: WsMessage) => void) => () => void;
 }
 
 const LiveStoreContext = createContext<LiveStoreValue | null>(null);
@@ -69,6 +75,15 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const streamRef = useRef<EventStream | null>(null);
   /** Guards against a late snapshot response overwriting a newer one. */
   const loadTokenRef = useRef(0);
+  /** Screens listening for finding/incident/link/action messages. */
+  const subscribersRef = useRef(new Set<(message: WsMessage) => void>());
+
+  const subscribe = useCallback((handler: (message: WsMessage) => void) => {
+    subscribersRef.current.add(handler);
+    return () => {
+      subscribersRef.current.delete(handler);
+    };
+  }, []);
 
   const appendEvents = useCallback((incoming: SocEvent[]) => {
     if (incoming.length === 0) return;
@@ -140,8 +155,10 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
         void loadSnapshot();
       },
       onMessage: (message) => {
-        // Only events feed this screen. finding/incident/link/action messages are
-        // consumed by the screens that own them.
+        // Hand every message to the screens listening for their own type.
+        for (const handler of subscribersRef.current) handler(message);
+
+        // Only events feed the live feed itself.
         if (message.type !== 'event') return;
         if (message.seq <= lastSeqRef.current) return;
         lastSeqRef.current = message.seq;
@@ -204,6 +221,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       setPaused,
       retryNow: () => streamRef.current?.retryNow(),
       reload: () => void loadSnapshot(),
+      subscribe,
     }),
     [
       events,
@@ -220,6 +238,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       lastDataAt,
       setPaused,
       loadSnapshot,
+      subscribe,
     ],
   );
 

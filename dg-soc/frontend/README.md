@@ -113,10 +113,15 @@ around it in the UI.
 - Link decision modal: both evidence events inline, mandatory rationale with a
   live character count, confirm and reject, reversible, and a reload from the
   API rather than an optimistic restyle
+- Incident list: severity-bordered cards sorted by newest activity, each with
+  the compact kill-chain strip, updating live from `type: "incident"` messages
 
 ## Known gaps
 
 - Screens 1 and 5–7 are stubs that name their spec section and build order
+- The incident list has no rule chips or "awaiting decision" flag:
+  `IncidentSummary` carries no findings and `Link` has no `incident_id`, so
+  neither has an honest source at that endpoint (open question 2)
 - The incident Block button is disabled until M2's response router exists
 - Export needs the live backend, so it is disabled in fixture mode
 - The drawer closes on `Esc` and autofocuses, but does not fully trap focus yet

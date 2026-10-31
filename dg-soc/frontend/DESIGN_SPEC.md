@@ -431,29 +431,35 @@ Incidents                                                              2 inciden
 │ ┃                                                                              │
 │ ┃ ▓▓▓▓▓▓ recon  ▓▓▓▓▓▓ cred  ▓▓▓▓▓▓ exploit  ▓▓▓▓▓▓ post  ▓▓▓▓▓▓ data         │
 │ ┃                                                                              │
-│ ┃ R01 R02 R03 R04 R05 R07 R09      ⚑ 1 link awaiting decision                 │
-│ ┃ first 04:30:00Z · last 04:32:30Z · 2m 30s                                   │
+│ ┃ inc_01 · run-01 · first 04:30:00Z · last 04:32:30Z · 2m 30s                 │
 ├────────────────────────────────────────────────────────────────────────────────┤
 │ ┃ [LOW]         5   192.168.77.11                            9 events          │
 │ ┃ ░░░░░░ recon  ░░░░░░ cred  ░░░░░░ exploit  ░░░░░░ post  ░░░░░░ data         │
-│ ┃ R08                                                                          │
-│ ┃ first 04:28:10Z · last 04:28:55Z · 45s                                      │
+│ ┃ inc_02 · run-01 · first 04:28:10Z · last 04:28:55Z · 45s                    │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 Cards, not a dense table — there will only ever be one to three incidents in this lab, and
-cards let the kill-chain strip and rule chips breathe.
+cards let the kill-chain strip breathe. Scanning those silhouettes down the page is the
+point: how far each source got, side by side.
 
 Each card: 4px left border in the severity colour, severity badge, score at 20/600, src_ip
-in mono at 16px, event count, the compact kill-chain bar, rule chips, first/last seen plus
-computed duration, and an `--pending` flag when any link has `status: "open"`.
+in mono at 16px, event count, the compact kill-chain strip, then a mono metadata line.
+The whole card is the link into the incident.
 
 Sort newest `last_seen` first. An incident updated by a WebSocket `type: "incident"` message
-gets a brief `--accent` border flash and re-sorts.
+replaces the one on screen and gets a 1.2s `--accent` flash.
 
-Rule chips are mono micro text in `--bg-raised`; hovering shows the rule's plain-language
-label. A rule that fired but did not count (duplicate, or awaiting confirmation) renders at
-60% opacity with a dashed border.
+**No rule chips and no "awaiting decision" flag, by necessity.** `IncidentSummary` carries
+no findings, and `Link` carries no `incident_id`, so neither has an honest source at this
+endpoint. The alternatives were N+1 fetching every incident's detail or inventing the data;
+both are worse than a slightly thinner card. Open question 2 asks Rohan for
+`findings_by_rule` and `open_link_count` on `IncidentSummary` — if they arrive, add the
+chips back as mono micro text in `--bg-raised`, with uncounted rules at 60% opacity and a
+dashed border, plus an `--pending` flag for open links.
+
+The compact strip uses the identical five-column grid as the full bar (§9.2) so silhouettes
+stay comparable between cards and against the incident page.
 
 ---
 
@@ -961,9 +967,12 @@ Ask these in the group chat early — all are small, and each one blocks a panel
 
 1. `GET /api/events` has no `src_ip` filter in `API.md`. Client-side filtering over the
    loaded window is fine for the lab's volumes — confirming that is not a problem.
-2. `GET /api/incidents` returns `IncidentSummary`, which has no link summary. The incident
-   list wants an "N links awaiting decision" flag. Either add a count, or the UI derives it
-   from `GET /api/links` — happy either way, just need to know which.
+2. **Blocking two features on the incident list.** `IncidentSummary` carries no findings and
+   no link info, and `Link` has no `incident_id`, so the list cannot show rule chips or an
+   "N links awaiting decision" flag without fetching every incident's detail. Could
+   `IncidentSummary` carry `findings_by_rule` (same shape as the one in `/api/stats/overview`)
+   and `open_link_count`? Alternatively, adding `incident_id` to `Link` would solve the
+   second half on its own.
 3. Does `/ws/events` emit `type: "action"` for response status changes, including the
    `applied → verified` transition? §13.3 depends on it. If not, the result panel polls
    `GET /api/response/actions` every 2s while open.
