@@ -159,7 +159,7 @@ function SensorNode({
 
 export function AttackGraph() {
   const navigate = useNavigate();
-  const { health, subscribe } = useLiveStore();
+  const { health, subscribe, connectionEpoch } = useLiveStore();
 
   const [data, setData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -212,6 +212,11 @@ export function AttackGraph() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // API.md: reload the snapshot on every reconnect, incidents and links too.
+  useEffect(() => {
+    if (connectionEpoch > 0) void load();
+  }, [connectionEpoch, load]);
 
   // A link decided elsewhere (the incident page) should show here too.
   useEffect(() => {

@@ -67,7 +67,7 @@ function IncidentCard({
 }
 
 export function IncidentList() {
-  const { subscribe } = useLiveStore();
+  const { subscribe, connectionEpoch } = useLiveStore();
   const [incidents, setIncidents] = useState<IncidentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
@@ -94,6 +94,11 @@ export function IncidentList() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // API.md: reload the snapshot on every reconnect, incidents included.
+  useEffect(() => {
+    if (connectionEpoch > 0) void load();
+  }, [connectionEpoch, load]);
 
   // Live updates: an `incident` message carries an IncidentSummary, which
   // replaces the one on screen. We display what arrived; we do not merge or

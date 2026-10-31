@@ -10,7 +10,7 @@
  * cap note rather than replacing the real score.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { ApiError, fetchEvents, fetchIncident, incidentExportUrl } from '../api/client';
 import { USE_FIXTURES } from '../api/config';
@@ -22,6 +22,7 @@ import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { Card, EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
 import { STAGE_LABEL, linkPhrase } from '../copy';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
+import { useLiveStore } from '../state/LiveStore';
 import type { Incident, Link, SocEvent, Stage } from '../types/api';
 
 /** "2m 30s" between two timestamps. Presentation only. */
@@ -66,6 +67,8 @@ function LinkRow({ link, onDecide }: { link: Link; onDecide: (link: Link) => voi
 
 export function IncidentDetail() {
   const { incidentId } = useParams<{ incidentId: string }>();
+  const { subscribe, connectionEpoch } = useLiveStore();
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [eventsById, setEventsById] = useState<Map<string, SocEvent>>(new Map());
@@ -103,6 +106,48 @@ export function IncidentDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Resync after a dropped connection: API.md requires the whole snapshot to be
+  // reloaded on reconnect, not just the event feed.
+  useEffect(() => {
+    if (connectionEpoch > 0) void load();
+  }, [connectionEpoch, load]);
+
+  /**
+   * Live updates. API.md: when an `incident` message arrives for the page you
+   * have open, re-fetch GET /api/incidents/{id}.
+   *
+   * We re-fetch on `finding` and `link` too, rather than patching items in
+   * place. The whole page is derived from one GET, and in-place replacement
+   * cannot express a removal — a rejected link drops its R05 finding and no
+   * delete message is sent, so a patched page would keep showing a finding the
+   * backend no longer has. Re-fetching is always correct.
+   *
+   * Debounced, because a single analyst decision produces a burst of messages.
+   */
+  useEffect(() => {
+    const unsubscribe = subscribe((message) => {
+      if (message.type === 'event' || message.type === 'action') return;
+
+      // `link` carries no incident_id, so it cannot be filtered by incident.
+      // Findings and incidents can be, and are.
+      if (message.type === 'incident') {
+        const summary = message.data as { incident_id?: string };
+        if (summary?.incident_id !== incidentId) return;
+      } else if (message.type === 'finding') {
+        const finding = message.data as { incident_id?: string };
+        if (finding?.incident_id !== incidentId) return;
+      }
+
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = setTimeout(() => void load(), 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    };
+  }, [subscribe, incidentId, load]);
 
   const visibleFindings = useMemo(() => {
     if (!incident) return [];

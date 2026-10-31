@@ -305,6 +305,12 @@ function summaryFor(linkConfirmed: boolean): string {
 
 function incidentSummary(): IncidentSummary {
   const confirmed = fixtureLink.status === 'confirmed';
+  // Counts and timestamps grow as events are released, the way a real
+  // backend's incident does. This is also what makes a live re-fetch
+  // observable rather than a no-op.
+  const seen = released();
+  const firstSeen = seen[0]?.occurred_at ?? '2026-11-01T04:30:00Z';
+  const lastSeen = seen[seen.length - 1]?.occurred_at ?? firstSeen;
   return {
     incident_id: 'inc_01',
     src_ip: '192.168.77.10',
@@ -315,9 +321,9 @@ function incidentSummary(): IncidentSummary {
     severity: 'critical',
     // No R08, so recon is genuinely not observed.
     stages_observed: ['credential_attack', 'exploit_attempt', 'post_access', 'data_access'],
-    first_seen: '2026-11-01T04:30:00Z',
-    last_seen: '2026-11-01T04:32:30Z',
-    event_count: ALL_EVENTS.length,
+    first_seen: firstSeen,
+    last_seen: lastSeen,
+    event_count: seen.length,
   };
 }
 
@@ -441,7 +447,8 @@ export function openFixtureSocket(onMessage: (message: WsMessage) => void): Fixt
       // A real backend pushes after each DB commit, so the incident summary
       // lands on the wire too. Emitting it here keeps the incident list's
       // live-update path exercised in fixture mode.
-      onMessage({ seq: releasedSeq + 1, type: 'incident', data: incidentSummary() });
+      // API.md: seq is the newest event seq at send time, not a new number.
+      onMessage({ seq: releasedSeq, type: 'incident', data: incidentSummary() });
       return;
     }
     index += 1;

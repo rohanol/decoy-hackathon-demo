@@ -253,10 +253,31 @@ instantly whether the problem is the decoy, the backend or your UI.
 
 Reconnect uses exponential backoff with jitter: 500ms, 1s, 2s, 4s, 8s, then every 8s.
 
-**On reconnect, reload the REST snapshot and discard the in-memory list** (`API.md`, and
-PRD AC11). Do not try to patch the gap from buffered messages. Apply WebSocket messages
-only where `seq` is greater than the highest `seq` seen; drop or ignore anything lower.
-Clicking the pill when offline forces a retry immediately.
+**On reconnect, reload the whole REST snapshot and discard the in-memory list** (`API.md`,
+and PRD AC11). That means `GET /api/events` for the feed **plus** `GET /api/incidents` and
+`GET /api/links` — every screen holding its own data resyncs, not just the feed. Do not try
+to patch the gap from buffered messages. Clicking the pill when offline forces a retry
+immediately.
+
+**The `seq` gate applies to `event` messages only** (`API.md`, WebSocket section, contract
+update `cc12ddd`). A `finding`, `link` or `incident` message carries the *newest event's*
+seq at send time, so it usually repeats the seq before it — and an analyst decision emits
+messages with no new event at all. Dropping those three types by seq would silently discard
+exactly the updates the confirm button exists to produce. Apply them always, replacing the
+item with the matching ID. `next_seq` from the snapshot is your last event seq; use it
+rather than deriving a max from the page.
+
+| `type` | Apply when | How |
+|---|---|---|
+| `event` | `seq` > last event seq | append to the feed |
+| `finding` | always | replace by `finding_id` |
+| `link` | always | replace by `link_id` |
+| `incident` | always | replace by `incident_id`; if that incident's page is open, re-fetch it |
+| `action` | reserved, not sent yet | poll `GET /api/response/actions` |
+
+On the incident page, re-fetch rather than patching items in place: a rejected link removes
+its R05 finding and no delete message is sent, so a patched page would keep showing a
+finding the backend no longer has.
 
 ---
 
@@ -924,9 +945,12 @@ Autofocus the reason field. During the demo this is typed under pressure.
 On success the modal becomes a result panel: `action_id`, `APPLIED` pill, `until`, and the
 line **"Applied. Waiting for a blocked request to verify."**
 
-It stays open and watches for the WebSocket `type: "action"` message. When status becomes
-`verified`, the pill flips to `VERIFIED` with the `verified_by_event_id` chip and a 400ms
-`--ok` glow. That moment is demo step 8 — it deserves to be visible without navigating.
+It stays open and **polls `GET /api/response/actions` every 2s**. `API.md` (contract update
+`cc12ddd`) marks `type: "action"` as reserved and not sent, so there is no push for this —
+polling is the contract's own answer, not a workaround. When status becomes `verified`, the
+pill flips to `VERIFIED` with the `verified_by_event_id` chip and a 400ms `--ok` glow. That
+moment is demo step 8 — it deserves to be visible without navigating. Stop polling when the
+panel closes or the action reaches a terminal status.
 
 Then: **Undo block** (`POST /api/response/{action_id}/revoke`) and **Done**.
 
@@ -996,9 +1020,9 @@ Ask these in the group chat early — all are small, and each one blocks a panel
    `IncidentSummary` carry `findings_by_rule` (same shape as the one in `/api/stats/overview`)
    and `open_link_count`? Alternatively, adding `incident_id` to `Link` would solve the
    second half on its own.
-3. Does `/ws/events` emit `type: "action"` for response status changes, including the
-   `applied → verified` transition? §13.3 depends on it. If not, the result panel polls
-   `GET /api/response/actions` every 2s while open.
+3. ~~Does `/ws/events` emit `type: "action"` for response status changes?~~ **Answered**
+   by contract update `cc12ddd`: `action` is reserved and not sent. Poll
+   `GET /api/response/actions` for block status. §13.3 updated to match.
 4. The attack graph wants per-sensor event counts per incident. Deriving them from
    `GET /api/events?incident_id=` is fine; just confirming there is no cheaper field.
 5. Is `score_breakdown` guaranteed to list every rule that fired, including uncounted ones

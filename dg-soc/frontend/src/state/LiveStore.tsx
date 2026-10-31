@@ -43,6 +43,12 @@ interface LiveStoreValue {
   labRunId: string | null;
   /** When data last arrived, for the offline pill and stale banners. */
   lastDataAt: Date | null;
+  /**
+   * Increments on every RE-connection (not the first). API.md requires the
+   * whole snapshot to be reloaded on reconnect, including incidents and links
+   * — so screens that hold their own data depend on this to resync.
+   */
+  connectionEpoch: number;
   setPaused: (paused: boolean) => void;
   retryNow: () => void;
   reload: () => void;
@@ -67,6 +73,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [lastDataAt, setLastDataAt] = useState<Date | null>(null);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
 
   /** Highest seq applied. The gate for every incoming message. */
   const lastSeqRef = useRef(0);
@@ -77,6 +84,8 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const loadTokenRef = useRef(0);
   /** Screens listening for finding/incident/link/action messages. */
   const subscribersRef = useRef(new Set<(message: WsMessage) => void>());
+  /** The first connection is the initial load, not a resync. */
+  const hasConnectedRef = useRef(false);
 
   const subscribe = useCallback((handler: (message: WsMessage) => void) => {
     subscribersRef.current.add(handler);
@@ -104,7 +113,9 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       if (token !== loadTokenRef.current) return;
 
       const ordered = [...page.items].sort((a, b) => b.seq - a.seq);
-      const maxSeq = ordered.reduce((max, event) => Math.max(max, event.seq), 0);
+      // API.md: next_seq IS your last event seq. Use it rather than deriving a
+      // max from the page, which would be wrong if the page were truncated.
+      const maxSeq = page.next_seq ?? ordered.reduce((max, event) => Math.max(max, event.seq), 0);
 
       // Reconnect discards the list rather than patching the gap (API.md).
       lastSeqRef.current = maxSeq;
@@ -152,13 +163,19 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     const stream = createEventStream({
       onStatus: setStatus,
       onConnected: () => {
+        if (hasConnectedRef.current) setConnectionEpoch((value) => value + 1);
+        else hasConnectedRef.current = true;
         void loadSnapshot();
       },
       onMessage: (message) => {
-        // Hand every message to the screens listening for their own type.
+        // Hand every message to the screens listening for their own type,
+        // BEFORE the seq gate below. API.md: a finding, link or incident
+        // message often reuses the previous event's seq, and an analyst
+        // decision sends messages with no new event at all — so those three
+        // types must never be dropped by seq.
         for (const handler of subscribersRef.current) handler(message);
 
-        // Only events feed the live feed itself.
+        // The seq gate applies to events only.
         if (message.type !== 'event') return;
         if (message.seq <= lastSeqRef.current) return;
         lastSeqRef.current = message.seq;
@@ -218,6 +235,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       captureMode,
       labRunId,
       lastDataAt,
+      connectionEpoch,
       setPaused,
       retryNow: () => streamRef.current?.retryNow(),
       reload: () => void loadSnapshot(),
@@ -236,6 +254,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       captureMode,
       labRunId,
       lastDataAt,
+      connectionEpoch,
       setPaused,
       loadSnapshot,
       subscribe,
