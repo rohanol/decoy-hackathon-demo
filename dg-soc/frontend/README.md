@@ -33,6 +33,24 @@ npm run typecheck   # tsc --noEmit, strict
 npm run build       # typecheck + production build
 ```
 
+## Against the real backend
+
+Verified end to end against M3's FastAPI (see DESIGN_SPEC.md §16b). In one terminal:
+
+```bash
+cd dg-soc
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m backend.main
+```
+
+```bash
+python -m backend.tools.load_fixtures
+```
+
+Then `npm run dev` with no fixture flag. The backend already allows
+`127.0.0.1:5173` via CORS.
+
 ## Fixture mode
 
 `VITE_USE_FIXTURES=1` runs the whole UI off

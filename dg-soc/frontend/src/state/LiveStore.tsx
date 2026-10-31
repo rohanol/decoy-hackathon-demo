@@ -22,7 +22,7 @@ import {
 } from 'react';
 import { ApiError, fetchEvents, fetchHealth } from '../api/client';
 import { createEventStream, type ConnectionStatus, type EventStream } from '../api/socket';
-import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS } from '../api/config';
+import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS, MAX_SNAPSHOT_PAGES } from '../api/config';
 import type { CaptureMode, Health, SocEvent, WsMessage } from '../types/api';
 
 interface LiveStoreValue {
@@ -109,13 +109,30 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     const token = ++loadTokenRef.current;
     setLoading(true);
     try {
-      const page = await fetchEvents({ limit: EVENTS_PAGE_LIMIT });
-      if (token !== loadTokenRef.current) return;
+      // GET /api/events returns events ASCENDING from since_seq, and next_seq is
+      // a forward cursor, not the global maximum. A single call therefore
+      // returns the OLDEST page — so for a run longer than one page the feed
+      // would show the oldest events and the socket would then append new ones
+      // on top, leaving a silent hole in the middle. Page forward to the end.
+      const collected: SocEvent[] = [];
+      let cursor = 0;
+      let lastSeq = 0;
+      for (let guard = 0; guard < MAX_SNAPSHOT_PAGES; guard += 1) {
+        const page = await fetchEvents({ since_seq: cursor, limit: EVENTS_PAGE_LIMIT });
+        if (token !== loadTokenRef.current) return;
+        collected.push(...page.items);
+        lastSeq = Math.max(lastSeq, page.next_seq ?? 0);
+        // Stop at a short page, or if the cursor stops advancing.
+        if (page.items.length < EVENTS_PAGE_LIMIT) break;
+        if (page.next_seq === undefined || page.next_seq <= cursor) break;
+        cursor = page.next_seq;
+      }
 
-      const ordered = [...page.items].sort((a, b) => b.seq - a.seq);
-      // API.md: next_seq IS your last event seq. Use it rather than deriving a
-      // max from the page, which would be wrong if the page were truncated.
-      const maxSeq = page.next_seq ?? ordered.reduce((max, event) => Math.max(max, event.seq), 0);
+      const ordered = collected.sort((a, b) => b.seq - a.seq);
+      const maxSeq = Math.max(
+        lastSeq,
+        ordered.reduce((max, event) => Math.max(max, event.seq), 0),
+      );
 
       // Reconnect discards the list rather than patching the gap (API.md).
       lastSeqRef.current = maxSeq;

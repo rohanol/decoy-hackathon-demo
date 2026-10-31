@@ -1032,11 +1032,52 @@ Ask these in the group chat early — all are small, and each one blocks a panel
 7. Can the incident carry `score_cap` (the `cap` from `config/scoring.yaml`)? Without it the
    header shows a bare score rather than `100 / 100`, because hardcoding the denominator
    means the UI lies if the cap ever changes.
-8. For a rule awaiting confirmation, does its `score_breakdown` row report `points: 0`, or
-   the points it *would* contribute? If the latter, the link decision modal can tell the
-   analyst the exact delta before they decide, which is strictly better.
+8. ~~For a rule awaiting confirmation, does its `score_breakdown` row report `points: 0`?~~
+   **Answered by running the backend**: yes, `points: 0`. The modal therefore names which
+   rules confirming makes count, without a delta. Leave as built.
 
 None of these block the H4 gate. Build screen 2 on fixtures now.
+
+---
+
+## 16b. Verified against the real backend
+
+Run on 2026-10-31 against M3's FastAPI with `backend.tools.load_fixtures`. All five built
+screens render with zero console errors. What the run taught us, beyond what any amount of
+fixture work would have:
+
+**`GET /api/events` is ascending with a forward cursor.** `next_seq` is the last seq of the
+page returned, not the global maximum, and a bare `limit=200` returns the *oldest* 200. The
+feed used to make a single call and sort descending, which is correct only while a run fits
+in one page; beyond that it would have shown the oldest events and then appended live ones
+on top, leaving a silent hole. It now pages forward to the end. The fixture was returning
+newest-first, which is precisely why this hid — fixtures now mirror the real ordering.
+
+**The backend caps inside `score_breakdown`.** After confirmation the rows read R09 `5` and
+R05 `0`, summing exactly to 100, each with a reason like
+`first R09 (weight 15, capped at 100)`. So the raw-versus-capped footer in §9.3 stays
+dormant against this backend, and the cap story is told by the backend's own reason text.
+Keep the footer: it is correct either way and costs nothing.
+
+**R05 has no finding until the link is confirmed.** Six findings before, seven after. The
+page is re-fetched rather than patched, so this needs no special handling.
+
+**Two links, not one.** The backend emits both a `strong_candidate` (honeytoken) and a
+`candidate` (same src_ip within 5 min) for the same pair of decoys. This exposed a real bug
+in the graph: both link labels were drawn at the same y, so the second label covered the
+first link's line and made it unclickable. Lines now fan out horizontally and labels stack
+vertically.
+
+**The WebSocket sequence on a confirm is `link, finding, finding, incident`** — every one of
+them carrying a repeated seq, with no new event. Confirms why the seq gate must apply to
+`event` only: gating all types would have silently dropped the entire confirm flow.
+
+**`score_breakdown` rows also carry `finding_id`**, which is not in the contract's example.
+Unused so far, but it would let a breakdown row link directly to its finding card.
+
+Not a frontend issue, worth raising with M3: the rule summary embeds
+`[evidence: evt_..., evt_...]` inline in its prose, which is both hard to read and redundant
+with the clickable cited-ID chips rendered beneath it.
 
 ---
 

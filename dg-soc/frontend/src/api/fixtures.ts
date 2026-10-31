@@ -99,9 +99,12 @@ export async function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> 
   }
 
   const limit = query.limit ?? 200;
-  // Newest first, matching how the feed renders.
-  const ordered = [...items].sort((a, b) => b.seq - a.seq).slice(0, limit);
-  const nextSeq = items.reduce((max, e) => Math.max(max, e.seq), 0);
+  // ASCENDING, with next_seq as a forward cursor — the real backend's
+  // semantics, verified against it. The fixture used to return newest-first,
+  // which hid a paging bug in the feed: keep these in step, or fixtures stop
+  // being a useful rehearsal for the real thing.
+  const ordered = [...items].sort((a, b) => a.seq - b.seq).slice(0, limit);
+  const nextSeq = ordered.length > 0 ? (ordered[ordered.length - 1]?.seq ?? 0) : (query.since_seq ?? 0);
 
   return { items: ordered, next_seq: nextSeq };
 }

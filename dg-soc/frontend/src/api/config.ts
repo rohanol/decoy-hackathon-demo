@@ -22,3 +22,10 @@ export const FEED_MAX_ROWS = 500;
 
 /** REST snapshot page size, matching the API.md default. */
 export const EVENTS_PAGE_LIMIT = 200;
+
+/**
+ * Safety stop when paging the snapshot forward. 25 pages x 200 is far more
+ * than a lab run produces; it exists so a backend that never advances its
+ * cursor cannot spin the browser.
+ */
+export const MAX_SNAPSHOT_PAGES = 25;

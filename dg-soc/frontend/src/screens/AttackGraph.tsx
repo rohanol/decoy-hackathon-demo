@@ -293,8 +293,14 @@ export function AttackGraph() {
             {/* Cross-decoy links. The key carries the status so a decided link
                 remounts and its animation actually plays. */}
             {links.map((link, index) => {
-              const offset = (index - (links.length - 1) / 2) * 26;
-              const midY = (SSH_Y + SENSOR_H + WEB_Y) / 2;
+              // Lines fan out horizontally, labels stack vertically. Both are
+              // needed: the real backend emits more than one link (a honeytoken
+              // strong_candidate and a same-IP candidate), and labels drawn at a
+              // shared y overlap each other and cover the neighbouring line,
+              // which makes that link impossible to click.
+              const offset = (index - (links.length - 1) / 2) * 36;
+              const centreY = (SSH_Y + SENSOR_H + WEB_Y) / 2;
+              const midY = centreY + (index - (links.length - 1) / 2) * 30;
               const x = SENSOR_X + SENSOR_W / 2 + offset;
               const label =
                 link.status === 'confirmed'
