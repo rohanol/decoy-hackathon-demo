@@ -2,12 +2,13 @@
 # Apply to the URL-decoded path + query, and the decoded form body for POSTs. Decode twice
 # (catches %2527 style double encoding). Match case-insensitively.
 # Positive and negative test strings: contracts/examples/payloads.json
-version: 1
+version: 2
 classes:
   sqli:
     - "'\\s*(or|and)\\s+['\"\\d]"
     - "\\bunion\\b.{0,40}\\bselect\\b"
-    - "(--|#|/\\*)\\s*$"
+    # A trailing comment marker alone is ordinary text too. Require one of
+    # the structural SQL-shaped indicators above/below; backend owns verdicts.
     - "\\b(sleep|benchmark|pg_sleep)\\s*\\("
     - ";\\s*(drop|insert|update|delete)\\b"
     - "'\\s*;"

@@ -1,5 +1,10 @@
 # M4 handoff — Prajwal
 
+Historical first implementation handoff. For the current stateful web-depth
+change, compatibility limits and fresh validation receipts, read
+`scenarios/M4_DEPTH_HANDOFF.md` and `decoys/web/README.md`. The old one-record
+and sessionless descriptions below do not describe the new web-depth branch.
+
 ## Implemented
 
 - Flask portal: login, canned SQL error bait, safe synthetic CSV download, canned

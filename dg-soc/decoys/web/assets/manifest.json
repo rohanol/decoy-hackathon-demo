@@ -1,0 +1,24 @@
+{
+  "manifest_version": 1,
+  "assets": [
+    {
+      "asset_id": "customer_data.csv",
+      "fixture_version": 1,
+      "path": "assets/customer_data.csv",
+      "access": "authenticated_decoy_session",
+      "size_bytes": 3728,
+      "sha256": "9753af0adf6da1ed936eeb50b4df0718eb1cee76e5c3d48bafc015980201f745",
+      "synthetic": true
+    },
+    {
+      "asset_id": "backup_env",
+      "fixture_version": 1,
+      "route": "/.env",
+      "access": "intentional_public_bait",
+      "honeytoken_id": "tok_backup_01",
+      "generated": true,
+      "digest": "computed over the complete generated response in each serving observation"
+    }
+  ],
+  "institutional_clone": "not supplied; the release contains only the synthetic Operations Portal"
+}
