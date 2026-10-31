@@ -239,3 +239,86 @@ def test_fixture_run_produces_expected_rules_once(client):
     blocked_ids = {i["event_id"] for i in db.list_events()["items"] if i["event_type"] == "blocked_request"}
     cited = {e for f in db.list_findings("inc_01") for e in f["evidence_event_ids"]}
     assert blocked_ids and not (blocked_ids & cited)
+
+
+# ---- v2 rule improvements ----
+from backend.rules._util import normalize_path, normalize_url  # noqa: E402
+
+
+@pytest.mark.parametrize("cmd", ["cd /tmp; ls -la", "whoami && find / -name '*.txt'", "/bin/ls -la",
+                                 "sudo ls /root", "sudo -u root find /home", "id || ls", "cat x | ls"])
+def test_r03_chained_and_full_path_commands_yes(cmd):
+    assert len(r03.evaluate([ev(etype="command_input", command=cmd)], CFG)) == 1
+
+
+@pytest.mark.parametrize("cmd", ["lsblk", "echo ls; whoami", "cat notes.txt && whoami", "findmnt -l",
+                                 "grep ls file", "sudo lsof"])
+def test_r03_chained_other_commands_no(cmd):
+    assert r03.evaluate([ev(etype="command_input", command=cmd)], CFG) == []
+
+
+@pytest.mark.parametrize("text,cls", [
+    ("/search?q=1%27%20UNION%0ASELECT%201", "sqli"),                              # newline evasion
+    ("/search?q=1'%09UNION%09%09SELECT%201", "sqli"),                              # tabs
+    ("/download?file=%25252e%25252e%25252f%25252e%25252e%25252fetc%25252fpasswd", "lfi"),  # triple encoded
+    ("/download?file=..%2F..%2Fetc%2Fpasswd%00.png", "lfi"),                       # null byte
+])
+def test_r07_evasion_variants_still_match(text, cls):
+    assert cls in r07.classify(text, CFG)
+
+
+def test_normalize_url_stops_when_stable():
+    assert normalize_url("%2541") == "a"          # %2541 -> %41 -> A -> a
+    assert normalize_url("q=a+b%20%20c") == "q=a b c"
+    assert normalize_url("100%") == "100%"        # not an escape; left alone
+
+
+@pytest.mark.parametrize("path,expected", [
+    ("/admin/login.php", True), ("//admin", True), ("/ADMIN/./", True), ("/wp-admin/install.php", True),
+    ("/%61dmin", True), ("/.git/config", True),
+    ("/administration-guide", False), ("/adminx", False), ("/login", False), ("/", False),
+])
+def test_r08_hidden_path_matching(path, expected):
+    assert r08.is_hidden(path, CFG.hidden_paths) is expected
+
+
+def test_normalize_path():
+    assert normalize_path("//Admin/./login.php/?x=1") == "/admin/login.php"
+    assert normalize_path("/") == "/"
+
+
+def test_r08_counts_subpaths_of_hidden_paths():
+    es = [_timed(web(p), i) for i, p in enumerate(
+        ["/admin/login.php", "/admin/config.php", "/wp-admin/install.php", "//.env", "/.git/HEAD"])]
+    assert len(r08.evaluate(es, CFG)) == 1
+
+
+def test_r01_mentions_login_accepted_after_guessing():
+    es = fails([0, 1, 2, 3, 4]) + [ev(etype="auth_success", at=14, username="dg_demo")]
+    out = r01.evaluate(es, CFG)[0]
+    assert out["label"].endswith("the decoy accepted a login for this user 10 s later")
+    assert out["evidence_event_ids"][-1] == es[-1]["event_id"] and len(out["evidence_event_ids"]) == 6
+    assert "compromised" in out["limitation"]  # still says what it does not prove
+
+
+@pytest.mark.parametrize("extra", [
+    lambda: ev(etype="auth_success", at=14, username="someone_else"),   # other user
+    lambda: ev(etype="auth_success", at=65, username="dg_demo"),        # 61 s after last failure
+])
+def test_r01_unrelated_or_late_login_not_mentioned(extra):
+    out = r01.evaluate(fails([0, 1, 2, 3, 4]) + [extra()], CFG)[0]
+    assert "accepted" not in out["label"] and len(out["evidence_event_ids"]) == 5
+
+
+def test_r01_login_kept_in_evidence_when_capped():
+    es = fails(list(range(55))) + [ev(etype="auth_success", at=56, username="dg_demo")]
+    out = r01.evaluate(es, CFG)[0]
+    assert len(out["evidence_event_ids"]) == 50 and out["evidence_event_ids"][-1] == es[-1]["event_id"]
+
+
+def test_changed_rules_carry_version_2():
+    assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@2"
+    assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@2"
+    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@2"
+    assert r02.evaluate([ev(etype="auth_success"), ev(etype="command_input", at=1, command="id")],
+                        CFG)[0]["rule_version"] == "R02@1"

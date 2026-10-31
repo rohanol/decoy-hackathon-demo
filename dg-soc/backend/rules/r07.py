@@ -1,13 +1,13 @@
 """R07: URL-decoded path/query matches a web attack class from config/web_patterns.yaml."""
-from ._util import decode_twice, finding
+from ._util import finding, normalize_url
 
 CLASS_ORDER = ["sqli", "xss", "lfi", "rfi", "cmd_injection"]
 EXTRA_TECHNIQUES = {"xss": "T1059.007", "rfi": "T1105"}
 
 
 def classify(text: str, cfg) -> list:
-    """Attack classes whose patterns match the decoded text."""
-    decoded = decode_twice(text)
+    """Attack classes whose patterns match the normalized text."""
+    decoded = normalize_url(text)
     return [c for c in CLASS_ORDER
             if any(p.search(decoded) for p in cfg.classes.get(c, []))]
 
@@ -31,6 +31,6 @@ def evaluate(events: list, cfg) -> list:
             techniques=techniques, stage="exploit_attempt",
             label=f"Web attack attempt ({', '.join(classes)}) on {a.get('path', '')[:128]}",
             limitation="Shows an attempt only; does not show successful exploitation.",
-            events=[e], web_attack_class=classes,
+            events=[e], web_attack_class=classes, version=2,
         ))
     return out

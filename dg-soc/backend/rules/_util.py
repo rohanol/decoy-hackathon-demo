@@ -1,9 +1,13 @@
 """Helpers shared by the rules. Rules are pure: events in, finding dicts out."""
+import re
 from datetime import datetime
 from typing import Optional
 from urllib.parse import unquote_plus
 
 MAX_EVIDENCE = 50
+MAX_DECODE_ROUNDS = 3
+_WHITESPACE = re.compile(r"\s+")
+_SLASHES = re.compile(r"/{2,}")
 
 
 def ts(event: dict) -> datetime:
@@ -30,19 +34,40 @@ def evidence_ids(events: list) -> list:
     return [e["event_id"] for e in events[:MAX_EVIDENCE]]
 
 
-def decode_twice(text: str) -> str:
-    """URL-decode twice (catches %2527-style encoding), lowercase for matching."""
-    return unquote_plus(unquote_plus(text)).lower()
+def normalize_url(text: str) -> str:
+    """What the web rules match against. Same steps a WAF takes before matching
+    (OWASP CRS transforms urlDecodeUni, removeNulls, compressWhitespace, lowercase):
+    URL-decode until nothing changes (max 3 rounds, catches %2527 and %252527),
+    drop NUL bytes, turn any run of whitespace into one space, lowercase."""
+    for _ in range(MAX_DECODE_ROUNDS):
+        decoded = unquote_plus(text)
+        if decoded == text:
+            break
+        text = decoded
+    return _WHITESPACE.sub(" ", text.replace("\x00", "")).lower()
+
+
+def normalize_path(path: str) -> str:
+    """URL path for R08: normalized as above, query dropped, `//` and `/./` collapsed,
+    no trailing slash. `/ADMIN//./` and `/admin` compare equal."""
+    p = normalize_url(path.split("?", 1)[0])
+    p = _SLASHES.sub("/", p)
+    while "/./" in p:
+        p = p.replace("/./", "/")
+    if p.endswith("/."):
+        p = p[:-2]
+    return p.rstrip("/") or "/"
 
 
 def finding(rule_id: str, key: str, *, techniques: list, stage: str, label: str,
-            limitation: str, events: list, **extra) -> dict:
+            limitation: str, events: list, version: int = 1, **extra) -> dict:
     """Finding without finding_id/incident_id/src_ip/created_at: the engine adds those.
-    `key` makes the finding_id stable so re-running the rules never duplicates it."""
+    `key` makes the finding_id stable so re-running the rules never duplicates it.
+    Bump `version` whenever a rule's matching logic changes (shown as rule_version)."""
     out = {
         "key": key,
         "rule_id": rule_id,
-        "rule_version": f"{rule_id}@1",
+        "rule_version": f"{rule_id}@{version}",
         "technique_ids": techniques,
         "stage": stage,
         "label": label,
