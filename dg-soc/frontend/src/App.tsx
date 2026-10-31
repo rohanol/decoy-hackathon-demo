@@ -4,12 +4,9 @@ import { AttackGraph } from './screens/AttackGraph';
 import { IncidentDetail } from './screens/IncidentDetail';
 import { IncidentList } from './screens/IncidentList';
 import { LiveFeed } from './screens/LiveFeed';
+import { Overview } from './screens/Overview';
 import { TranscriptReplay } from './screens/TranscriptReplay';
-import {
-  NotFound,
-  Overview,
-  ResponseCenter,
-} from './screens/Stub';
+import { NotFound, ResponseCenter } from './screens/Stub';
 import { LiveStoreProvider } from './state/LiveStore';
 
 /** Routes match DESIGN_SPEC.md section 1. */

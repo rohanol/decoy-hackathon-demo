@@ -336,13 +336,22 @@ and purely decorative reinforcement; the numbers are the truth. `low_priority_in
 means incidents scoring below `low_priority_below` (25). Tooltip on "low priority":
 *"Scored below the noise threshold set in scoring.yaml."*
 
-**Time to first alert** — `first_alert_seconds`, one decimal, "s" in `--text-secondary`.
-If `null`, show `—` with "no findings yet". Do not show `0.0`.
+**Time to first alert** — `first_alert_seconds`, "s" in `--text-secondary`. If `null`, show
+`—` with "no findings yet".
+
+Precision follows magnitude: 2 decimals below 1s, 1 decimal to 10s, 0 above. A bulk fixture
+load really does report `0.013`, and a flat one-decimal rule would render that as `0.0 s`,
+which reads as "nothing was measured" rather than "measured, and very fast".
 
 **Findings by rule** — horizontal bars from `findings_by_rule`. Rule code in mono, count at
 the end. Fixed order R01, R02, R03, R04, R05, R07, R08, R09. **There is no R06** — do not
-render a slot for it. Rules with zero count render a dim empty track, so the set of possible
-rules is always visible. Clicking a bar goes to `/incidents` filtered by that rule.
+render a slot for it. Rules with zero count render a dim dashed track, so the set of
+possible rules stays visible even before anything fires.
+
+**Bars are not clickable.** They were meant to open `/incidents` filtered by that rule, but
+`IncidentSummary` carries no findings (open question 2), so the destination cannot honour
+the filter. A link that quietly ignores what you clicked is worse than no link. If
+`findings_by_rule` lands on `IncidentSummary`, wire both at once.
 
 **Active incidents** — compact rows: IP (mono), severity badge, score, and the compact
 kill-chain strip. Whole row navigates to the incident.

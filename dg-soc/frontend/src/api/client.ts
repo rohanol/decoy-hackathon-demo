@@ -149,5 +149,6 @@ export function fetchLinks(): Promise<{ items: Link[] }> {
 }
 
 export function fetchOverview(): Promise<StatsOverview> {
+  if (USE_FIXTURES) return fixtures.fetchOverview();
   return get<StatsOverview>('/api/stats/overview');
 }

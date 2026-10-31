@@ -30,13 +30,6 @@ export function Stub({
   );
 }
 
-export const Overview = () => (
-  <Stub
-    title="Overview"
-    specSection="section 6"
-    buildOrder="Build order 4 of 7. Needs GET /api/stats/overview from M3."
-  />
-);
 
 
 

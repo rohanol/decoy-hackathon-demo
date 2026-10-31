@@ -23,8 +23,10 @@ import type {
   IncidentSummary,
   IngestEvent,
   Link,
+  RuleId,
   ScoreBreakdownRow,
   SocEvent,
+  StatsOverview,
   Transcript,
   TranscriptLine,
   TranscriptLineKind,
@@ -407,6 +409,26 @@ export async function fetchTranscript(sessionId: string): Promise<Transcript> {
   }
 
   return { session_id: sessionId, lines };
+}
+
+export async function fetchOverview(): Promise<StatsOverview> {
+  await sleep(FAKE_LATENCY_MS);
+  const confirmed = fixtureLink.status === 'confirmed';
+  // Derived from the same findings the incident page shows, so R05 appears
+  // here exactly when it appears there.
+  const findingsByRule: Partial<Record<RuleId, number>> = {};
+  for (const finding of buildFindings(confirmed)) {
+    if (finding.pending_confirmation === true) continue;
+    findingsByRule[finding.rule_id] = (findingsByRule[finding.rule_id] ?? 0) + 1;
+  }
+  const seen = released();
+  return {
+    raw_events: seen.length,
+    incidents: seen.length > 0 ? 1 : 0,
+    low_priority_incidents: 0,
+    findings_by_rule: findingsByRule,
+    first_alert_seconds: seen.length > 0 ? 4.2 : null,
+  };
 }
 
 export async function fetchLinks(): Promise<{ items: Link[] }> {
