@@ -3,10 +3,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from backend.config import load_config
-from backend.main import create_app
 from backend.rules import evaluate_incident, r01, r02, r03, r04, r07, r08
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -194,10 +192,6 @@ def test_finding_ids_are_stable_and_schema_complete():
 
 
 # ---- end to end through the API ----
-@pytest.fixture
-def client():
-    with TestClient(create_app(":memory:")) as c:
-        yield c
 
 
 def raw(rid, sensor="ssh-decoy-01", etype="auth_failure", at=0, **attrs):

@@ -9,6 +9,7 @@ import logging
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 
 log = logging.getLogger("dg.integrations")
 
@@ -71,9 +72,10 @@ class Integrations:
         if not self._on_event:
             return
         try:
-            result = self._on_event(event)
-            if inspect.isawaitable(result):
-                await result
+            if inspect.iscoroutinefunction(self._on_event):
+                await self._on_event(event)
+            else:
+                await run_in_threadpool(self._on_event, event)  # file I/O must not block the event loop
         except Exception:
             log.exception("response.on_event failed for %s", event.get("event_id"))
 

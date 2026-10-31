@@ -3,9 +3,7 @@ import json
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
-from backend.main import create_app
 
 FIXTURE = Path(__file__).resolve().parents[2] / "contracts" / "examples" / "events_p3.json"
 
@@ -22,10 +20,6 @@ def make_event(rid="rec-1", **over):
     return ev
 
 
-@pytest.fixture
-def client():
-    with TestClient(create_app(":memory:")) as c:
-        yield c
 
 
 def post(client, events):
@@ -84,7 +78,8 @@ def test_batch_limits(client):
     big = make_event("big")
     big["attributes"]["extra"] = "x" * (1024 * 1024)
     assert post(client, [big]).status_code == 413
-    assert client.post("/api/ingest/events", content="not json").status_code == 400
+    bad_json = client.post("/api/ingest/events", content="not json", headers={"Content-Type": "application/json"})
+    assert bad_json.status_code == 400 and bad_json.json()["error"]["code"] == "bad_request"
 
 
 def test_seq_is_global_and_ordered(client):
@@ -137,3 +132,44 @@ def test_fixture_file_loads_cleanly(client):
     r = post(client, copy.deepcopy(events)).json()
     assert r["accepted"] == len(events) and r["rejected"] == []
     assert post(client, events).json()["duplicates"] == len(events)
+
+
+def test_ingest_requires_json_content_type(client):
+    r = client.post("/api/ingest/events", content=json.dumps({"events": [make_event("ct")]}),
+                    headers={"Content-Type": "text/plain"})
+    assert r.status_code == 415 and r.json()["error"]["code"] == "unsupported_media_type"
+    assert client.get("/api/events").json()["items"] == []
+
+
+def test_declared_oversize_body_rejected_before_reading(client):
+    r = client.post("/api/ingest/events", content=b"{}",
+                    headers={"Content-Type": "application/json", "Content-Length": str(2 * 1024 * 1024)})
+    assert r.status_code == 413
+
+
+def test_cors_allows_the_vite_dev_server_only(client):
+    ok = client.get("/api/health", headers={"Origin": "http://127.0.0.1:5173"})
+    assert ok.headers.get("access-control-allow-origin") == "http://127.0.0.1:5173"
+    other = client.get("/api/health", headers={"Origin": "http://evil.example"})
+    assert "access-control-allow-origin" not in other.headers
+
+
+def test_websocket_rejects_foreign_origin(client):
+    from starlette.websockets import WebSocketDisconnect
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect("/ws/events", headers={"Origin": "http://evil.example"}) as ws:
+            ws.receive_json()
+    with client.websocket_connect("/ws/events", headers={"Origin": "http://localhost:5173"}):
+        pass
+
+
+def test_unknown_route_uses_error_shape(client):
+    r = client.get("/api/nope")
+    assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+
+
+def test_importing_main_does_not_create_default_db():
+    import importlib
+    import backend.main as m
+    importlib.reload(m)
+    assert m._app is None

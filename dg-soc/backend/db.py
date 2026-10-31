@@ -1,9 +1,10 @@
-"""SQLite (WAL) storage. One writer: every write goes through a single lock."""
+"""SQLite (WAL) storage. One writer behind a lock; one read connection per thread."""
 import json
 import os
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -80,7 +81,8 @@ TRANSCRIPT_KINDS = {"auth_failure": "login_failed", "auth_success": "login_ok",
 
 
 def _now() -> str:
-    return to_rfc3339(datetime.now(timezone.utc))
+    """Backend-issued timestamps (ingested_at, created_at, decided_at): UTC, milliseconds."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _ts(s: str) -> datetime:
@@ -88,26 +90,55 @@ def _ts(s: str) -> datetime:
 
 
 class Database:
+    """One writer connection (behind a lock) plus one read connection per thread.
+
+    WAL lets readers run while a write is in progress, and a reader only ever sees
+    committed data, so a GET can never return a half-written ingest."""
+
     def __init__(self, path: Optional[str] = None, cfg: Optional[Config] = None):
         self.cfg = cfg or load_config()
-        path = path or os.environ.get("DG_DB_PATH") or str(DEFAULT_DB)
-        if path != ":memory:":
-            Path(path).parent.mkdir(parents=True, exist_ok=True)
-        # isolation_level=None: we issue BEGIN/COMMIT ourselves.
-        self.conn = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self.conn.execute("PRAGMA foreign_keys=ON")
-        self.conn.executescript(SCHEMA)
+        self.path = path or os.environ.get("DG_DB_PATH") or str(DEFAULT_DB)
+        if self.path == ":memory:":
+            raise ValueError("use a file path: readers and the writer need to share one database")
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self._writer = self._connect()
+        self._writer.execute("PRAGMA journal_mode=WAL")
+        self._writer.executescript(SCHEMA)
         self._write_lock = threading.Lock()
+        self._local = threading.local()
+        self._readers: list[sqlite3.Connection] = []
+        self._readers_lock = threading.Lock()
+
+    def _connect(self) -> sqlite3.Connection:
+        # isolation_level=None: autocommit for reads; the writer issues BEGIN/COMMIT itself.
+        conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None, timeout=10)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA busy_timeout=10000")
+        return conn
+
+    @property
+    def conn(self) -> sqlite3.Connection:
+        """Read connection for the calling thread."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._connect()
+            self._local.conn = conn
+            with self._readers_lock:
+                self._readers.append(conn)
+        return conn
 
     def close(self) -> None:
-        self.conn.close()
+        with self._readers_lock:
+            for conn in self._readers:
+                conn.close()
+            self._readers.clear()
+        self._writer.close()
 
     def _write(self, fn):
         """Run fn(conn) in one IMMEDIATE transaction under the single-writer lock."""
         with self._write_lock:
-            c = self.conn
+            c = self._writer
             c.execute("BEGIN IMMEDIATE")
             try:
                 result = fn(c)
@@ -126,11 +157,13 @@ class Database:
         def work(c):
             touched: set[str] = set()
             stored = [self._insert_one(c, ev, touched) for ev in events]
-            new_links = self._refresh_links(c, touched)
+            # Load each touched incident's events once; links and rules both use them.
+            loaded = {inc: self._incident_events(c, inc) for inc in sorted(touched)}
+            new_links = self._refresh_links(c, loaded)
             affected = set(touched)
             for l in new_links:
                 affected.update((l["from_incident_id"], l["to_incident_id"]))
-            changed = [f for inc in sorted(affected) for f in self._sync_incident(c, inc)]
+            changed = [f for inc in sorted(affected) for f in self._sync_incident(c, inc, loaded.get(inc))]
             return {"stored": stored, "links": new_links, "findings": changed,
                     "incidents": sorted(affected) if any(stored) or new_links else []}
         return self._write(work)
@@ -194,7 +227,8 @@ class Database:
         return [self._event_dict(r) for r in
                 c.execute("SELECT * FROM events WHERE incident_id=? ORDER BY seq", (incident_id,))]
 
-    def _refresh_links(self, c, touched: set[str]) -> list[dict]:
+    def _refresh_links(self, c, loaded: dict) -> list[dict]:
+        """`loaded`: incident_id -> its events, for the incidents this ingest touched."""
         def planted_lookup(tok: dict, use: dict) -> Optional[dict]:
             # Prefer the same src_ip, then a shell command (e.g. reading the bait file), then latest.
             r = c.execute(
@@ -206,8 +240,7 @@ class Database:
             return self._event_dict(r) if r else None
 
         new = []
-        for inc in sorted(touched):
-            events = self._incident_events(c, inc)
+        for inc, events in loaded.items():
             found = linking.candidate_links(inc, events, self.cfg)
             found += linking.strong_links(linking.token_uses(events, self.cfg), planted_lookup, self.cfg)
             for l in found:
@@ -226,11 +259,13 @@ class Database:
             "SELECT * FROM links WHERE from_incident_id=? OR to_incident_id=? ORDER BY created_at, link_id",
             (incident_id, incident_id))]
 
-    def _sync_incident(self, c, incident_id: str) -> list[dict]:
+    def _sync_incident(self, c, incident_id: str, events: Optional[list] = None) -> list[dict]:
         """Re-run rules and scoring for one incident; store and return what changed."""
         inc = c.execute("SELECT incident_id, src_ip FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
         links = self._links_for(c, incident_id)
-        fresh = evaluate_incident(dict(inc), self._incident_events(c, incident_id), self.cfg, links)
+        if events is None:
+            events = self._incident_events(c, incident_id)
+        fresh = evaluate_incident(dict(inc), events, self.cfg, links)
         # rowid = order first recorded; scoring walks findings in that order (new ones last).
         existing = {r["finding_id"]: json.loads(r["data"]) for r in c.execute(
             "SELECT finding_id, data FROM findings WHERE incident_id=? ORDER BY rowid", (incident_id,))}
@@ -310,10 +345,24 @@ class Database:
             "first_seen": r["first_seen"], "last_seen": r["last_seen"], "event_count": r["event_count"],
         }
 
+    @contextmanager
+    def snapshot(self):
+        """Several reads that must agree with each other see one committed state."""
+        c = self.conn
+        if c.in_transaction:
+            yield
+            return
+        c.execute("BEGIN")
+        try:
+            yield
+        finally:
+            c.execute("COMMIT")
+
     def list_incidents(self) -> list[dict]:
-        ids = [r[0] for r in self.conn.execute(
-            "SELECT incident_id FROM incidents ORDER BY last_seen DESC, rowid DESC")]
-        return [self.incident_summary(i) for i in ids]
+        with self.snapshot():
+            ids = [r[0] for r in self.conn.execute(
+                "SELECT incident_id FROM incidents ORDER BY last_seen DESC, rowid DESC")]
+            return [self.incident_summary(i) for i in ids]
 
     def list_findings(self, incident_id: str) -> list[dict]:
         rows = self.conn.execute(
@@ -341,17 +390,17 @@ class Database:
 
     def incident_detail(self, incident_id: str) -> dict:
         """Incident minus `summary` and `active_block`, which main.py adds."""
-        findings = self.list_findings(incident_id)
-        links = self._links_for(self.conn, incident_id)
-        scored = score_incident(findings, links, self.cfg)
-        out = self.incident_summary(incident_id)
-        out.update({
-            "findings": findings,
-            "score_breakdown": scored["breakdown"],
-            "links": [self.public_link(l) for l in links],
-            "sessions": self.sessions(incident_id),
-        })
-        return out
+        with self.snapshot():
+            findings = self.list_findings(incident_id)
+            links = self._links_for(self.conn, incident_id)
+            out = self.incident_summary(incident_id)
+            out.update({
+                "findings": findings,
+                "score_breakdown": score_incident(findings, links, self.cfg)["breakdown"],
+                "links": [self.public_link(l) for l in links],
+                "sessions": self.sessions(incident_id),
+            })
+            return out
 
     def transcript(self, incident_id: str, session_id: Optional[str]) -> Optional[dict]:
         if not session_id:
@@ -386,22 +435,24 @@ class Database:
 
     def stats(self) -> dict:
         c = self.conn
-        by_rule = {r["rule_id"]: r["n"] for r in
-                   c.execute("SELECT rule_id, COUNT(*) AS n FROM findings GROUP BY rule_id ORDER BY rule_id")}
-        first = c.execute("SELECT incident_id, created_at FROM findings ORDER BY created_at LIMIT 1").fetchone()
-        first_alert = None
-        if first:
-            start = c.execute("SELECT MIN(ingested_at) FROM events WHERE incident_id=?",
-                              (first["incident_id"],)).fetchone()[0]
-            first_alert = max(0.0, (_ts(first["created_at"]) - _ts(start)).total_seconds())
-        return {
-            "raw_events": c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
-            "incidents": c.execute("SELECT COUNT(*) FROM incidents").fetchone()[0],
-            "low_priority_incidents": c.execute("SELECT COUNT(*) FROM incidents WHERE score < ?",
-                                                (self.cfg.low_priority_below,)).fetchone()[0],
-            "findings_by_rule": by_rule,
-            "first_alert_seconds": first_alert,
-        }
+        with self.snapshot():
+            by_rule = {r["rule_id"]: r["n"] for r in
+                       c.execute("SELECT rule_id, COUNT(*) AS n FROM findings GROUP BY rule_id ORDER BY rule_id")}
+            first = c.execute("SELECT incident_id, created_at FROM findings ORDER BY created_at LIMIT 1").fetchone()
+            first_alert = None
+            if first:
+                # From the backend receiving that incident's first event to its first finding.
+                start = c.execute("SELECT MIN(ingested_at) FROM events WHERE incident_id=?",
+                                  (first["incident_id"],)).fetchone()[0]
+                first_alert = round(max(0.0, (_ts(first["created_at"]) - _ts(start)).total_seconds()), 3)
+            return {
+                "raw_events": c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
+                "incidents": c.execute("SELECT COUNT(*) FROM incidents").fetchone()[0],
+                "low_priority_incidents": c.execute("SELECT COUNT(*) FROM incidents WHERE score < ?",
+                                                    (self.cfg.low_priority_below,)).fetchone()[0],
+                "findings_by_rule": by_rule,
+                "first_alert_seconds": first_alert,
+            }
 
     def export_events(self, incident_id: str) -> list[dict]:
         """Incident events for export with password hashes removed."""

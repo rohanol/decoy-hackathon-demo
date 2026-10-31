@@ -1,10 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from fastapi.testclient import TestClient
 
 from backend.config import load_config
-from backend.main import create_app
 from backend.scoring import severity_for
 
 CFG = load_config()
@@ -30,10 +28,6 @@ def webreq(at, path, query=None, etype="http_request", **attrs):
     return raw("web-decoy-01", etype, at=at, session=None, **a)
 
 
-@pytest.fixture
-def client():
-    with TestClient(create_app(":memory:")) as c:
-        yield c
 
 
 def send(client, *events):
@@ -180,6 +174,7 @@ def test_decision_validation(client):
     short = decide(client, lid, "confirm", "ok")
     assert short.status_code == 400 and short.json()["error"]["code"] == "bad_request"
     assert decide(client, lid, "maybe").status_code == 400
+    assert decide(client, lid, "confirm", "    ok    ").status_code == 400  # spaces do not count
     missing = decide(client, "lnk_nope", "confirm")
     assert missing.status_code == 404 and missing.json()["error"]["code"] == "not_found"
 
@@ -206,7 +201,10 @@ def test_incident_list_newest_first_and_detail_shape(client):
     inc = incident(client, "inc_01")
     assert {"findings", "score_breakdown", "links", "sessions", "summary", "active_block"} <= set(inc)
     assert inc["active_block"] is None and inc["summary"]["source"] == "rules"
-    assert inc["summary"]["cited_event_ids"] and "waits for analyst confirmation" in inc["summary"]["text"]
+    # Whichever summariser runs (M4's analyst/summarise.py or the fallback), it cites real evidence.
+    event_ids = {e["event_id"] for e in client.get("/api/events?limit=1000").json()["items"]}
+    assert inc["summary"]["text"] and set(inc["summary"]["cited_event_ids"]) <= event_ids
+    assert inc["summary"]["cited_event_ids"]
     sess = {s["session_id"]: s for s in inc["sessions"]}
     assert sess["sess01"]["commands"] == 3 and sess["sess01"]["sensor_id"] == "ssh-decoy-01"
     assert client.get("/api/incidents/inc_99").status_code == 404
@@ -277,4 +275,6 @@ def test_analyst_summary_used_when_present_and_fallback_on_error(client):
     hooks._summarise = lambda inc: {"source": "rules", "text": "custom", "cited_event_ids": []}
     assert incident(client)["summary"]["text"] == "custom"
     hooks._summarise = lambda inc: 1 / 0
+    assert incident(client)["summary"]["text"].startswith("Repeated SSH password guessing")
+    hooks._summarise = None  # M4 module absent
     assert incident(client)["summary"]["text"].startswith("Repeated SSH password guessing")
