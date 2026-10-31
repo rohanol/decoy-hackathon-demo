@@ -1,14 +1,27 @@
-/** App shell: topbar, sidebar, sensor health strip. DESIGN_SPEC.md section 4. */
+/** App shell: sidebar, topbar, page transitions. DESIGN_SPEC.md section 4. */
 
+import {
+  Activity,
+  LayoutGrid,
+  LogOut,
+  Orbit,
+  Radar,
+  ShieldAlert,
+  ShieldCheck,
+} from 'lucide-react';
+import { motion } from 'motion/react';
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, useLocation, useOutlet } from 'react-router-dom';
+import { useAuth } from '../auth/AuthProvider';
+import { BlueHat } from './BlueHat';
+import { BrandMark } from './BrandMark';
 import { ConnectionPill } from './ConnectionPill';
 import { Dot } from './primitives';
 import { USE_FIXTURES } from '../api/config';
 import { SENSOR_LABEL } from '../copy';
 import { relativeFromNow } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
-import { SENSOR_IDS } from '../types/api';
+import { SENSOR_IDS, type Health } from '../types/api';
 
 /**
  * LIVE / REPLAY / FIXTURES, on every screen (PRD section 8).
@@ -67,11 +80,32 @@ function UtcClock() {
   );
 }
 
+export type SensorTone = 'ok' | 'warn' | 'danger' | 'neutral';
+
+/** Health of one sensor from GET /api/health, shared by the sidebar and the Sensors page. */
+export function sensorState(
+  health: Health | null,
+  sensorId: string,
+  now: Date,
+): { tone: SensorTone; text: string; lastSeen: string | null } {
+  if (health === null) return { tone: 'danger', text: 'unreachable', lastSeen: null };
+  const lastSeen = health.sensors[sensorId] ?? null;
+  if (lastSeen === null) return { tone: 'neutral', text: 'no events yet', lastSeen };
+  const ageSeconds = Math.max(0, (now.getTime() - new Date(lastSeen).getTime()) / 1000);
+  const tone = ageSeconds < 60 ? 'ok' : ageSeconds < 300 ? 'warn' : 'neutral';
+  return {
+    tone,
+    text: `${tone === 'warn' ? 'stale · ' : ''}${relativeFromNow(lastSeen, now)}`,
+    lastSeen,
+  };
+}
+
 /**
  * The cheapest insurance in the build: when the demo misbehaves this says
- * instantly whether the problem is the decoy, the backend or the UI.
+ * instantly whether the problem is the decoy, the backend or the UI. In the
+ * sidebar it is one dot per sensor on the Sensors nav item.
  */
-function SensorHealthStrip() {
+function SensorDots() {
   const { health } = useLiveStore();
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -80,65 +114,97 @@ function SensorHealthStrip() {
   }, []);
 
   return (
-    <>
-      <div className="sidebar__divider" />
-      <div className="sidebar__section">
-        <span className="label">Sensors</span>
-      </div>
+    <span className="navitem__dots">
       {SENSOR_IDS.map((sensorId) => {
-        if (health === null) {
-          return (
-            <div className="sensorrow" key={sensorId}>
-              <Dot tone="danger" />
-              <span className="sensorrow__name">{sensorId}</span>
-              <span className="sensorrow__when">unreachable</span>
-            </div>
-          );
-        }
-
-        const lastSeen = health.sensors[sensorId] ?? null;
-        if (lastSeen === null) {
-          return (
-            <div className="sensorrow" key={sensorId}>
-              <Dot tone="neutral" />
-              <span className="sensorrow__name">{sensorId}</span>
-              <span className="sensorrow__when">no events yet</span>
-            </div>
-          );
-        }
-
-        const ageSeconds = Math.max(0, (now.getTime() - new Date(lastSeen).getTime()) / 1000);
-        const tone = ageSeconds < 60 ? 'ok' : ageSeconds < 300 ? 'warn' : 'neutral';
+        const state = sensorState(health, sensorId, now);
         return (
-          <div className="sensorrow" key={sensorId} title={SENSOR_LABEL[sensorId] ?? sensorId}>
-            <Dot tone={tone} />
-            <span className="sensorrow__name">{sensorId}</span>
-            <span className="sensorrow__when">
-              {tone === 'warn' ? 'stale · ' : ''}
-              {relativeFromNow(lastSeen, now)}
-            </span>
-          </div>
+          <span key={sensorId} title={`${SENSOR_LABEL[sensorId] ?? sensorId}: ${state.text}`}>
+            <Dot tone={state.tone} />
+          </span>
         );
       })}
-    </>
+    </span>
   );
 }
 
 const NAV = [
-  { to: '/', label: 'Overview', end: true },
-  { to: '/events', label: 'Live Feed', end: false },
-  { to: '/incidents', label: 'Incidents', end: false },
-  { to: '/graph', label: 'ChakraView', end: false },
-  { to: '/response', label: 'Response', end: false },
+  { to: '/', label: 'Overview', end: true, icon: LayoutGrid },
+  { to: '/events', label: 'Live Feed', end: false, icon: Activity },
+  { to: '/incidents', label: 'Incidents', end: false, icon: ShieldAlert },
+  { to: '/graph', label: 'ChakraView', end: false, icon: Orbit },
+  { to: '/response', label: 'Response', end: false, icon: ShieldCheck },
+  { to: '/sensors', label: 'Sensors', end: false, icon: Radar },
 ] as const;
+
+/** Enter animation per section; query-string changes do not replay it. */
+function AnimatedOutlet() {
+  const location = useLocation();
+  const outlet = useOutlet();
+  const section = location.pathname.split('/')[1] ?? '';
+  return (
+    <motion.div
+      key={section}
+      className="main__page"
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+    >
+      {outlet}
+    </motion.div>
+  );
+}
 
 export function Shell() {
   const { labRunId, receivedCount } = useLiveStore();
+  const { user, signOut } = useAuth();
 
   return (
     <div className="shell">
+      <nav className="sidebar" aria-label="Console">
+        <div className="sidebar__brand">
+          <BrandMark to="/" />
+        </div>
+
+        <div className="sidebar__nav">
+          {NAV.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => (isActive ? 'navitem navitem--active' : 'navitem')}
+            >
+              <item.icon className="navitem__icon" size={18} strokeWidth={1.9} />
+              <span>{item.label}</span>
+              {item.to === '/events' && receivedCount > 0 ? (
+                <span className="navitem__count">{receivedCount}</span>
+              ) : null}
+              {item.to === '/sensors' ? <SensorDots /> : null}
+            </NavLink>
+          ))}
+        </div>
+
+        <div className="sidebar__team">
+          <BlueHat className="bluehat--side" spin={0.5} />
+          <div className="sidebar__who">
+            <span className="sidebar__team-title">Blue team</span>
+            <span className="sidebar__team-user" title={user?.email}>
+              {user?.name ?? 'analyst'}
+              {user?.provider === 'dev' ? ' · dev' : ''}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="iconbtn"
+            title="Sign out"
+            aria-label="Sign out"
+            onClick={() => void signOut()}
+          >
+            <LogOut size={16} />
+          </button>
+        </div>
+      </nav>
+
       <header className="topbar">
-        <span className="topbar__brand">DeceptionGraph SOC</span>
         <CaptureChip />
         <span className="topbar__spacer" />
         {labRunId ? (
@@ -150,25 +216,8 @@ export function Shell() {
         <UtcClock />
       </header>
 
-      <nav className="sidebar">
-        {NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) => (isActive ? 'navitem navitem--active' : 'navitem')}
-          >
-            {item.label}
-            {item.to === '/events' && receivedCount > 0 ? (
-              <span className="navitem__count">{receivedCount}</span>
-            ) : null}
-          </NavLink>
-        ))}
-        <SensorHealthStrip />
-      </nav>
-
       <main className="main">
-        <Outlet />
+        <AnimatedOutlet />
       </main>
     </div>
   );

@@ -4,9 +4,16 @@
  * (DESIGN_SPEC.md law 1).
  */
 
-import { API_BASE, EVENTS_PAGE_LIMIT, USE_FIXTURES } from './config';
+import { API_BASE, EVENTS_PAGE_LIMIT } from './config';
 import { ApiError } from './error';
-import * as fixtures from './fixtures';
+
+/**
+ * The mock backend is loaded only in a fixture build. The flag is read from
+ * import.meta.env right here so the bundler can see it is false in a normal
+ * build and drop the mock and its demo events from the release bundle.
+ */
+const MOCK = import.meta.env['VITE_USE_FIXTURES'] === '1';
+const fixtures = () => import('./fixtures');
 import type {
   ApiErrorBody,
   EventsPage,
@@ -87,7 +94,7 @@ export interface EventsQuery {
 }
 
 export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
-  if (USE_FIXTURES) return fixtures.fetchEvents(query);
+  if (MOCK) return fixtures().then((mock) => mock.fetchEvents(query));
   const params = new URLSearchParams();
   if (query.incident_id) params.set('incident_id', query.incident_id);
   if (query.sensor_id) params.set('sensor_id', query.sensor_id);
@@ -97,17 +104,17 @@ export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
 }
 
 export function fetchHealth(): Promise<Health> {
-  if (USE_FIXTURES) return fixtures.fetchHealth();
+  if (MOCK) return fixtures().then((mock) => mock.fetchHealth());
   return get<Health>('/api/health');
 }
 
 export function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
-  if (USE_FIXTURES) return fixtures.fetchIncidents();
+  if (MOCK) return fixtures().then((mock) => mock.fetchIncidents());
   return get<{ items: IncidentSummary[] }>('/api/incidents');
 }
 
 export function fetchIncident(incidentId: string): Promise<Incident> {
-  if (USE_FIXTURES) return fixtures.fetchIncident(incidentId);
+  if (MOCK) return fixtures().then((mock) => mock.fetchIncident(incidentId));
   return get<Incident>(`/api/incidents/${encodeURIComponent(incidentId)}`);
 }
 
@@ -121,7 +128,7 @@ export function postLinkDecision(
   decision: 'confirm' | 'reject',
   rationale: string,
 ): Promise<Link> {
-  if (USE_FIXTURES) return fixtures.postLinkDecision(linkId, decision, rationale);
+  if (MOCK) return fixtures().then((mock) => mock.postLinkDecision(linkId, decision, rationale));
   return post<Link>(`/api/links/${encodeURIComponent(linkId)}/decision`, { decision, rationale });
 }
 
@@ -131,7 +138,7 @@ export function incidentExportUrl(incidentId: string): string {
 }
 
 export function fetchTranscript(incidentId: string, sessionId: string): Promise<Transcript> {
-  if (USE_FIXTURES) return fixtures.fetchTranscript(sessionId);
+  if (MOCK) return fixtures().then((mock) => mock.fetchTranscript(sessionId));
   const params = new URLSearchParams({ session_id: sessionId });
   return get<Transcript>(
     `/api/incidents/${encodeURIComponent(incidentId)}/transcript?${params.toString()}`,
@@ -139,12 +146,12 @@ export function fetchTranscript(incidentId: string, sessionId: string): Promise<
 }
 
 export function fetchLinks(): Promise<{ items: Link[] }> {
-  if (USE_FIXTURES) return fixtures.fetchLinks();
+  if (MOCK) return fixtures().then((mock) => mock.fetchLinks());
   return get<{ items: Link[] }>('/api/links');
 }
 
 export function fetchOverview(): Promise<StatsOverview> {
-  if (USE_FIXTURES) return fixtures.fetchOverview();
+  if (MOCK) return fixtures().then((mock) => mock.fetchOverview());
   return get<StatsOverview>('/api/stats/overview');
 }
 
@@ -155,13 +162,13 @@ export function fetchOverview(): Promise<StatsOverview> {
  */
 
 export function fetchActions(): Promise<{ items: ResponseAction[] }> {
-  if (USE_FIXTURES) return fixtures.fetchActions();
+  if (MOCK) return fixtures().then((mock) => mock.fetchActions());
   return get<{ items: ResponseAction[] }>('/api/response/actions');
 }
 
 /** Preview expires after 60s. Read every value back from the RESPONSE. */
 export function postBlockPreview(incidentId: string, ttlSeconds = 120): Promise<BlockPreview> {
-  if (USE_FIXTURES) return fixtures.postBlockPreview(incidentId, ttlSeconds);
+  if (MOCK) return fixtures().then((mock) => mock.postBlockPreview(incidentId, ttlSeconds));
   return post<BlockPreview>('/api/response/preview', {
     incident_id: incidentId,
     ttl_seconds: ttlSeconds,
@@ -169,7 +176,7 @@ export function postBlockPreview(incidentId: string, ttlSeconds = 120): Promise<
 }
 
 export function postBlockApply(previewId: string, reason: string): Promise<ResponseAction> {
-  if (USE_FIXTURES) return fixtures.postBlockApply(previewId, reason);
+  if (MOCK) return fixtures().then((mock) => mock.postBlockApply(previewId, reason));
   return post<ResponseAction>('/api/response/apply', {
     preview_id: previewId,
     reason,
@@ -178,6 +185,6 @@ export function postBlockApply(previewId: string, reason: string): Promise<Respo
 }
 
 export function postBlockRevoke(actionId: string): Promise<ResponseAction> {
-  if (USE_FIXTURES) return fixtures.postBlockRevoke(actionId);
+  if (MOCK) return fixtures().then((mock) => mock.postBlockRevoke(actionId));
   return post<ResponseAction>(`/api/response/${encodeURIComponent(actionId)}/revoke`, {});
 }

@@ -1,0 +1,458 @@
+/* ChakraView 3D: stage, overlays, in-scene labels and the timeline. */
+
+.chakra {
+  overflow: hidden;
+  border-radius: 18px;
+  /* Inside ChakraView "reached" is white, as in the 3D scene; green stays for live. */
+  --accent: #f4f4f2;
+  --accent-weak: rgba(244, 244, 242, 0.1);
+}
+
+.chakra .timeline__mode--live {
+  color: var(--neon);
+}
+
+.chakra--3d .chakra__wheel {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.c3stage {
+  position: relative;
+  height: clamp(460px, calc(100vh - 300px), 760px);
+  background: #070707;
+  overflow: hidden;
+}
+
+.c3stage canvas {
+  display: block;
+}
+
+.c3stage__fallback {
+  display: grid;
+  place-items: center;
+  gap: 12px;
+  height: 100%;
+  color: var(--text-secondary);
+}
+
+.chakra3d__loading {
+  padding: 48px;
+  color: var(--text-secondary);
+}
+
+/* ---------- overlays ---------- */
+
+.c3hud {
+  position: absolute;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.c3hud > * {
+  pointer-events: auto;
+}
+
+.c3hud--stats {
+  top: 18px;
+  left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.c3hud__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.c3hud__value {
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+
+.c3hud__sub {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.c3hud--controls {
+  top: 16px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.c3hud--controls .segmented {
+  background: rgba(10, 10, 10, 0.8);
+  backdrop-filter: blur(6px);
+}
+
+.c3hud--controls .segmented__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+}
+
+.c3hud--controls .iconbtn {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  background: rgba(10, 10, 10, 0.8);
+}
+
+.iconbtn--on {
+  color: var(--neon);
+}
+
+.c3hud--hint {
+  bottom: 14px;
+  left: 20px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.segmented__btn--active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ---------- labels drawn in the scene ---------- */
+
+.c3ring {
+  padding: 2px 8px;
+  border-radius: var(--r-pill);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #4a4a48;
+  white-space: nowrap;
+  user-select: none;
+  transition: color 0.4s;
+}
+
+.c3ring--reached {
+  color: #bdbdb9;
+}
+
+.c3sector {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.c3label {
+  position: absolute;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 9px 5px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(7, 7, 7, 0.72);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    opacity 0.4s;
+}
+
+.c3label--right {
+  left: 14px;
+  transform: translateY(-50%);
+}
+
+.c3label--left {
+  right: 14px;
+  transform: translateY(-50%);
+}
+
+.c3label--below {
+  left: 0;
+  top: 22px;
+  transform: translateX(-50%);
+  align-items: center;
+}
+
+.c3label--above {
+  left: 0;
+  top: -22px;
+  transform: translate(-50%, -100%);
+  align-items: center;
+}
+
+.c3label--untouched {
+  background: transparent;
+}
+
+.c3label:hover,
+.c3label--selected {
+  border-color: var(--border-strong);
+  background: rgba(20, 20, 20, 0.92);
+}
+
+.c3label__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.c3label__n {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #f4f4f2;
+  color: #050505;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.c3label__sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.c3label--untouched {
+  opacity: 0.55;
+}
+
+.c3label--untouched .c3label__name {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.c3label--flagged .c3label__n {
+  background: var(--sev-critical);
+  color: #fff;
+}
+
+.c3label--flagged .c3label__sub {
+  color: var(--sev-critical-text);
+  font-weight: 600;
+}
+
+.c3chord {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 10px;
+  border: 1px dashed var(--pending);
+  background: rgba(14, 10, 24, 0.88);
+  color: #d9ccff;
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.2s var(--ease-out);
+}
+
+.c3chord span {
+  font-family: var(--font-ui);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.c3chord:hover,
+.c3chord--selected {
+  transform: scale(1.06);
+}
+
+.c3chord--confirmed {
+  border-style: solid;
+  border-color: #fff;
+  background: rgba(20, 20, 20, 0.92);
+  color: #fff;
+}
+
+.c3chord--rejected {
+  border-color: #444;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.c3block {
+  padding: 4px 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--sev-low);
+  background: rgba(76, 158, 255, 0.14);
+  color: var(--sev-low-text);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ---------- timeline ---------- */
+
+.timeline {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: #0a0a0a;
+}
+
+.timeline__play {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: #f4f4f2;
+  color: #050505;
+  cursor: pointer;
+  transition:
+    transform 0.15s var(--ease-out),
+    box-shadow 0.2s;
+}
+
+.timeline__play:hover {
+  transform: scale(1.06);
+  box-shadow: var(--neon-glow);
+}
+
+.timeline__track {
+  position: relative;
+  flex: 1;
+  height: 34px;
+  min-width: 120px;
+}
+
+.timeline__ticks {
+  position: absolute;
+  inset: 0;
+}
+
+.timeline__tick {
+  position: absolute;
+  top: 6px;
+  width: 2px;
+  height: 22px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: #2e2e2e;
+  transition: background 0.2s;
+}
+
+.timeline__tick--past {
+  background: #9a9a96;
+}
+.timeline__tick--past.timeline__tick--danger {
+  background: var(--danger);
+}
+.timeline__tick--past.timeline__tick--warn {
+  background: var(--warn);
+}
+.timeline__tick--past.timeline__tick--ok {
+  background: var(--ok);
+}
+
+.timeline__fill {
+  position: absolute;
+  left: 0;
+  top: 16px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon));
+  pointer-events: none;
+}
+
+.timeline__range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.timeline__range::-webkit-slider-runnable-track {
+  height: 34px;
+  background: transparent;
+}
+
+.timeline__range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 34px;
+  border-radius: 2px;
+  background: var(--neon);
+  box-shadow: 0 0 12px var(--neon);
+}
+
+.timeline__range::-moz-range-thumb {
+  width: 4px;
+  height: 34px;
+  border: none;
+  border-radius: 2px;
+  background: var(--neon);
+}
+
+.timeline__readout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 132px;
+}
+
+.timeline__mode {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pending);
+}
+
+.timeline__mode--live {
+  color: var(--neon);
+}
+
+.timeline__time {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.timeline__count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.timeline__live {
+  flex: none;
+}
+
+.chakra--3d .chakra__legend {
+  padding: 12px 20px 16px;
+}

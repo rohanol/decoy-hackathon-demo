@@ -109,3 +109,29 @@ export const COPY = {
   fixturesWarning:
     'Fixture data from contracts/examples/events_p3.json. Not a live capture.',
 } as const;
+
+/** Short rule names for analytics. Mirrors the docstrings in backend/rules/. */
+export const RULE_NAME: Record<string, string> = {
+  R01: 'SSH password guessing',
+  R02: 'Commands after login',
+  R03: 'Discovery commands',
+  R04: 'Synthetic file served',
+  R05: 'Confirmed cross-decoy link',
+  R07: 'Web attack attempt',
+  R08: 'Hidden-path scanning',
+  R09: 'Honeytoken reuse',
+};
+
+/**
+ * Landing punchline options. The part in `highlight` is drawn in neon green.
+ * Pick with LANDING_PUNCHLINE, or preview any of them with /welcome?p=2.
+ */
+export const PUNCHLINES = [
+  { lead: 'Nothing here is real.', highlight: 'Except the evidence.' },
+  { lead: 'The attacker sees a network.', highlight: 'You see the attacker.' },
+  { lead: 'Let them in.', highlight: 'Watch every move.' },
+  { lead: 'Bait the breach.', highlight: 'Read the intent.' },
+  { lead: 'Every touch is', highlight: 'a signal.' },
+] as const;
+
+export const LANDING_PUNCHLINE = 0;

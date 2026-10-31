@@ -9,8 +9,11 @@
  * In fixture mode this transparently drives the fake socket instead.
  */
 
-import { USE_FIXTURES, wsUrl } from './config';
-import { openFixtureSocket, type FixtureSocket } from './fixtures';
+import { wsUrl } from './config';
+import type { FixtureSocket } from './fixtures';
+
+/** See client.ts: read here so a normal build drops the fake socket. */
+const MOCK = import.meta.env['VITE_USE_FIXTURES'] === '1';
 import type { WsMessage } from '../types/api';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline';
@@ -50,17 +53,22 @@ function isWsMessage(value: unknown): value is WsMessage {
 }
 
 export function createEventStream(handlers: EventStreamHandlers): EventStream {
-  if (USE_FIXTURES) {
+  if (MOCK) {
     let socket: FixtureSocket | null = null;
     // Defer so the caller's snapshot load lands before the first streamed event.
+    let closed = false;
     const start = setTimeout(() => {
-      socket = openFixtureSocket(handlers.onMessage);
-      handlers.onStatus({ state: 'live', attempt: 0 });
-      handlers.onConnected();
+      void import('./fixtures').then(({ openFixtureSocket }) => {
+        if (closed) return;
+        socket = openFixtureSocket(handlers.onMessage);
+        handlers.onStatus({ state: 'live', attempt: 0 });
+        handlers.onConnected();
+      });
     }, 300);
 
     return {
       close: () => {
+        closed = true;
         clearTimeout(start);
         socket?.close();
       },

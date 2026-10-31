@@ -16,7 +16,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApiError, fetchActions, postBlockRevoke } from '../api/client';
 import { ActionCard, ActionStatusPill } from '../components/ActionCard';
-import { Card, EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
+import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
+
+/** The block flow, in the order the analyst walks it. Mirrors BlockFlowModal. */
+const STEPS = [
+  { title: 'Preview', text: 'See exactly what would be blocked, and for how long.' },
+  { title: 'Approve', text: 'Write a reason and acknowledge the scope.' },
+  { title: 'Applied', text: 'The web decoy starts refusing this source.' },
+  { title: 'Verified', text: 'A refused request proves the block is working.' },
+];
 import { timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import type { ResponseAction } from '../types/api';
@@ -92,7 +100,7 @@ export function ResponseCenter() {
   return (
     <div className="page">
       <div className="page__head">
-        <h1 className="page__title">Response Center</h1>
+        <h1 className="page__title">Response</h1>
         <span className="page__head-spacer" />
         {active.length > 0 ? (
           <span className="pill pill--warn">
@@ -100,6 +108,16 @@ export function ResponseCenter() {
           </span>
         ) : null}
       </div>
+
+      <ol className="rsteps">
+        {STEPS.map((step, index) => (
+          <li key={step.title} className="rstep">
+            <span className="rstep__n">{index + 1}</span>
+            <span className="rstep__title">{step.title}</span>
+            <span className="rstep__text">{step.text}</span>
+          </li>
+        ))}
+      </ol>
 
       {loading && actions.length === 0 && !error ? (
         <section className="card">
@@ -131,8 +149,12 @@ export function ResponseCenter() {
         <ErrorCard error={error} onRetry={() => void load()} />
       ) : (
         <>
-          <Card title={`Active (${active.length})`}>
-            <div className="card__body">
+          <section className="panel">
+            <header className="panel__head">
+              <h2 className="panel__title">Active blocks</h2>
+              <span className="panel__count">{active.length}</span>
+            </header>
+            <div>
               {active.length === 0 ? (
                 <EmptyState
                   title="No block applied."
@@ -152,11 +174,15 @@ export function ResponseCenter() {
                 </div>
               )}
             </div>
-          </Card>
+          </section>
 
           <div style={{ marginTop: 'var(--s4)' }}>
-            <Card title={`History (${history.length})`}>
-              <div className="card__body">
+            <section className="panel">
+              <header className="panel__head">
+                <h2 className="panel__title">History</h2>
+                <span className="panel__count">{history.length}</span>
+              </header>
+              <div>
                 {history.length === 0 ? (
                   <p className="state__hint" style={{ textAlign: 'left' }}>
                     Finished actions appear here when a block expires or is undone.
@@ -188,7 +214,7 @@ export function ResponseCenter() {
                   </table>
                 )}
               </div>
-            </Card>
+            </section>
           </div>
 
           <p className="graph__note">

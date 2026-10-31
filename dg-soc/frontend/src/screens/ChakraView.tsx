@@ -23,8 +23,13 @@
  * Inline SVG, no library, deterministic layout, and nothing ever spins.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Eye, Layers, RefreshCw } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import type { CameraView } from '../chakra/Chakra3D';
+import { Timeline } from '../chakra/Timeline';
+import { ErrorBoundary, webglAvailable } from '../components/ErrorBoundary';
 import {
   ApiError,
   fetchActions,
@@ -73,6 +78,15 @@ const GATE_LABEL_GAP = 44;
 const ACTIONS_POLL_MS = 2000;
 /** Slower while the response router is not installed, so it is noticed when it lands. */
 const ACTIONS_POLL_UNAVAILABLE_MS = 10_000;
+
+// three.js is heavy; the 3D scene loads only when ChakraView is opened.
+const Chakra3D = lazy(() => import('../chakra/Chakra3D'));
+
+const CAMERA_VIEWS: { id: CameraView; label: string; icon: typeof Box }[] = [
+  { id: 'orbit', label: 'Orbit', icon: Box },
+  { id: 'top', label: 'Top', icon: Eye },
+  { id: 'side', label: 'Depth', icon: Layers },
+];
 
 function polar(radius: number, degrees: number): [number, number] {
   const radians = (degrees * Math.PI) / 180;
@@ -1117,6 +1131,53 @@ export function ChakraView() {
     [events, detail, loadedFor, selectedId, actions, incident],
   );
 
+  // 3D by default; the original 2D wheel stays one click away, and is the only
+  // view when the browser has no WebGL.
+  const canRender3d = useMemo(() => webglAvailable(), []);
+  const [mode, setMode] = useState<'3d' | '2d'>(() => (canRender3d ? '3d' : '2d'));
+  const [cameraView, setCameraView] = useState<CameraView>('orbit');
+  const [autoRotate, setAutoRotate] = useState(true);
+
+  // The fourth dimension: a time cursor over this incident's events (null = live).
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    setCursor(null);
+    setPlaying(false);
+  }, [selectedId]);
+
+  const incidentEvents = useMemo(
+    () => (loadedFor === selectedId ? events : []),
+    [events, loadedFor, selectedId],
+  );
+
+  /**
+   * The wheel as it stood at the cursor: only events that had occurred, only
+   * findings whose evidence had all occurred, only links whose two events had.
+   * Blocks are shown live only. Same buildWheel, same rules, less input.
+   */
+  const shown = useMemo(() => {
+    if (cursor === null) return model;
+    const visible = incidentEvents.filter((event) => Date.parse(event.occurred_at) <= cursor);
+    const ids = new Set(visible.map((event) => event.event_id));
+    return buildWheel({
+      events: visible,
+      findings: (detail?.findings ?? []).filter((finding) =>
+        finding.evidence_event_ids.every((id) => ids.has(id)),
+      ),
+      links: (detail?.links ?? []).filter(
+        (link) => ids.has(link.from_event_id) && ids.has(link.to_event_id),
+      ),
+      actions: [],
+      srcIp: incident?.src_ip ?? null,
+    });
+  }, [cursor, model, incidentEvents, detail, incident]);
+
+  const sortedEvents = useMemo(
+    () => [...incidentEvents].sort((a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at)),
+    [incidentEvents],
+  );
+
   // Ignite only lures reached while the screen is open. On the first load of an
   // incident everything already reached is simply shown lit: replaying history
   // as fireworks would be decoration.
@@ -1157,20 +1218,21 @@ export function ChakraView() {
   // A bait lure pulses while its token's link waits for the analyst.
   const awaitingLures = useMemo(() => {
     const out = new Set<LureId>();
-    for (const chord of model.chords) {
+    for (const chord of shown.chords) {
       if (chord.link.status === 'open' && chord.token) out.add(chord.token.plantedAt);
     }
     return out;
-  }, [model]);
+  }, [shown]);
 
   const eventsById = useMemo(() => new Map(events.map((event) => [event.event_id, event])), [events]);
   const openLinks = model.chords.filter((chord) => chord.link.status === 'open').length;
 
-  const selectedLure = selection?.kind === 'lure' ? model.lures.get(selection.id) : undefined;
+  const selectedLure = selection?.kind === 'lure' ? shown.lures.get(selection.id) : undefined;
   const selectedChord =
     selection?.kind === 'chord'
-      ? model.chords.find((chord) => chord.link.link_id === selection.linkId)
+      ? shown.chords.find((chord) => chord.link.link_id === selection.linkId)
       : undefined;
+  const deepest = shown.depth ? RINGS.find((ring) => ring.id === shown.depth) : undefined;
 
   return (
     <div className="page">
@@ -1182,6 +1244,21 @@ export function ChakraView() {
           <span className="pill pill--pending">
             {openLinks} link{openLinks === 1 ? '' : 's'} awaiting decision
           </span>
+        ) : null}
+        {canRender3d ? (
+          <div className="segmented" role="group" aria-label="Dimensions">
+            {(['3d', '2d'] as const).map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={mode === item ? 'segmented__btn segmented__btn--active' : 'segmented__btn'}
+                aria-pressed={mode === item}
+                onClick={() => setMode(item)}
+              >
+                {item.toUpperCase()}
+              </button>
+            ))}
+          </div>
         ) : null}
         <GraphViewToggle current="chakra" />
       </div>
@@ -1220,16 +1297,105 @@ export function ChakraView() {
         />
       ) : null}
 
-      <section className="card chakra">
+      <section className={mode === '3d' ? 'card chakra chakra--3d' : 'card chakra'}>
         <div className="chakra__wheel">
-          <Wheel
-            model={model}
-            selection={selection}
-            ignites={ignites}
-            comets={!reducedMotion}
-            awaitingLures={awaitingLures}
-            onSelect={setSelection}
+          {mode === '3d' ? (
+            <div className="c3stage">
+              <ErrorBoundary
+                fallback={
+                  <div className="c3stage__fallback">
+                    The 3D view could not start on this browser.{' '}
+                    <button type="button" className="btn" onClick={() => setMode('2d')}>
+                      Use the 2D wheel
+                    </button>
+                  </div>
+                }
+              >
+                <Suspense fallback={<div className="c3stage__fallback">Building the scene…</div>}>
+                  <Chakra3D
+                    model={shown}
+                    selection={selection}
+                    awaitingLures={awaitingLures}
+                    view={cameraView}
+                    autoRotate={autoRotate && !reducedMotion}
+                    animate={!reducedMotion}
+                    onSelect={setSelection}
+                  />
+                </Suspense>
+              </ErrorBoundary>
+
+              <div className="c3hud c3hud--stats" aria-live="polite">
+                <span className="c3hud__label">Deepest ring reached</span>
+                <AnimatePresence mode="popLayout" initial={false}>
+                  <motion.span
+                    key={deepest?.id ?? 'none'}
+                    className="c3hud__value"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.25 }}
+                  >
+                    {deepest ? deepest.label : 'None yet'}
+                  </motion.span>
+                </AnimatePresence>
+                <span className="c3hud__sub">
+                  {shown.touchedCount} of {shown.total} lures reached
+                </span>
+              </div>
+
+              <div className="c3hud c3hud--controls">
+                <div className="segmented" role="group" aria-label="Camera">
+                  {CAMERA_VIEWS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={
+                        cameraView === item.id
+                          ? 'segmented__btn segmented__btn--active'
+                          : 'segmented__btn'
+                      }
+                      aria-pressed={cameraView === item.id}
+                      onClick={() => {
+                        setSelection(null);
+                        setCameraView(item.id);
+                      }}
+                    >
+                      <item.icon size={14} /> {item.label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className={autoRotate ? 'iconbtn iconbtn--on' : 'iconbtn'}
+                  title={autoRotate ? 'Stop rotating' : 'Rotate slowly'}
+                  aria-pressed={autoRotate}
+                  onClick={() => setAutoRotate((on) => !on)}
+                >
+                  <RefreshCw size={15} />
+                </button>
+              </div>
+
+              <div className="c3hud c3hud--hint">Drag to orbit · scroll to zoom · click a lure</div>
+            </div>
+          ) : (
+            <Wheel
+              model={shown}
+              selection={selection}
+              ignites={ignites}
+              comets={!reducedMotion}
+              awaitingLures={awaitingLures}
+              onSelect={setSelection}
+            />
+          )}
+
+          <Timeline
+            events={sortedEvents}
+            cursor={cursor}
+            playing={playing}
+            onCursor={setCursor}
+            onPlaying={setPlaying}
           />
+
           <div className="legend chakra__legend">
             <span className="legend__item">
               <span className="clegend clegend--untouched" /> not reached
@@ -1253,22 +1419,42 @@ export function ChakraView() {
         </div>
 
         <aside className="chakra__panel" aria-live="polite">
-          {selectedLure ? (
-            <LurePanel view={selectedLure} incidentId={selectedId} onBack={() => setSelection(null)} />
-          ) : selectedChord ? (
-            <ChordPanel
-              chord={selectedChord}
-              onBack={() => setSelection(null)}
-              onDecide={() => setDeciding(selectedChord.link)}
-            />
-          ) : (
-            <SummaryPanel
-              model={model}
-              incident={incident}
-              actionsUnavailable={actionsUnavailable}
-              onSelect={setSelection}
-            />
-          )}
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={
+                selectedLure
+                  ? `lure-${selectedLure.lure.id}`
+                  : selectedChord
+                    ? `chord-${selectedChord.link.link_id}`
+                    : 'summary'
+              }
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -10 }}
+              transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {selectedLure ? (
+                <LurePanel
+                  view={selectedLure}
+                  incidentId={selectedId}
+                  onBack={() => setSelection(null)}
+                />
+              ) : selectedChord ? (
+                <ChordPanel
+                  chord={selectedChord}
+                  onBack={() => setSelection(null)}
+                  onDecide={() => setDeciding(selectedChord.link)}
+                />
+              ) : (
+                <SummaryPanel
+                  model={shown}
+                  incident={incident}
+                  actionsUnavailable={actionsUnavailable}
+                  onSelect={setSelection}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
         </aside>
       </section>
 

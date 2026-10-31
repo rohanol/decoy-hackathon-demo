@@ -1,0 +1,437 @@
+/* Live feed and the centred event dialog. Loaded after theme.css. */
+
+/* ---------- live feed ---------- */
+
+.feedstate {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.spotlight-wrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.spotlight {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  padding: 18px 22px 18px 26px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-strong);
+  background: linear-gradient(100deg, #101410 0%, var(--bg-surface) 55%);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.spotlight:hover {
+  border-color: #3d3d3d;
+}
+
+/* A thin bar on the left carries the event tone. */
+.spotlight::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--text-primary);
+}
+.spotlight--warn::before {
+  background: var(--warn);
+}
+.spotlight--danger::before {
+  background: var(--danger);
+}
+.spotlight--ok::before {
+  background: var(--ok);
+}
+.spotlight--muted::before,
+.spotlight--secondary::before {
+  background: var(--text-muted);
+}
+
+/* One light sweep across the card when a new event lands. */
+.spotlight__sweep {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(57, 255, 136, 0.12) 50%, transparent 70%);
+  transform: translateX(-100%);
+  animation: sweep 1.1s var(--ease-out) 0.1s forwards;
+  pointer-events: none;
+}
+
+@keyframes sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+.spotlight__kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.spotlight__row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.spotlight__glyph {
+  font-size: 20px;
+}
+.spotlight__glyph.evtype--warn {
+  color: var(--warn);
+}
+.spotlight__glyph.evtype--danger {
+  color: var(--danger);
+}
+.spotlight__glyph.evtype--ok {
+  color: var(--ok);
+}
+.spotlight__glyph.evtype--secondary,
+.spotlight__glyph.evtype--muted {
+  color: var(--text-secondary);
+}
+
+.spotlight__type {
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.spotlight__ip {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.spotlight__sensor {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.spotlight__detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: var(--text-primary);
+}
+
+.spotlight__detail:empty {
+  display: none;
+}
+
+.spotlight__desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.spotlight__id {
+  position: absolute;
+  top: 18px;
+  right: 22px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.toolbar {
+  margin-bottom: 12px;
+}
+
+.feedcard {
+  overflow: hidden;
+}
+
+.feed thead th {
+  background: #0f0f0f;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.feed tbody tr {
+  transition: background 0.15s;
+}
+
+.feed tbody tr:hover {
+  background: var(--bg-raised);
+}
+
+.feed tbody tr.is-selected {
+  background: #161a17;
+  box-shadow: inset 3px 0 0 var(--text-primary);
+}
+
+.cell-time,
+.cell-ip {
+  font-variant-numeric: tabular-nums;
+}
+
+.cell-ip {
+  font-weight: 600;
+}
+
+/* A live arrival glows in and settles over four seconds. */
+.feed tbody tr.row--new {
+  animation: row-arrive 4s var(--ease-out);
+}
+
+@keyframes row-arrive {
+  0% {
+    background: rgba(57, 255, 136, 0.2);
+    box-shadow: inset 4px 0 0 var(--neon);
+  }
+  25% {
+    background: rgba(57, 255, 136, 0.08);
+    box-shadow: inset 4px 0 0 var(--neon);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 4px 0 0 transparent;
+  }
+}
+
+.feed tbody tr.row--new.row--danger {
+  animation-name: row-arrive-danger;
+}
+
+@keyframes row-arrive-danger {
+  0% {
+    background: rgba(255, 45, 106, 0.2);
+    box-shadow: inset 4px 0 0 var(--danger);
+  }
+  25% {
+    background: rgba(255, 45, 106, 0.08);
+    box-shadow: inset 4px 0 0 var(--danger);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 4px 0 0 transparent;
+  }
+}
+
+.newtag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  background: var(--neon);
+  color: #050505;
+  font-family: var(--font-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  animation: newtag-out 9s forwards;
+}
+
+@keyframes newtag-out {
+  0%,
+  80% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+.newpill {
+  position: fixed;
+  top: calc(var(--topbar-h) + 14px);
+  left: calc(var(--sidebar-w) + (100vw - var(--sidebar-w)) / 2);
+  translate: -50% 0;
+  z-index: 30;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--r-pill);
+  background: var(--neon);
+  color: #050505;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 30px rgba(57, 255, 136, 0.3);
+  cursor: pointer;
+}
+
+/* ---------- event dialog (centred, no transition) ---------- */
+
+.evmodal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.72);
+}
+
+.evmodal {
+  display: flex;
+  flex-direction: column;
+  width: min(780px, 100%);
+  max-height: min(86vh, 900px);
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: #0e0e0e;
+  box-shadow: var(--shadow-modal);
+  overflow: hidden;
+}
+
+.evmodal__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 24px 24px 18px;
+}
+
+.evmodal__glyph {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--bg-raised);
+  font-size: 18px;
+  color: var(--text-primary);
+}
+.evmodal__glyph.evtype--warn {
+  color: var(--warn);
+}
+.evmodal__glyph.evtype--danger {
+  color: var(--danger);
+}
+.evmodal__glyph.evtype--ok {
+  color: var(--ok);
+}
+
+.evmodal__titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.evmodal__title {
+  margin: 0;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.evmodal__title::first-letter {
+  text-transform: uppercase;
+}
+
+.evmodal__desc {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.evmodal__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: #0a0a0a;
+}
+
+.evfact {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 24px;
+  min-width: 0;
+}
+
+.evfact + .evfact {
+  border-left: 1px solid var(--border);
+}
+
+.evfact__label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.evfact__value {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.evmodal__ip {
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
+
+.evmodal__sub {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.evmodal__body {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 22px 24px 26px;
+  overflow-y: auto;
+}
+
+.evmodal__section {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+}
+
+.evmodal__note {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.kv {
+  grid-template-columns: 160px 1fr;
+  gap: 10px 16px;
+}
+
+.kv__k {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.copybtn {
+  border-radius: var(--r-pill);
+}

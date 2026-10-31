@@ -1,59 +1,79 @@
 /*
  * Design tokens. See frontend/DESIGN_SPEC.md section 2.
  *
- * Fonts are SYSTEM STACKS ONLY. The demo laptop has no internet on the lab link
- * (AGENTS.md section 6), so a webfont from Google Fonts would silently fail and
- * fall back mid-demo. JetBrains Mono is listed first in the mono stack so it is
- * used when locally installed, but nothing depends on it.
+ * Theme: black, white and one neon green. Green is the brand and the "live"
+ * signal only: navigation, focus, the live dot, the landing punchline. Data
+ * (analytics, severity, reports) uses its own bright palette so it reads at a
+ * glance and is never confused with chrome.
+ *
+ * Fonts ship with the app (@fontsource, imported in main.tsx), so they work on
+ * the lab laptop with no internet (AGENTS.md section 6). The system stacks
+ * after them are only a safety net.
  */
 
 :root {
   /* surfaces */
-  --bg-base: #0b0f14;
-  --bg-surface: #111822;
-  --bg-raised: #1a232f;
-  --bg-inset: #080c11;
-  --border: #243040;
-  --border-strong: #33465c;
+  --bg-base: #050505;
+  --bg-surface: #0c0c0c;
+  --bg-raised: #151515;
+  --bg-hover: #1b1b1b;
+  --bg-inset: #000000;
+  --border: #1f1f1f;
+  --border-strong: #2f2f2f;
 
   /* text */
-  --text-primary: #e6edf3;
-  --text-secondary: #9ba9b7;
-  --text-muted: #6b7a8a;
+  --text-primary: #f4f4f2;
+  --text-secondary: #a6a6a3;
+  --text-muted: #6e6e6b;
 
-  /* accent */
-  --accent: #3da9fc;
-  --accent-weak: rgba(61, 169, 252, 0.12);
+  /* brand: neon green, used sparingly */
+  --neon: #39ff88;
+  --neon-dim: #1fae5c;
+  --neon-weak: rgba(57, 255, 136, 0.1);
+  --neon-glow: 0 0 18px rgba(57, 255, 136, 0.35);
 
-  /* severity */
-  --sev-low: #4a90a4;
-  --sev-low-fill: rgba(74, 144, 164, 0.12);
-  --sev-low-text: #7fc4d8;
-  --sev-medium: #d99a2b;
-  --sev-medium-fill: rgba(217, 154, 43, 0.12);
-  --sev-medium-text: #f0bc5e;
-  --sev-high: #e0703b;
-  --sev-high-fill: rgba(224, 112, 59, 0.12);
-  --sev-high-text: #ff9b6b;
-  --sev-critical: #d9394b;
-  --sev-critical-fill: rgba(217, 57, 75, 0.12);
-  --sev-critical-text: #ff8a96;
+  /* accent keeps its old name so existing screens follow the theme */
+  --accent: var(--neon);
+  --accent-weak: var(--neon-weak);
+
+  /* data: bright and bold, never green, for analytics and reports */
+  --data: #ececea;
+  --data-strong: #ffffff;
+  --data-fill: rgba(236, 236, 234, 0.1);
+  --blue-team: #3b82f6;
+
+  /* severity: validated on #0c0c0c (dataviz validator: CVD and normal-vision
+     separation pass); always shown with a text label, never colour alone */
+  --sev-low: #4c9eff;
+  --sev-low-fill: rgba(76, 158, 255, 0.14);
+  --sev-low-text: #8cc2ff;
+  --sev-medium: #f5d000;
+  --sev-medium-fill: rgba(245, 208, 0, 0.13);
+  --sev-medium-text: #ffe24d;
+  --sev-high: #ff8a00;
+  --sev-high-fill: rgba(255, 138, 0, 0.14);
+  --sev-high-text: #ffad4d;
+  --sev-critical: #ff2d6a;
+  --sev-critical-fill: rgba(255, 45, 106, 0.15);
+  --sev-critical-text: #ff7aa2;
 
   /* status */
-  --ok: #3dd68c;
-  --ok-fill: rgba(61, 214, 140, 0.12);
-  --warn: #d99a2b;
-  --warn-fill: rgba(217, 154, 43, 0.12);
-  --danger: #d9394b;
-  --danger-fill: rgba(217, 57, 75, 0.12);
-  --pending: #a78bfa;
-  --pending-fill: rgba(167, 139, 250, 0.12);
-  --neutral: #6b7a8a;
-  --neutral-fill: rgba(107, 122, 138, 0.12);
+  --ok: var(--neon);
+  --ok-fill: var(--neon-weak);
+  --warn: #f5d000;
+  --warn-fill: rgba(245, 208, 0, 0.13);
+  --danger: #ff2d6a;
+  --danger-fill: rgba(255, 45, 106, 0.14);
+  --pending: #b69cff;
+  --pending-fill: rgba(182, 156, 255, 0.14);
+  --neutral: #6e6e6b;
+  --neutral-fill: rgba(110, 110, 107, 0.14);
 
   /* type */
-  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --font-ui: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial,
+    sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo,
+    Consolas, monospace;
 
   /* spacing: 4px base */
   --s1: 4px;
@@ -65,13 +85,15 @@
   --s12: 48px;
 
   /* radius */
-  --r-sm: 4px;
-  --r-md: 8px;
-  --r-lg: 12px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
   --r-pill: 999px;
 
-  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 24px 80px rgba(0, 0, 0, 0.75);
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 
   --topbar-h: 56px;
-  --sidebar-w: 216px;
+  --sidebar-w: 236px;
 }

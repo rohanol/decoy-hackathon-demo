@@ -3,45 +3,50 @@
  *
  * This is the H4 gate: a real SSH event from Kali, visible here, with its event
  * ID (AGENTS.md section 5, M1_frontend.md task 1).
+ *
+ * Arrivals are meant to be noticed without taking the screen away from the
+ * analyst: the newest event takes the spotlight at the top, a new row glows in
+ * and fades over a few seconds, and if you have scrolled down a pill counts
+ * what arrived above you instead of moving the rows under your cursor.
  */
 
-import { useMemo, useState } from 'react';
+import { ArrowUp, Pause, Play } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, ErrorCard, SkeletonRows, AttackerText } from '../components/primitives';
 import { RawEventDrawer } from '../components/RawEventDrawer';
-import { COPY, EVENT_TYPE_LABEL } from '../copy';
+import { COPY, EVENT_TYPE_DESCRIPTION, EVENT_TYPE_LABEL, SENSOR_LABEL } from '../copy';
 import { FEED_MAX_ROWS } from '../api/config';
 import { EVENT_STYLE } from '../lib/eventStyle';
-import { bytes, clamp, number, timeUtc } from '../lib/format';
+import { bytes, clamp, number, relativeFromNow, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { EVENT_TYPES, SENSOR_IDS, type EventType, type SocEvent } from '../types/api';
 
 const DETAIL_MAX = 60;
 
 /** One or two lines derived from attributes. DESIGN_SPEC.md section 7.3. */
-function DetailCell({ event }: { event: SocEvent }) {
+function DetailCell({ event, max = DETAIL_MAX }: { event: SocEvent; max?: number }) {
   const attributes = event.attributes ?? {};
 
   switch (event.event_type) {
     case 'auth_failure':
     case 'auth_success':
       return attributes.username ? (
-        <AttackerText value={`username=${clamp(attributes.username, DETAIL_MAX)}`} />
+        <AttackerText value={`username=${clamp(attributes.username, max)}`} />
       ) : null;
 
     case 'command_input':
-      return attributes.command ? (
-        <AttackerText value={clamp(attributes.command, DETAIL_MAX)} />
-      ) : null;
+      return attributes.command ? <AttackerText value={clamp(attributes.command, max)} /> : null;
 
     case 'http_request':
     case 'blocked_request': {
       const line = `${attributes.method ?? ''} ${attributes.path ?? ''}`.trim();
       return (
         <>
-          {line ? <AttackerText value={clamp(line, DETAIL_MAX)} /> : null}
+          {line ? <AttackerText value={clamp(line, max)} /> : null}
           {attributes.query_redacted ? (
-            <AttackerText value={clamp(attributes.query_redacted, DETAIL_MAX)} />
+            <AttackerText value={clamp(attributes.query_redacted, max)} />
           ) : null}
           {event.event_type === 'blocked_request' && attributes.block_action_id ? (
             <span className="mono">{attributes.block_action_id}</span>
@@ -53,9 +58,7 @@ function DetailCell({ event }: { event: SocEvent }) {
     case 'synthetic_file_access':
       return (
         <>
-          {attributes.asset_id ? (
-            <AttackerText value={clamp(attributes.asset_id, DETAIL_MAX)} />
-          ) : null}
+          {attributes.asset_id ? <AttackerText value={clamp(attributes.asset_id, max)} /> : null}
           {typeof attributes.size_bytes === 'number' ? (
             <span className="mono">{bytes(attributes.size_bytes)}</span>
           ) : null}
@@ -64,7 +67,7 @@ function DetailCell({ event }: { event: SocEvent }) {
 
     case 'connection_open':
       return attributes.client_version ? (
-        <AttackerText value={clamp(attributes.client_version, DETAIL_MAX)} />
+        <AttackerText value={clamp(attributes.client_version, max)} />
       ) : null;
 
     default:
@@ -82,6 +85,50 @@ function eventSubLabel(event: SocEvent): string | null {
   return parts.length > 0 ? parts.join(' ') : null;
 }
 
+/** The newest event, large, at the top. Swaps in with a short slide. */
+function Spotlight({ event, onOpen }: { event: SocEvent; onOpen: () => void }) {
+  const style = EVENT_STYLE[event.event_type];
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="spotlight-wrap">
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.button
+          key={event.event_id}
+          type="button"
+          className={`spotlight spotlight--${style.tone}`}
+          onClick={onOpen}
+          initial={{ opacity: 0, y: -18, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 14 }}
+          transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <span className="spotlight__sweep" aria-hidden="true" />
+          <span className="spotlight__kicker">
+            <span className="livedot" aria-hidden="true" /> Latest event ·{' '}
+            {relativeFromNow(event.occurred_at, now)}
+          </span>
+          <span className="spotlight__row">
+            <span className={`spotlight__glyph evtype--${style.tone}`}>{style.glyph}</span>
+            <span className="spotlight__type">{EVENT_TYPE_LABEL[event.event_type]}</span>
+            <span className="spotlight__ip">{event.src_ip}</span>
+            <span className="spotlight__sensor">{SENSOR_LABEL[event.sensor_id] ?? event.sensor_id}</span>
+          </span>
+          <span className="spotlight__detail">
+            <DetailCell event={event} max={120} />
+          </span>
+          <span className="spotlight__desc">{EVENT_TYPE_DESCRIPTION[event.event_type]}</span>
+          <span className="spotlight__id">{event.event_id}</span>
+        </motion.button>
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function EventRow({
   event,
   isLive,
@@ -96,7 +143,7 @@ function EventRow({
   const style = EVENT_STYLE[event.event_type];
   const sub = eventSubLabel(event);
 
-  const classes = ['', isLive ? 'row--new' : '', isSelected ? 'is-selected' : '']
+  const classes = [`row--${style.tone}`, isLive ? 'row--new' : '', isSelected ? 'is-selected' : '']
     .filter(Boolean)
     .join(' ');
 
@@ -112,7 +159,10 @@ function EventRow({
         }
       }}
     >
-      <td className="cell-time">{timeUtc(event.occurred_at)}</td>
+      <td className="cell-time">
+        {timeUtc(event.occurred_at)}
+        {isLive ? <span className="newtag">new</span> : null}
+      </td>
       <td className="cell-sensor">{event.sensor_id}</td>
       <td>
         <div className={`evtype evtype--${style.tone}`}>
@@ -121,7 +171,7 @@ function EventRow({
         </div>
         {sub ? <div className="evtype__sub">{sub}</div> : null}
       </td>
-      <td className="mono">{event.src_ip}</td>
+      <td className="mono cell-ip">{event.src_ip}</td>
       <td>
         <div className="cell-detail">
           <DetailCell event={event} />
@@ -140,6 +190,41 @@ function EventRow({
       </td>
     </tr>
   );
+}
+
+/**
+ * Counts events that arrive while the feed is scrolled away from the top, so
+ * new rows never push the one you are reading out from under you unnoticed.
+ */
+function useArrivedAbove(newestSeq: number) {
+  const [arrived, setArrived] = useState(0);
+  const scrolledRef = useRef(false);
+  const lastSeqRef = useRef(newestSeq);
+
+  useEffect(() => {
+    const main = document.querySelector('.main');
+    if (!main) return;
+    const onScroll = () => {
+      scrolledRef.current = main.scrollTop > 240;
+      if (!scrolledRef.current) setArrived(0);
+    };
+    main.addEventListener('scroll', onScroll, { passive: true });
+    return () => main.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (newestSeq > lastSeqRef.current && scrolledRef.current) {
+      setArrived((count) => count + 1);
+    }
+    lastSeqRef.current = newestSeq;
+  }, [newestSeq]);
+
+  const jumpToTop = () => {
+    document.querySelector('.main')?.scrollTo({ top: 0, behavior: 'smooth' });
+    setArrived(0);
+  };
+
+  return { arrived, jumpToTop };
 }
 
 export function LiveFeed() {
@@ -176,19 +261,29 @@ export function LiveFeed() {
 
   const filtersActive = sensorFilter !== '' || typeFilter !== '' || ipFilter.trim() !== '';
   const trimmed = receivedCount > FEED_MAX_ROWS;
+  const newest = events[0] ?? null;
+  const { arrived, jumpToTop } = useArrivedAbove(newest?.seq ?? 0);
 
   return (
     <div className="page">
       <div className="page__head">
         <h1 className="page__title">Live Feed</h1>
-        <span className="page__head-spacer" />
         {paused ? (
-          <span className="pill pill--warn">paused · {bufferedCount} new</span>
-        ) : null}
+          <span className="pill pill--warn">paused · {bufferedCount} waiting</span>
+        ) : (
+          <span className="feedstate">
+            <span className="livedot" aria-hidden="true" /> streaming
+          </span>
+        )}
+        <span className="page__head-spacer" />
+        <span className="feedstate">{number(receivedCount)} received this session</span>
         <button type="button" className="btn" onClick={() => setPaused(!paused)}>
+          {paused ? <Play size={15} /> : <Pause size={15} />}
           {paused ? 'Resume' : 'Pause'}
         </button>
       </div>
+
+      {newest ? <Spotlight event={newest} onOpen={() => setSelected(newest)} /> : null}
 
       <div className="toolbar">
         <select
@@ -225,7 +320,7 @@ export function LiveFeed() {
         <input
           className="input"
           aria-label="Filter by source IP"
-          placeholder="src_ip"
+          placeholder="Source IP"
           value={ipFilter}
           onChange={(changeEvent) => setIpFilter(changeEvent.target.value)}
         />
@@ -256,7 +351,7 @@ export function LiveFeed() {
         </div>
       ) : null}
 
-      <section className="card">
+      <section className="card feedcard">
         {error ? (
           <div style={{ padding: 'var(--s4)' }}>
             <ErrorCard error={error} onRetry={reload} />
@@ -312,6 +407,21 @@ export function LiveFeed() {
           </>
         )}
       </section>
+
+      <AnimatePresence>
+        {arrived > 0 ? (
+          <motion.button
+            type="button"
+            className="newpill"
+            onClick={jumpToTop}
+            initial={{ opacity: 0, y: -12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -12 }}
+          >
+            <ArrowUp size={15} /> {arrived} new event{arrived === 1 ? '' : 's'}
+          </motion.button>
+        ) : null}
+      </AnimatePresence>
 
       {selected ? (
         <RawEventDrawer event={selected} onClose={() => setSelected(null)} />
