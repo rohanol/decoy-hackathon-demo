@@ -10,6 +10,7 @@
  * cap note rather than replacing the real score.
  */
 
+import { ArrowLeft, Download, Play, ShieldBan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { ApiError, fetchEvents, fetchIncident, incidentExportUrl } from '../api/client';
@@ -21,17 +22,77 @@ import { BlockFlowModal } from '../components/BlockFlowModal';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
-import { Card, EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
-import { STAGE_LABEL, linkPhrase } from '../copy';
+import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
+import { RULE_NAME, STAGE_LABEL, linkPhrase } from '../copy';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
-import type { Incident, Link, SocEvent, Stage } from '../types/api';
+import { KILL_CHAIN_STAGES, type Incident, type Link, type SocEvent, type Stage } from '../types/api';
 
 /** "2m 30s" between two timestamps. Presentation only. */
 function duration(from: string, to: string): string {
   const seconds = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
   const minutes = Math.floor(seconds / 60);
   return minutes > 0 ? `${minutes}m ${seconds % 60}s` : `${seconds}s`;
+}
+
+/**
+ * The summary cites evidence inline as "[evidence: id, id]". Split it into one
+ * point per claim, each keeping its own citations, so it reads as a list of
+ * findings instead of a wall of ids. Display only: the words are unchanged.
+ */
+function summaryPoints(text: string): { text: string; ids: string[] }[] {
+  const points: { text: string; ids: string[] }[] = [];
+  const pattern = /([^[]*?)\s*\[evidence:\s*([^\]]*)\]\.?\s*/g;
+  let consumed = 0;
+  for (const match of text.matchAll(pattern)) {
+    const sentence = (match[1] ?? '').trim();
+    const ids = (match[2] ?? '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (sentence) points.push({ text: /[.!?]$/.test(sentence) ? sentence : `${sentence}.`, ids });
+    consumed = (match.index ?? 0) + match[0].length;
+  }
+  const rest = text.slice(consumed).trim();
+  if (rest) points.push({ text: rest, ids: [] });
+  return points.length > 0 ? points : [{ text, ids: [] }];
+}
+
+function EvidenceButton({
+  ids,
+  eventsById,
+  onOpen,
+}: {
+  ids: string[];
+  eventsById: Map<string, SocEvent>;
+  onOpen: (event: SocEvent) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? ids : ids.slice(0, 1);
+  return (
+    <span className="keypoint__ev">
+      {shown.map((id) => {
+        const event = eventsById.get(id);
+        return (
+          <button
+            key={id}
+            type="button"
+            className="chip"
+            disabled={!event}
+            onClick={() => event && onOpen(event)}
+            title={event ? 'Open the raw event' : 'Event not in the loaded window'}
+          >
+            {id}
+          </button>
+        );
+      })}
+      {!expanded && ids.length > 1 ? (
+        <button type="button" className="chip" onClick={() => setExpanded(true)}>
+          +{ids.length - 1} more
+        </button>
+      ) : null}
+    </span>
+  );
 }
 
 function LinkRow({ link, onDecide }: { link: Link; onDecide: (link: Link) => void }) {
@@ -183,12 +244,16 @@ export function IncidentDetail() {
 
   if (!incident) return null;
 
+  const openLinks = incident.links.filter((link) => link.status === 'open');
+  const pendingFindings = incident.findings.filter((finding) => finding.pending_confirmation);
+  const points = summaryPoints(incident.summary.text);
+  const reached = incident.stages_observed.filter((stage) => stage !== 'none').length;
 
   return (
-    <div className="page">
+    <div className="page incpage">
       <div className="page__head">
         <RouterLink to="/incidents" className="btn btn--ghost">
-          ← Incidents
+          <ArrowLeft size={15} /> Incidents
         </RouterLink>
         <span className="page__head-spacer" />
         <a
@@ -201,184 +266,130 @@ export function IncidentDetail() {
           }
           aria-disabled={USE_FIXTURES}
         >
-          Export
+          <Download size={15} /> Export report
         </a>
         <button
           type="button"
-          className="btn"
+          className="btn btn--primary"
           onClick={() => setBlocking(true)}
           title="Preview a 120 s block of this source on the web decoy"
         >
-          Block
+          <ShieldBan size={15} /> Block source
         </button>
       </div>
 
-      <header className="inchead">
-        <div className="inchead__left">
-          <h1 className="inchead__ip mono">{incident.src_ip}</h1>
-          <div className="inchead__meta mono">
-            {incident.incident_id} · {incident.lab_run_id} ·{' '}
-            {number(incident.event_count)} events · {fullUtc(incident.first_seen)} →{' '}
-            {timeUtcZ(incident.last_seen)} · {duration(incident.first_seen, incident.last_seen)}
+      <header className={`inchero inchero--${incident.severity}`}>
+        <div className="inchero__main">
+          <div className="inchero__eyebrow">
+            <span className={`badge badge--${incident.severity}`}>{incident.severity}</span>
+            <span>
+              {incident.incident_id} · {incident.lab_run_id}
+            </span>
           </div>
+          <h1 className="inchero__ip">{incident.src_ip}</h1>
+          <dl className="inchero__facts">
+            <div>
+              <dt>Events</dt>
+              <dd>{number(incident.event_count)}</dd>
+            </div>
+            <div>
+              <dt>Stages reached</dt>
+              <dd>
+                {reached} of {KILL_CHAIN_STAGES.length}
+              </dd>
+            </div>
+            <div>
+              <dt>First seen</dt>
+              <dd>{fullUtc(incident.first_seen)}</dd>
+            </div>
+            <div>
+              <dt>Last seen</dt>
+              <dd>{timeUtcZ(incident.last_seen)}</dd>
+            </div>
+            <div>
+              <dt>Duration</dt>
+              <dd>{duration(incident.first_seen, incident.last_seen)}</dd>
+            </div>
+          </dl>
         </div>
-        <div className="inchead__right">
-          <span className={`badge badge--${incident.severity}`}>{incident.severity}</span>
-          <div className={`inchead__score inchead__score--${incident.severity}`}>
+        <div className="inchero__score">
+          <span className="inchero__score-label">Risk score</span>
+          <span className={`inchero__score-value inchero__score-value--${incident.severity}`}>
             {number(incident.score)}
-          </div>
+          </span>
+          <span className="inchero__score-hint">from {incident.findings.length} findings</span>
         </div>
       </header>
 
-      <Card title="Kill chain">
-        <div className="card__body">
-          <KillChainBar
-            stagesObserved={incident.stages_observed}
-            findings={incident.findings}
-            severity={incident.severity}
-            activeStage={stageFilter}
-            onStageClick={(stage) => setStageFilter((current) => (current === stage ? null : stage))}
-          />
-        </div>
-      </Card>
-
-      <div className="incgrid">
-        <div className="incgrid__col">
-          <Card title="Summary">
-            <div className="card__body">
-              <div className="summary__source">
-                <span className="chip">{incident.summary.source}</span>
-                {incident.summary.source !== 'rules' ? (
-                  <span className="state__hint">
-                    Generated text — all claims cite the event IDs below.
+      <section className="incsec">
+        <h2 className="incsec__title">What happened</h2>
+        <div className="incsummary">
+          <div className="incsummary__text">
+            <div className="incsummary__source">
+              <span className="chip">{incident.summary.source}</span>
+              <span>
+                {incident.summary.source === 'rules'
+                  ? 'Written from rule findings.'
+                  : 'Generated text — all claims cite the event IDs below.'}
+              </span>
+            </div>
+            <ol className="keypoints">
+              {points.map((point, index) => (
+                <li key={index} className="keypoint">
+                  <span className="keypoint__n">{index + 1}</span>
+                  <span className="keypoint__body">
+                    <span className="keypoint__text">{point.text}</span>
+                    {point.ids.length > 0 ? (
+                      <EvidenceButton ids={point.ids} eventsById={eventsById} onOpen={setOpenEvent} />
+                    ) : null}
                   </span>
-                ) : null}
-              </div>
-              <p className="summary__text">{incident.summary.text}</p>
-              <div className="evidence">
-                <span className="evidence__label">cited</span>
-                {incident.summary.cited_event_ids.map((eventId) => {
-                  const event = eventsById.get(eventId);
-                  return event ? (
-                    <button
-                      key={eventId}
-                      type="button"
-                      className="chip"
-                      onClick={() => setOpenEvent(event)}
-                    >
-                      {eventId}
-                    </button>
-                  ) : (
-                    <span key={eventId} className="chip">
-                      {eventId}
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
-          </Card>
+                </li>
+              ))}
+            </ol>
+          </div>
 
-          <Card
-            title={`Findings (${visibleFindings.length}${
-              stageFilter ? ` of ${incident.findings.length}` : ''
-            })`}
-            actions={
-              stageFilter ? (
-                <button type="button" className="btn btn--ghost" onClick={() => setStageFilter(null)}>
-                  Clear {STAGE_LABEL[stageFilter]} filter
-                </button>
-              ) : null
-            }
-          >
-            <div className="card__body findings">
-              {visibleFindings.length === 0 ? (
-                <EmptyState
-                  title="No findings for this stage."
-                  hint="Clear the filter to see every finding on this incident."
-                />
+          <aside className="incsummary__side">
+            <div
+              className={
+                openLinks.length + pendingFindings.length > 0 ? 'decide decide--open' : 'decide'
+              }
+            >
+              <h3 className="decide__title">Needs your decision</h3>
+              {openLinks.length === 0 && pendingFindings.length === 0 ? (
+                <p className="decide__none">Nothing waiting on an analyst.</p>
               ) : (
-                visibleFindings.map((finding) => (
-                  <FindingCard
-                    key={finding.finding_id}
-                    finding={finding}
-                    eventsById={eventsById}
-                    onOpenEvent={setOpenEvent}
-                  />
-                ))
-              )}
-            </div>
-          </Card>
-        </div>
-
-        <div className="incgrid__col">
-          <Card title="Score breakdown">
-            <div className="card__body">
-              <ScoreBreakdown rows={incident.score_breakdown} score={incident.score} />
-            </div>
-          </Card>
-
-          <Card title={`Cross-decoy links (${incident.links.length})`}>
-            <div className="card__body">
-              {incident.links.length === 0 ? (
-                <EmptyState
-                  title="No cross-decoy links."
-                  hint="A link appears when the same source touches both decoys within 5 minutes."
-                />
-              ) : (
-                incident.links.map((link) => (
-                  <LinkRow key={link.link_id} link={link} onDecide={setDecidingLink} />
-                ))
-              )}
-            </div>
-          </Card>
-
-          <Card title={`Sessions (${incident.sessions.length})`}>
-            <div className="card__body">
-              {incident.sessions.length === 0 ? (
-                <EmptyState
-                  title="No sessions."
-                  hint="SSH sessions appear here once a connection is opened."
-                />
-              ) : (
-                <>
-                  {incident.sessions.map((session) => (
-                    <div
-                      key={session.session_id}
-                      className={
-                        session.commands > 0 ? 'sessionrow' : 'sessionrow sessionrow--empty'
-                      }
-                    >
-                      <span className="mono">{session.session_id}</span>
-                      <span className="sessionrow__sensor mono">{session.sensor_id}</span>
-                      <span className="sessionrow__count">
-                        {session.commands} cmd{session.commands === 1 ? '' : 's'}
+                <ul className="decide__list">
+                  {openLinks.map((link) => (
+                    <li key={link.link_id}>
+                      <span>
+                        {link.from_sensor} → {link.to_sensor}: {linkPhrase(link.kind, link.status)}
                       </span>
-                      {session.commands > 0 ? (
-                        <RouterLink
-                          className="btn btn--ghost"
-                          to={`/incidents/${incident.incident_id}/transcript/${session.session_id}`}
-                        >
-                          ▸ Replay
-                        </RouterLink>
-                      ) : null}
-                    </div>
+                      <button type="button" className="btn" onClick={() => setDecidingLink(link)}>
+                        Review
+                      </button>
+                    </li>
                   ))}
-                  <p className="state__hint" style={{ textAlign: 'left', marginTop: 'var(--s2)' }}>
-                    Sessions with no commands never reached a shell, so there is nothing to replay.
-                  </p>
-                </>
+                  {pendingFindings.map((finding) => (
+                    <li key={finding.finding_id}>
+                      <span>
+                        {finding.rule_id} {RULE_NAME[finding.rule_id] ?? ''} counts once its link
+                        is confirmed
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               )}
             </div>
-          </Card>
-
-          <Card title="Response">
-            <div className="card__body">
+            <div className="decide">
+              <h3 className="decide__title">Response</h3>
               {incident.active_block === null ? (
                 <>
-                  <p className="state__hint" style={{ textAlign: 'left' }}>
-                    No action applied.
-                  </p>
-                  <button type="button" className="btn" onClick={() => setBlocking(true)}>
+                  <p className="decide__none">No action applied.</p>
+                  <button
+                    type="button"
+                    className="btn btn--block"
+                    onClick={() => setBlocking(true)}
+                  >
                     Preview block
                   </button>
                 </>
@@ -386,9 +397,117 @@ export function IncidentDetail() {
                 <ActionCard action={incident.active_block} onExpired={() => void load()} />
               )}
             </div>
-          </Card>
+          </aside>
         </div>
+      </section>
+
+      <section className="incsec">
+        <h2 className="incsec__title">How far it got</h2>
+        <KillChainBar
+          stagesObserved={incident.stages_observed}
+          findings={incident.findings}
+          severity={incident.severity}
+          activeStage={stageFilter}
+          onStageClick={(stage) => setStageFilter((current) => (current === stage ? null : stage))}
+        />
+      </section>
+
+      <section className="incsec">
+        <div className="incsec__head">
+          <h2 className="incsec__title">
+            Findings <span className="incsec__count">{visibleFindings.length}</span>
+          </h2>
+          {stageFilter ? (
+            <button type="button" className="btn btn--ghost" onClick={() => setStageFilter(null)}>
+              Clear {STAGE_LABEL[stageFilter]} filter
+            </button>
+          ) : null}
+        </div>
+        {visibleFindings.length === 0 ? (
+          <EmptyState
+            title="No findings for this stage."
+            hint="Clear the filter to see every finding on this incident."
+          />
+        ) : (
+          <div className="findgrid">
+            {visibleFindings.map((finding) => (
+              <FindingCard
+                key={finding.finding_id}
+                finding={finding}
+                eventsById={eventsById}
+                onOpenEvent={setOpenEvent}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <div className="incsec incsec--split">
+        <section>
+          <h2 className="incsec__title">
+            Cross-decoy links <span className="incsec__count">{incident.links.length}</span>
+          </h2>
+          {incident.links.length === 0 ? (
+            <EmptyState
+              title="No cross-decoy links."
+              hint="A link appears when the same source touches both decoys within 5 minutes."
+            />
+          ) : (
+            <div className="stack">
+              {incident.links.map((link) => (
+                <LinkRow key={link.link_id} link={link} onDecide={setDecidingLink} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h2 className="incsec__title">
+            Sessions <span className="incsec__count">{incident.sessions.length}</span>
+          </h2>
+          {incident.sessions.length === 0 ? (
+            <EmptyState
+              title="No sessions."
+              hint="SSH sessions appear here once a connection is opened."
+            />
+          ) : (
+            <div className="sessions">
+              {[...incident.sessions]
+                .sort((a, b) => b.commands - a.commands)
+                .map((session) => (
+                  <div
+                    key={session.session_id}
+                    className={session.commands > 0 ? 'sessionrow' : 'sessionrow sessionrow--empty'}
+                  >
+                    <span className="mono">{session.session_id}</span>
+                    <span className="sessionrow__sensor mono">{session.sensor_id}</span>
+                    <span className="sessionrow__count">
+                      {session.commands} cmd{session.commands === 1 ? '' : 's'}
+                    </span>
+                    {session.commands > 0 ? (
+                      <RouterLink
+                        className="btn"
+                        to={`/incidents/${incident.incident_id}/transcript/${session.session_id}`}
+                      >
+                        <Play size={13} /> Replay
+                      </RouterLink>
+                    ) : null}
+                  </div>
+                ))}
+              <p className="incsec__note">
+                Sessions with no commands never reached a shell, so there is nothing to replay.
+              </p>
+            </div>
+          )}
+        </section>
       </div>
+
+      <section className="incsec">
+        <h2 className="incsec__title">Score breakdown</h2>
+        <div className="panel">
+          <ScoreBreakdown rows={incident.score_breakdown} score={incident.score} />
+        </div>
+      </section>
 
       {openEvent ? (
         <RawEventDrawer event={openEvent} onClose={() => setOpenEvent(null)} />

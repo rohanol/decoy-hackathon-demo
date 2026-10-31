@@ -1,7 +1,35 @@
 # Frontend (M1)
 
-React + TypeScript + Vite. Owner: Pashmee (M1). Design source of truth:
+React + TypeScript + Vite. Owner: Pashmee (M1), with Rohan. Design source of truth:
 [`DESIGN_SPEC.md`](./DESIGN_SPEC.md).
+
+## Redesign (November 2026)
+
+- Theme: black, white and one neon green (`src/styles/tokens.css`). Green means
+  brand or live only. Analytics and reports use white and the validated
+  severity palette, never green. Fonts are Inter and JetBrains Mono, shipped
+  with the app, so nothing loads from the internet.
+- New routes: `/welcome` (landing, no scroll), `/login`, `/sensors`. The
+  console routes are unchanged and need a signed-in analyst.
+- ChakraView is 3D by default (`src/chakra/Chakra3D.tsx`): the rings form a
+  funnel, so depth into the fiction is real depth. The timeline under it
+  replays the incident by rebuilding the same wheel model from the events up
+  to the cursor (`src/chakra/Timeline.tsx`). The 2D wheel stays one click away
+  and is used automatically when the browser has no WebGL.
+- The blue hat (blue team mark) is built from geometry in code; there is no
+  model file to download.
+- three.js loads only when ChakraView or the hat is shown.
+
+### Sign-in
+
+Supabase Auth, Google plus email and password (`src/auth/AuthProvider.tsx`).
+Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local`, enable the
+Google provider in the Supabase dashboard, and add `http://127.0.0.1:5173/` as a
+redirect URL. Google sign-in needs internet on the SOC laptop.
+
+This gates the UI only. The backend has no auth yet, so `/api` stays open on
+loopback until it verifies the Supabase token. Until a provider is set,
+`VITE_AUTH_DEV_BYPASS=1` shows a "Continue as lab analyst" button (dev only).
 
 ## Run
 

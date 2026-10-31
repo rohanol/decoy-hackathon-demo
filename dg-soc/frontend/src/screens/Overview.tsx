@@ -7,68 +7,85 @@
  * legitimate users, so "900 raw records became 2 cases" is not a filtering
  * trick — it is the point.
  *
- * Every number comes from GET /api/stats/overview. Nothing here is derived in
- * the browser except the bar widths, which are proportional decoration beneath
- * the numbers they illustrate.
+ * Built for the ten-foot view as well as the desk: big white numbers, colour
+ * only where it carries severity, and every number straight from
+ * GET /api/stats/overview. Nothing is derived in the browser except bar
+ * widths, which are proportional decoration beside the numbers they show.
  */
 
+import { ArrowRight } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApiError, fetchIncidents, fetchOverview } from '../api/client';
+import { CountUp } from '../components/CountUp';
 import { KillChainStrip } from '../components/KillChainBar';
-import { Card, EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
-import { COPY } from '../copy';
-import { number, seconds } from '../lib/format';
+import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
+import { COPY, EVENT_TYPE_LABEL, RULE_NAME } from '../copy';
+import { EVENT_STYLE } from '../lib/eventStyle';
+import { number, relativeFromNow, seconds, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { RULE_IDS, type IncidentSummary, type StatsOverview } from '../types/api';
 
-function NoiseCounter({ stats }: { stats: StatsOverview }) {
+const SEVERITY_RANK = { critical: 0, high: 1, medium: 2, low: 3 } as const;
+const whole = (value: number) => number(Math.round(value));
+
+function Kpi({
+  label,
+  value,
+  format,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: number | null;
+  format: (value: number) => string;
+  hint: string;
+  tone?: 'muted';
+}) {
+  return (
+    <section className="kpi">
+      <span className="kpi__label">{label}</span>
+      <span className={tone === 'muted' ? 'kpi__value kpi__value--muted' : 'kpi__value'}>
+        {value === null ? '—' : <CountUp value={value} format={format} />}
+      </span>
+      <span className="kpi__hint">{hint}</span>
+    </section>
+  );
+}
+
+function NoiseFunnel({ stats }: { stats: StatsOverview }) {
   const raw = Math.max(stats.raw_events, 1);
-  const incidentPct = Math.min(100, (stats.incidents / raw) * 100);
-  const lowPct = Math.min(100, (stats.low_priority_incidents / raw) * 100);
+  const rows = [
+    { label: 'Raw events', value: stats.raw_events, tone: 'raw' },
+    { label: 'Incidents to review', value: stats.incidents, tone: 'cases' },
+    { label: 'Low priority', value: stats.low_priority_incidents, tone: 'low' },
+  ];
 
   return (
-    <div className="card__body">
-      <div className="metrics">
-        <div className="metric">
-          <div className="metric__value">{number(stats.raw_events)}</div>
-          <div className="metric__label">raw events</div>
-        </div>
-        <div className="metric__arrow" aria-hidden="true">
-          →
-        </div>
-        <div className="metric">
-          <div className="metric__value">{number(stats.incidents)}</div>
-          <div className="metric__label">incidents</div>
-        </div>
-        <div className="metric">
-          <div
-            className="metric__value metric__value--muted"
-            title={COPY.lowPriorityTooltip}
-          >
-            {number(stats.low_priority_incidents)}
-          </div>
-          <div className="metric__label" title={COPY.lowPriorityTooltip}>
-            low priority
-          </div>
-        </div>
-      </div>
-
-      {/* Decoration beneath the numbers, never instead of them. */}
-      <div className="noisebar" aria-hidden="true">
-        <span className="noisebar__raw" />
-        <span className="noisebar__incidents" style={{ width: `${Math.max(incidentPct, 1)}%` }} />
-        <span className="noisebar__low" style={{ width: `${lowPct}%` }} />
-      </div>
-
-      <p className="noisebar__sentence">
-        {number(stats.raw_events)} raw event{stats.raw_events === 1 ? '' : 's'} →{' '}
-        {number(stats.incidents)} incident{stats.incidents === 1 ? '' : 's'},{' '}
-        {number(stats.low_priority_incidents)} low priority
+    <div className="funnel">
+      <p className="funnel__headline">
+        <strong>{number(stats.raw_events)}</strong> raw event{stats.raw_events === 1 ? '' : 's'}{' '}
+        became <strong>{number(stats.incidents)}</strong> incident
+        {stats.incidents === 1 ? '' : 's'} to review.
       </p>
-      <p className="state__hint" style={{ textAlign: 'left' }}>
-        {COPY.noiseCounterNote}
-      </p>
+      <div className="funnel__rows">
+        {rows.map((row) => (
+          <div key={row.label} className="funnel__row" title={`${row.label}: ${number(row.value)}`}>
+            <span className="funnel__label">{row.label}</span>
+            <span className="funnel__track">
+              <motion.span
+                className={`funnel__fill funnel__fill--${row.tone}`}
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.max(row.value > 0 ? 1.5 : 0, (row.value / raw) * 100)}%` }}
+                transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+              />
+            </span>
+            <span className="funnel__value">{number(row.value)}</span>
+          </div>
+        ))}
+      </div>
+      <p className="funnel__note">{COPY.noiseCounterNote}</p>
     </div>
   );
 }
@@ -81,25 +98,85 @@ function FindingsByRule({ stats }: { stats: StatsOverview }) {
   const max = Math.max(1, ...counts.map((row) => row.count));
 
   return (
-    <div className="card__body">
-      <div className="rulebars">
-        {counts.map(({ ruleId, count }) => (
-          <div key={ruleId} className={count > 0 ? 'rulebar' : 'rulebar rulebar--zero'}>
-            <span className="rulebar__id mono">{ruleId}</span>
-            <span className="rulebar__track">
-              <span className="rulebar__fill" style={{ width: `${(count / max) * 100}%` }} />
-            </span>
-            <span className="rulebar__count mono">{count}</span>
-          </div>
-        ))}
-      </div>
+    <div className="rules">
+      {counts.map(({ ruleId, count }, index) => (
+        <div
+          key={ruleId}
+          className={count > 0 ? 'rule' : 'rule rule--zero'}
+          title={`${ruleId} · ${RULE_NAME[ruleId] ?? ''}: ${count} finding${count === 1 ? '' : 's'}`}
+        >
+          <span className="rule__id">{ruleId}</span>
+          <span className="rule__name">{RULE_NAME[ruleId]}</span>
+          <span className="rule__track">
+            <motion.span
+              className="rule__fill"
+              initial={{ width: 0 }}
+              animate={{ width: `${(count / max) * 100}%` }}
+              transition={{ duration: 0.7, delay: index * 0.04, ease: [0.22, 1, 0.36, 1] }}
+            />
+          </span>
+          <span className="rule__count">{count}</span>
+        </div>
+      ))}
       {/* Every rule that can fire stays visible at zero, so the set of things
           being looked for is legible even before anything happens. There is
           deliberately no R06. */}
-      <p className="state__hint" style={{ textAlign: 'left', marginTop: 'var(--s3)' }}>
-        Rules at zero have not fired in this run.
-      </p>
+      <p className="rules__note">Rules at zero have not fired in this run.</p>
     </div>
+  );
+}
+
+function LatestActivity() {
+  const { events, snapshotMaxSeq } = useLiveStore();
+  const latest = events.slice(0, 7);
+
+  if (latest.length === 0) {
+    return <EmptyState title={COPY.emptyFeedTitle} hint={COPY.emptyFeedHint} />;
+  }
+
+  return (
+    <ol className="activity">
+      <AnimatePresence initial={false}>
+        {latest.map((event) => {
+          const style = EVENT_STYLE[event.event_type];
+          return (
+            <motion.li
+              key={event.event_id}
+              layout
+              initial={{ opacity: 0, x: -12 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              className={event.seq > snapshotMaxSeq ? 'activity__row activity__row--new' : 'activity__row'}
+            >
+              <span className={`activity__glyph evtype--${style.tone}`}>{style.glyph}</span>
+              <span className="activity__what">{EVENT_TYPE_LABEL[event.event_type]}</span>
+              <span className="activity__ip">{event.src_ip}</span>
+              <span className="activity__time">{timeUtc(event.occurred_at)}</span>
+            </motion.li>
+          );
+        })}
+      </AnimatePresence>
+    </ol>
+  );
+}
+
+function IncidentRow({ incident }: { incident: IncidentSummary }) {
+  return (
+    <RouterLink to={`/incidents/${incident.incident_id}`} className={`ovinc ovinc--${incident.severity}`}>
+      <span className={`ovinc__score ovinc__score--${incident.severity}`}>{number(incident.score)}</span>
+      <span className="ovinc__main">
+        <span className="ovinc__ip">{incident.src_ip}</span>
+        <span className="ovinc__meta">
+          <span className={`badge badge--${incident.severity}`}>{incident.severity}</span>
+          {number(incident.event_count)} events · last {relativeFromNow(incident.last_seen)}
+        </span>
+      </span>
+      <span className="ovinc__chain">
+        <KillChainStrip stagesObserved={incident.stages_observed} severity={incident.severity} />
+      </span>
+      <ArrowRight className="ovinc__go" size={18} />
+    </RouterLink>
   );
 }
 
@@ -176,7 +253,11 @@ export function Overview() {
     );
   }
 
-  const sorted = [...incidents].sort((a, b) => b.last_seen.localeCompare(a.last_seen));
+  // Most severe first, then most recent: the order an analyst should read them.
+  const sorted = [...incidents].sort(
+    (a, b) =>
+      SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || b.last_seen.localeCompare(a.last_seen),
+  );
 
   return (
     <div className="page">
@@ -184,66 +265,80 @@ export function Overview() {
         <h1 className="page__title">Overview</h1>
       </div>
 
-      <div className="ovgrid">
-        <Card title="Noise reduction">
-          {stats ? <NoiseCounter stats={stats} /> : null}
-        </Card>
-
-        <Card title="Time to first alert">
-          <div className="card__body">
-            <div className="metric metric--solo">
-              <div className="metric__value">
-                {stats?.first_alert_seconds == null ? '—' : seconds(stats.first_alert_seconds)}
-              </div>
-              <div className="metric__label">first event → first finding</div>
-            </div>
-            {stats?.first_alert_seconds == null ? (
-              <p className="state__hint" style={{ textAlign: 'left' }}>
-                No findings yet.
-              </p>
-            ) : null}
-          </div>
-        </Card>
+      <div className="kpis">
+        <Kpi
+          label="Raw events"
+          value={stats?.raw_events ?? null}
+          format={whole}
+          hint="deduplicated sensor records"
+        />
+        <Kpi
+          label="Incidents"
+          value={stats?.incidents ?? null}
+          format={whole}
+          hint="grouped by source IP"
+        />
+        <Kpi
+          label="Low priority"
+          value={stats?.low_priority_incidents ?? null}
+          format={whole}
+          hint={COPY.lowPriorityTooltip}
+          tone="muted"
+        />
+        <Kpi
+          label="Time to first alert"
+          value={stats?.first_alert_seconds ?? null}
+          format={(value) => seconds(value)}
+          hint={stats?.first_alert_seconds == null ? 'no findings yet' : 'first event → first finding'}
+        />
       </div>
 
-      <div style={{ marginTop: 'var(--s4)' }}>
-        <Card title="Findings by rule">
+      <div className="ovgrid2">
+        <section className="panel">
+          <header className="panel__head">
+            <h2 className="panel__title">Noise reduction</h2>
+          </header>
+          {stats ? <NoiseFunnel stats={stats} /> : null}
+        </section>
+
+        <section className="panel">
+          <header className="panel__head">
+            <h2 className="panel__title">Findings by rule</h2>
+          </header>
           {stats ? <FindingsByRule stats={stats} /> : null}
-        </Card>
+        </section>
       </div>
 
-      <div style={{ marginTop: 'var(--s4)' }}>
-        <Card title={`Active incidents (${sorted.length})`}>
-          <div className="card__body">
-            {sorted.length === 0 ? (
-              <EmptyState title={COPY.emptyIncidentsTitle} hint={COPY.emptyIncidentsHint} />
-            ) : (
-              <div className="ovlist">
-                {sorted.map((incident) => (
-                  <RouterLink
-                    key={incident.incident_id}
-                    to={`/incidents/${incident.incident_id}`}
-                    className="ovrow"
-                  >
-                    <span className="ovrow__ip mono">{incident.src_ip}</span>
-                    <span className={`badge badge--${incident.severity}`}>
-                      {incident.severity}
-                    </span>
-                    <span className={`ovrow__score ovrow__score--${incident.severity}`}>
-                      {number(incident.score)}
-                    </span>
-                    <span className="ovrow__chain">
-                      <KillChainStrip
-                        stagesObserved={incident.stages_observed}
-                        severity={incident.severity}
-                      />
-                    </span>
-                  </RouterLink>
-                ))}
-              </div>
-            )}
-          </div>
-        </Card>
+      <div className="ovgrid2 ovgrid2--wide">
+        <section className="panel">
+          <header className="panel__head">
+            <h2 className="panel__title">Active incidents</h2>
+            <span className="panel__count">{sorted.length}</span>
+            <RouterLink to="/incidents" className="linkbtn panel__link">
+              All incidents <ArrowRight size={14} />
+            </RouterLink>
+          </header>
+          {sorted.length === 0 ? (
+            <EmptyState title={COPY.emptyIncidentsTitle} hint={COPY.emptyIncidentsHint} />
+          ) : (
+            <div className="ovincs">
+              {sorted.map((incident) => (
+                <IncidentRow key={incident.incident_id} incident={incident} />
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section className="panel">
+          <header className="panel__head">
+            <h2 className="panel__title">Latest activity</h2>
+            <span className="livedot" aria-hidden="true" />
+            <RouterLink to="/events" className="linkbtn panel__link">
+              Live feed <ArrowRight size={14} />
+            </RouterLink>
+          </header>
+          <LatestActivity />
+        </section>
       </div>
     </div>
   );

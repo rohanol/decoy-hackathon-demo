@@ -1,0 +1,116 @@
+/* Response screen, action cards and report tables. Loaded after theme.css. */
+
+.rsteps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
+  margin: 0 0 20px;
+  padding: 0;
+  list-style: none;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.rstep {
+  position: relative;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  grid-template-rows: auto auto;
+  gap: 2px 12px;
+  padding: 18px 20px;
+}
+
+.rstep + .rstep {
+  border-left: 1px solid var(--border);
+}
+
+.rstep__n {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.rstep__title {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.rstep__text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+@media (max-width: 1000px) {
+  .rsteps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ---------- action cards ---------- */
+
+.actionlist {
+  gap: 12px;
+}
+
+.action {
+  padding: 18px 20px;
+  border-radius: var(--r-lg);
+  background: var(--bg-raised);
+}
+
+.action__ip {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.action__bar {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.action__fill {
+  border-radius: 4px;
+  background: var(--text-primary);
+}
+
+/* ---------- report tables: bright, not green ---------- */
+
+.breakdown th {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.breakdown td {
+  font-size: 14px;
+}
+
+.breakdown__num {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown__tick {
+  color: var(--text-primary);
+}
+
+.breakdown__total {
+  font-size: 15px;
+}
+
+.breakdown__total strong {
+  font-size: 20px;
+  font-weight: 800;
+}
