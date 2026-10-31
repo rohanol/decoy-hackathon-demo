@@ -278,3 +278,20 @@ def test_analyst_summary_used_when_present_and_fallback_on_error(client):
     assert incident(client)["summary"]["text"].startswith("Repeated SSH password guessing")
     hooks._summarise = None  # M4 module absent
     assert incident(client)["summary"]["text"].startswith("Repeated SSH password guessing")
+
+
+def test_websocket_seq_rule_from_api_md(client):
+    """contracts/API.md: seq = newest event seq at send time; finding/link/incident reuse it,
+    and a decision sends messages with no new event."""
+    with client.websocket_connect("/ws/events") as ws:
+        send(client, raw(at=0, username="u"), webreq(10, "/login"))
+        msgs = [ws.receive_json() for _ in range(4)]
+        assert [m["type"] for m in msgs] == ["event", "event", "link", "incident"]
+        last_event_seq = msgs[1]["seq"]
+        assert msgs[0]["seq"] < last_event_seq
+        assert all(m["seq"] == last_event_seq for m in msgs[2:])  # same seq: never drop these by seq
+        decide(client, msgs[2]["data"]["link_id"], "confirm")
+        after = [ws.receive_json() for _ in range(3)]
+        assert [m["type"] for m in after] == ["link", "finding", "incident"]
+        assert all(m["seq"] == last_event_seq for m in after)  # no new event, same seq
+        assert after[2]["data"]["score"] == 15

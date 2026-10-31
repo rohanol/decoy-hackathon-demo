@@ -94,4 +94,18 @@ Server pushes after each DB commit:
 { "seq": 124, "type": "event | finding | incident | link | action", "data": { ... } }
 ```
 
-`data` is the same shape as the REST object (`incident` sends IncidentSummary). Client loads a REST snapshot on connect, then applies messages with `seq` greater than the last one seen. On reconnect, reload the snapshot.
+`data` is the same shape as the REST object (`incident` sends IncidentSummary). Messages arrive in commit order.
+
+`seq` always means the newest event `seq` when the message was sent. How to apply each type:
+
+| `type` | Apply when | How |
+|---|---|---|
+| `event` | `seq` > the last event `seq` you have | append to the feed |
+| `finding` | always | replace the finding with the same `finding_id` (points and `pending_confirmation` change when a link is decided) |
+| `link` | always | replace the link with the same `link_id` |
+| `incident` | always | replace the summary with the same `incident_id`; if that incident's page is open, re-fetch `GET /api/incidents/{id}` (a rejected link removes its R05 finding, and there is no delete message) |
+| `action` | reserved, not sent yet | poll `GET /api/response/actions` for block status |
+
+A `finding`, `link` or `incident` message often has the same `seq` as the event before it, and an analyst decision sends messages without any new event, so never drop those three types by `seq`.
+
+On connect and on every reconnect: open the socket, then load the snapshot (`GET /api/events` for the feed, whose `next_seq` is your last event `seq`, plus `GET /api/incidents` and `GET /api/links`), then apply messages as above.
