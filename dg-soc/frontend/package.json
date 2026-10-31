@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node --test --experimental-strip-types 'tests/*.test.ts'",
+    "test": "node tests/run-unit.mjs",
     "test:e2e": "node tests/e2e/reconnect.e2e.cjs && node tests/e2e/evidence.e2e.cjs && node tests/e2e/offline-entry.e2e.cjs"
   },
   "dependencies": {
