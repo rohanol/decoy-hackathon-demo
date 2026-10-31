@@ -1,5 +1,7 @@
 # M2 handoff (AGENTS.md section 11)
 
+Update: the 31 October Cowrie lab failures are addressed in [LAB_FIX_RESULTS.md](LAB_FIX_RESULTS.md). Follow [LINUX_LAB_CHECKLIST.md](LINUX_LAB_CHECKLIST.md) for the remaining physical source-IP gate. The original handoff below predates these verified-image fixes.
+
 Branch: `m2/sensors-response` (never pushed to `main`). PR title: `[M2] sensors, response, policy, deployment`.
 
 ## 1. What works now (tested here, no Docker available)
