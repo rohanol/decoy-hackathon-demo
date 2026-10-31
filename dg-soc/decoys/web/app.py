@@ -15,7 +15,7 @@ from urllib.parse import parse_qsl, unquote, urlencode
 import yaml
 from flask import Flask, Response, g, request
 
-from .policy_bridge import resolve_checker
+from .policy_bridge import resolve_enforcer
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSET = Path(__file__).parent / "assets/customer_data.csv"
@@ -46,8 +46,8 @@ def create_app(config=None, *, policy_check=None):
     )
     app.config.update(config or {})
     tokens = yaml.safe_load(Path(app.config["HONEYTOKENS_PATH"]).read_text())["tokens"]
-    checker = policy_check or resolve_checker(
-        app.config["BLOCKLIST_PATH"], app.config["ATTACKER_IPS"].split()
+    enforcer = policy_check or resolve_enforcer(
+        app.config["BLOCKLIST_PATH"], app.config["ATTACKER_IPS"].replace(",", " ").split()
     )
     lock = threading.Lock()
 
@@ -76,13 +76,16 @@ def create_app(config=None, *, policy_check=None):
         except (ipaddress.AddressValueError, TypeError):
             return page("<h2>IPv4 lab connection required</h2>", 400)
         try:
-            action_id = checker(g.src_ip)
+            enforcement = enforcer(g.src_ip)
+            action_id, policy_revision = enforcement if isinstance(enforcement, tuple) else (enforcement, None)
         except (OSError, ValueError, KeyError, TypeError):
             return page("<h2>Portal temporarily unavailable</h2>", 503)
         if action_id:
             g.event_type = "blocked_request"
             g.response_class = "blocked"
             g.attributes["block_action_id"] = action_id
+            if isinstance(policy_revision, int) and not isinstance(policy_revision, bool):
+                g.attributes["policy_revision"] = policy_revision
             return page("<h2>Access denied</h2>", 403)
 
     @app.after_request

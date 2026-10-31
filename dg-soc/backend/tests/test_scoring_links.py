@@ -248,42 +248,25 @@ def test_export_has_no_password_hashes(client):
 
 
 # ---- task 7: response hooks ----
-def test_response_placeholder_when_m2_module_absent(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    import backend.integrations as integrations
-    from backend.main import create_app
-
-    real = integrations._optional_import
-    monkeypatch.setattr(integrations, "_optional_import",
-                        lambda name: None if name == "response.router" else real(name))
-    with TestClient(create_app(str(tmp_path / "t.db"))) as c:
-        r = c.post("/api/response/preview", json={"incident_id": "inc_01", "ttl_seconds": 120})
-    assert r.status_code == 503 and r.json()["error"]["code"] == "response_unavailable"
-
-
-def test_response_router_mounted_now_that_m2_landed(client, tmp_path):
-    from response import router as response_router
-
-    response_router.configure(state_dir=str(tmp_path / "state"), env_file=str(tmp_path / "absent.env"),
-                              incident_lookup=lambda incident_id: None)
-    r = client.get("/api/response/actions")
-    assert r.status_code == 200 and r.json() == {"items": []}
-    r = client.post("/api/response/preview", json={"incident_id": "inc_404", "ttl_seconds": 120})
-    assert r.status_code == 404 and r.json()["error"]["code"] == "not_found"
+def test_m2_response_router_is_mounted(client):
+    r = client.post("/api/response/preview", json={"incident_id": "inc_01", "ttl_seconds": 1})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_request"
 
 
 def test_on_event_hook_called_once_per_new_event(client):
     seen = []
-    client.app.state.hooks._on_event = lambda ev: seen.append(ev["event_id"])
+    client.app.state.hooks._on_event = lambda ev, context: seen.append((ev["event_id"], context))
     evs = [raw(at=0, username="u"), raw(at=1, username="u")]
     send(client, *evs)
     send(client, *evs)  # duplicates: no second call
     assert len(seen) == 2
+    for event_id, context in seen:
+        assert context == {"source": "backend_ingest", "persisted_event_id": event_id,
+                           "received_at": next(ev["ingested_at"] for ev in client.app.state.db.list_events(None, None, 0, 100)["items"] if ev["event_id"] == event_id)}
 
 
 def test_on_event_failure_never_breaks_ingest(client):
-    def boom(ev):
+    def boom(ev, context):
         raise RuntimeError("bug in response module")
     client.app.state.hooks._on_event = boom
     assert send(client, raw(at=0, username="u"))["accepted"] == 1

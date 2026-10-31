@@ -86,10 +86,12 @@ class ResponseService:
         allowed_ips: List[str],
         incident_lookup: Callable[[str], Optional[str]],
         now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        live_context: Optional[Callable[[], Dict[str, Any]]] = None,
     ):
         self.state_dir = state_dir
         self.blocklist_path = os.path.join(state_dir, "blocklist.json")
         self.actions_path = os.path.join(state_dir, "response-actions.json")
+        self.verification_audit_path = os.path.join(state_dir, "response-verification-audit.jsonl")
         safe = []
         for ip in allowed_ips:
             canon = _valid_single_ipv4(ip)
@@ -98,6 +100,7 @@ class ResponseService:
         self.allowed_ips = safe
         self.incident_lookup = incident_lookup
         self.now = now
+        self.live_context = live_context or (lambda: {})
         self._lock = threading.RLock()
         self._previews: Dict[str, Dict[str, Any]] = {}
         self._actions: Dict[str, Dict[str, Any]] = {}
@@ -123,24 +126,66 @@ class ResponseService:
             raise
 
     def _load(self) -> None:
+        changed = False
         try:
             with open(self.actions_path, "r", encoding="utf-8") as fh:
                 saved = json.load(fh)
-            self._actions = saved.get("actions", {})
+            actions = saved.get("actions", {})
+            self._actions = actions if isinstance(actions, dict) else {}
             self._version = int(saved.get("version", 0))
-        except (OSError, ValueError):
+        except (OSError, ValueError, AttributeError, TypeError):
             pass
+        policy_entries = []
         try:
             with open(self.blocklist_path, "r", encoding="utf-8") as fh:
-                self._version = max(self._version, int(json.load(fh).get("version", 0)))
-        except (OSError, ValueError):
+                policy = json.load(fh)
+            self._version = max(self._version, int(policy.get("version", 0)))
+            policy_entries = policy.get("entries", []) if isinstance(policy.get("entries", []), list) else []
+        except (OSError, ValueError, AttributeError, TypeError):
             pass
+        entries_by_id = {e.get("action_id"): e for e in policy_entries
+                         if isinstance(e, dict) and isinstance(e.get("action_id"), str)}
+        for action_id, action in self._actions.items():
+            if not isinstance(action, dict) or action.get("status") not in ACTIVE:
+                continue
+            entry = entries_by_id.get(action_id)
+            if not entry or entry.get("ip") != action.get("target_ip") or entry.get("expires_at") != action.get("until"):
+                action["status"] = "reconciliation_required"
+                action.setdefault("verification_mismatches", []).append({"event_id": None,
+                    "received_at": _iso(self.now()), "reason": "active_action_missing_or_changed_in_policy_after_restart"})
+                changed = True
+        now = self.now()
+        for action_id, entry in entries_by_id.items():
+            if action_id in self._actions:
+                continue
+            try:
+                expiry, created = _parse(entry["expires_at"]), _parse(entry["created_at"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if expiry <= now:
+                continue
+            target = _valid_single_ipv4(entry.get("ip"))
+            revision = entry.get("policy_revision")
+            if target not in self.allowed_ips or entry.get("capture_mode") != "live":
+                continue
+            if not isinstance(revision, int) or isinstance(revision, bool):
+                continue
+            self._actions[action_id] = {"action_id": action_id, "target_ip": target, "status": "applied",
+                "reason": "recovered from enforcement policy after restart", "created_at": _iso(created),
+                "until": _iso(expiry), "verified_by_event_id": None, "incident_id": None,
+                "lab_run_id": entry.get("lab_run_id"), "capture_mode": "live", "policy_revision": revision,
+                "recovered_after_restart": True}
+            changed = True
+        if changed:
+            self._write_state()
 
     def _write_state(self) -> None:
         """Blocklist first (enforcement), then the action record."""
         self._version += 1
         entries = [
-            {"ip": a["target_ip"], "action_id": a["action_id"], "expires_at": a["until"]}
+            {"ip": a["target_ip"], "action_id": a["action_id"], "expires_at": a["until"],
+             "policy_revision": a["policy_revision"], "created_at": a["created_at"],
+             "lab_run_id": a["lab_run_id"], "capture_mode": a["capture_mode"]}
             for a in self._actions.values()
             if a["status"] in ACTIVE
         ]
@@ -168,6 +213,12 @@ class ResponseService:
             ttl = DEFAULT_BLOCK_TTL
         if isinstance(ttl, bool) or not isinstance(ttl, int) or not MIN_BLOCK_TTL <= ttl <= MAX_BLOCK_TTL:
             raise ApiError(400, "invalid_request", f"ttl_seconds must be an integer {MIN_BLOCK_TTL} to {MAX_BLOCK_TTL}")
+        context = self.live_context()
+        if context.get("capture_mode", "live") != "live":
+            raise ApiError(409, "not_live", "response previews are available only during a live run")
+        run_id = context.get("lab_run_id")
+        if not isinstance(run_id, str) or not run_id:
+            raise ApiError(409, "run_unavailable", "live lab run context is unavailable")
         src = self.incident_lookup(incident_id)
         if src is None:
             raise ApiError(404, "not_found", "incident not found")
@@ -179,7 +230,9 @@ class ResponseService:
             now = self.now()
             preview_id = "prv_" + secrets.token_hex(6)
             expires = now + timedelta(seconds=PREVIEW_TTL_SECONDS)
-            self._previews[preview_id] = {"incident_id": incident_id, "target_ip": target, "ttl": ttl, "expires_at": expires}
+            self._previews[preview_id] = {"incident_id": incident_id, "target_ip": target, "ttl": ttl,
+                "expires_at": expires, "lab_run_id": run_id,
+                "policy_revision": self._current_policy_version()}
             return {"preview_id": preview_id, "target_ip": target, "scope": SCOPE, "ttl_seconds": ttl, "expires_at": _iso(expires)}
 
     def apply(self, preview_id: Any, reason: Any, confirm: Any) -> Dict[str, Any]:
@@ -195,6 +248,15 @@ class ResponseService:
             target = pv["target_ip"]
             if target not in self.allowed_ips:  # re-check at apply time
                 raise ApiError(400, "target_not_allowed", "target is not an allowed lab attacker IP")
+            context = self.live_context()
+            if context.get("capture_mode", "live") != "live":
+                raise ApiError(409, "not_live", "response actions are available only during a live run")
+            run_id = context.get("lab_run_id")
+            if not isinstance(run_id, str) or not run_id:
+                raise ApiError(409, "run_unavailable", "live lab run context is unavailable")
+            if run_id != pv["lab_run_id"] or self._current_policy_version() != pv["policy_revision"]:
+                raise ApiError(409, "preview_stale", "run or policy changed; request a new preview")
+            policy_revision = max(self._version, self._current_policy_version()) + 1
             if any(a["target_ip"] == target and a["status"] in ACTIVE for a in self._actions.values()):
                 raise ApiError(409, "already_blocked", "an active block already exists for this IP")
             del self._previews[preview_id]  # single use
@@ -204,7 +266,8 @@ class ResponseService:
             self._actions[action_id] = {
                 "action_id": action_id, "target_ip": target, "status": "applied", "reason": reason.strip(),
                 "created_at": _iso(now), "until": _iso(until), "verified_by_event_id": None,
-                "incident_id": pv["incident_id"],
+                "incident_id": pv["incident_id"], "lab_run_id": run_id,
+                "capture_mode": "live", "policy_revision": policy_revision,
             }
             self._write_state()
             return {"action_id": action_id, "status": "applied", "until": _iso(until)}
@@ -226,24 +289,104 @@ class ResponseService:
             self.expire()
             items = [
                 {k: a[k] for k in ("action_id", "target_ip", "status", "reason", "created_at", "until", "verified_by_event_id")}
+                | {"verification_mismatches": a.get("verification_mismatches", [])}
                 for a in sorted(self._actions.values(), key=lambda x: x["created_at"], reverse=True)
             ]
             return {"items": items}
 
-    def on_event(self, event: Any) -> None:
-        """Called by the backend for every ingested event. blocked_request + known action -> verified."""
+    def on_event(self, event: Any, trusted_context: Optional[Dict[str, Any]] = None) -> None:
+        """Verify only a trusted, persisted blocked_request matching the full enforcement context.
+
+        `trusted_context` is populated by the backend after commit. In particular, received_at must
+        be the backend's own timestamp, never a field copied from the sensor payload.
+        """
         get = event.get if isinstance(event, dict) else lambda k, d=None: getattr(event, k, d)
         if get("event_type") != "blocked_request":
             return
         attrs = get("attributes") or {}
         attrs = attrs if isinstance(attrs, dict) else getattr(attrs, "__dict__", {})
         action_id = attrs.get("block_action_id")
+        context = trusted_context if isinstance(trusted_context, dict) else {}
+        sensor_id = get("sensor_id")
+        src_ip = get("src_ip")
+        run_id = get("lab_run_id")
+        capture_mode = get("capture_mode")
+        event_time = get("occurred_at")
+        revision = attrs.get("policy_revision")
+        event_id = get("event_id")
         with self._lock:
             a = self._actions.get(action_id) if isinstance(action_id, str) else None
-            if a is not None and a["status"] == "applied":
+            if a is None:
+                self._write_unmatched_verification(event_id, action_id, context)
+                return
+            if a is not None:
+                now = self.now()
+                try:
+                    occurred = _parse(event_time) if isinstance(event_time, str) else None
+                    received = _parse(context.get("received_at")) if isinstance(context.get("received_at"), str) else None
+                    action_created = _parse(a["created_at"])
+                    action_until = _parse(a["until"])
+                except (TypeError, ValueError):
+                    occurred = received = action_created = action_until = None
+                live = self.live_context()
+                valid = (
+                    a["status"] == "applied"
+                    and sensor_id == "web-decoy-01" and src_ip == a["target_ip"]
+                    and run_id == a["lab_run_id"] and run_id == live.get("lab_run_id")
+                    and capture_mode == "live" and a.get("capture_mode") == "live"
+                    and live.get("capture_mode", "live") == "live"
+                    and revision == a.get("policy_revision") == self._policy_revision(action_id)
+                    and occurred is not None and received is not None
+                    and context.get("source") == "backend_ingest"
+                    and context.get("persisted_event_id") == event_id
+                    and action_created is not None and action_until is not None
+                    and action_created <= occurred <= action_until
+                    and action_created <= received <= action_until
+                    and now <= action_until
+                    and isinstance(event_id, str) and bool(event_id)
+                )
+                if not valid:
+                    # Keep a rejected verification attempt visible in the durable audit trail.
+                    a.setdefault("verification_mismatches", []).append({
+                        "event_id": event_id if isinstance(event_id, str) else None,
+                        "received_at": context.get("received_at"),
+                        "reason": "verification_context_mismatch",
+                    })
+                    self._atomic_write(self.actions_path, {"version": self._version, "actions": self._actions})
+                    return
                 a["status"] = "verified"
-                a["verified_by_event_id"] = get("event_id")
+                a["verified_by_event_id"] = event_id
                 self._atomic_write(self.actions_path, {"version": self._version, "actions": self._actions})
+
+    def _write_unmatched_verification(self, event_id: Any, action_id: Any, context: Dict[str, Any]) -> None:
+        os.makedirs(os.path.dirname(self.verification_audit_path), exist_ok=True)
+        record = {"event_id": event_id if isinstance(event_id, str) else None,
+                  "block_action_id": action_id[:128] if isinstance(action_id, str) else None,
+                  "received_at": context.get("received_at") if isinstance(context.get("received_at"), str) else None,
+                  "reason": "unknown_action_id"}
+        with open(self.verification_audit_path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def _policy_revision(self, action_id: str) -> Optional[int]:
+        try:
+            with open(self.blocklist_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            entry = next((item for item in data.get("entries", [])
+                          if isinstance(item, dict) and item.get("action_id") == action_id), None)
+            value = entry.get("policy_revision") if entry else None
+            return value if isinstance(value, int) and not isinstance(value, bool) else None
+        except (OSError, ValueError, AttributeError):
+            return None
+
+    def _current_policy_version(self) -> int:
+        try:
+            with open(self.blocklist_path, "r", encoding="utf-8") as fh:
+                value = json.load(fh).get("version", 0)
+            return value if isinstance(value, int) and not isinstance(value, bool) else 0
+        except (OSError, ValueError, AttributeError):
+            return self._version
 
 
 # ---- default wiring --------------------------------------------------
@@ -264,17 +407,20 @@ _service_lock = threading.Lock()
 
 def configure(state_dir: Optional[str] = None, env_file: Optional[str] = None,
               incident_lookup: Optional[Callable[[str], Optional[str]]] = None,
-              now: Optional[Callable[[], datetime]] = None) -> ResponseService:
+              now: Optional[Callable[[], datetime]] = None,
+              live_context: Optional[Callable[[], Dict[str, Any]]] = None) -> ResponseService:
     """Build the service. Defaults read deployment/lab.env and use deployment/state."""
     global _service
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = _parse_env_file(env_file or os.path.join(root, "deployment", "lab.env"))
     allowed = [x.strip() for x in env.get("ATTACKER_IPS", "192.168.77.10").split(",") if x.strip()]
     backend = env.get("BACKEND_URL", "http://127.0.0.1:8000")
+    run_id = env.get("LAB_RUN_ID", "run-01")
     with _service_lock:
         _service = ResponseService(
             state_dir or os.path.join(root, "deployment", "state"), allowed,
             incident_lookup or _default_lookup_factory(backend), now or (lambda: datetime.now(timezone.utc)),
+            live_context or (lambda: {"lab_run_id": run_id, "capture_mode": env.get("CAPTURE_MODE", "live")}),
         )
     return _service
 
@@ -315,5 +461,5 @@ def actions():
     return _run(lambda: _svc().list_actions())
 
 
-def on_event(event: Any) -> None:
-    _svc().on_event(event)
+def on_event(event: Any, trusted_context: Optional[Dict[str, Any]] = None) -> None:
+    _svc().on_event(event, trusted_context)

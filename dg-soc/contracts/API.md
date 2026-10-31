@@ -70,9 +70,17 @@ Link:
 | `POST /api/response/preview` | `{ "incident_id", "ttl_seconds": 120 }` | `{ "preview_id", "target_ip", "scope": "web-decoy-01 only", "ttl_seconds", "expires_at" }` preview valid 60 s. 400 if target is not an allowed lab IP |
 | `POST /api/response/apply` | `{ "preview_id", "reason": "min 5 chars", "confirm": true }` | `{ "action_id", "status": "applied", "until": "..." }` |
 | `POST /api/response/{action_id}/revoke` | `{}` | `{ "action_id", "status": "revoked" }` |
-| `GET /api/response/actions` | | `{ "items": [ { "action_id", "target_ip", "status": "applied|verified|expired|revoked", "reason", "created_at", "until", "verified_by_event_id" } ] }` |
+| `GET /api/response/actions` | | `{ "items": [ { "action_id", "target_ip", "status": "applied|verified|expired|revoked|reconciliation_required", "reason", "created_at", "until", "verified_by_event_id", "verification_mismatches": [] } ] }` |
 
 `verified` means a `blocked_request` event with matching `block_action_id` arrived. The UI shows "verified" only then.
+
+For provenance, the enforcing web decoy adds `attributes.policy_revision` to a denied request. The
+response verifier also checks `sensor_id=web-decoy-01`, the exact target `src_ip`, `lab_run_id`,
+`capture_mode=live`, event and backend receive times within the action interval, and the action's
+policy revision. The backend integration calls `on_event(event, trusted_context)` only after commit,
+where `trusted_context` is backend-created: `{ "source": "backend_ingest", "persisted_event_id": event["event_id"],
+"received_at": event["ingested_at"] }`. Never build this context from sensor payload fields. A mismatch is
+retained in action audit data and does not verify the action.
 
 Allowed targets: exactly the IPs in `deployment/lab.env` `ATTACKER_IPS` (default `192.168.77.10`). Never `192.168.77.20`, `127.0.0.1`, or a range.
 
@@ -81,10 +89,10 @@ Allowed targets: exactly the IPs in `deployment/lab.env` `ATTACKER_IPS` (default
 `deployment/state/blocklist.json`, written atomically (write tmp, rename). Web decoy mounts it read-only and reads it on every request through `decoys/policy/policy.py: check(ip) -> action_id | None`.
 
 ```json
-{ "version": 3, "entries": [ { "ip": "192.168.77.10", "action_id": "act_01", "expires_at": "2026-11-01T05:12:00Z" } ] }
+{ "version": 3, "entries": [ { "ip": "192.168.77.10", "action_id": "act_01", "expires_at": "2026-11-01T05:12:00Z", "policy_revision": 3, "created_at": "2026-11-01T05:10:00Z", "lab_run_id": "run-01", "capture_mode": "live" } ] }
 ```
 
-Expired entries are ignored by `check()`. A blocked request gets HTTP 403 and the web decoy logs a `blocked_request` event with `attributes.block_action_id`.
+Expired entries are ignored by `check()`. A blocked request gets HTTP 403 and the web decoy logs a `blocked_request` event with `attributes.block_action_id` and the entry's `policy_revision`, read from the same policy snapshot.
 
 ## WebSocket `/ws/events`
 

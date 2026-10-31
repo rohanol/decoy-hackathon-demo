@@ -15,6 +15,12 @@ def file_checker(path, allowed_ips):
             "192.168.77.0", "192.168.77.20", "192.168.77.255"
         }:
             raise ValueError("ATTACKER_IPS must contain exact allowed lab IPs")
+    for value in allowed:
+        address = ipaddress.IPv4Address(value)
+        if address not in ipaddress.IPv4Network("192.168.77.0/24") or value in {
+            "192.168.77.0", "192.168.77.20", "192.168.77.255"
+        }:
+            raise ValueError("ATTACKER_IPS must contain exact allowed lab IPs")
 
     def check(ip):
         state = json.loads(Path(path).read_text())
@@ -35,19 +41,39 @@ def file_checker(path, allowed_ips):
 
 
 def resolve_checker(path, allowed_ips):
-    guarded = file_checker(path, allowed_ips)
     try:
         from decoys.policy.policy import check
     except ModuleNotFoundError as error:
         if error.name not in {"decoys.policy", "decoys.policy.policy"}:
             raise
-        return guarded
+        return file_checker(path, allowed_ips)
+    return check
 
-    def m2_check(ip):
-        # M2's check() fails open and defaults to /state/blocklist.json. Validate the configured
-        # file first, so missing or malformed state still fails closed exactly as it does in the
-        # container (whose build context has no decoys/policy), then ask M2 about that same file.
-        guarded(ip)
-        return check(ip, str(path))
 
-    return m2_check
+def resolve_enforcer(path, allowed_ips):
+    """Return (action_id, policy_revision) from the same request-time policy snapshot."""
+    try:
+        from decoys.policy.policy import check_with_revision
+        return lambda ip: check_with_revision(ip, path)
+    except ModuleNotFoundError as error:
+        if error.name not in {"decoys.policy", "decoys.policy.policy"}:
+            raise
+
+    allowed = set(allowed_ips)
+    def enforce(ip):
+        # One atomic file read keeps action ID and revision from the same policy snapshot.
+        state = json.loads(Path(path).read_text())
+        if not isinstance(state, dict) or type(state.get("version")) is not int or not isinstance(state.get("entries"), list):
+            raise ValueError("Invalid blocklist format")
+        now = datetime.now(timezone.utc)
+        for entry in state["entries"]:
+            if not isinstance(entry, dict) or not isinstance(entry.get("expires_at"), str):
+                raise ValueError("Invalid blocklist entry")
+            expires = datetime.fromisoformat(entry["expires_at"].replace("Z", "+00:00"))
+            if expires.tzinfo is None or not isinstance(entry.get("action_id"), str) or not entry["action_id"]:
+                raise ValueError("Invalid blocklist entry")
+            if entry.get("ip") == ip and ip in allowed and expires > now:
+                revision = entry.get("policy_revision", state["version"])
+                return entry["action_id"], revision if type(revision) is int else None
+        return None, state["version"]
+    return enforce

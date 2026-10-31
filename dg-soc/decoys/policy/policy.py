@@ -35,15 +35,23 @@ def check(ip: str, path: Optional[str] = None, now: Optional[datetime] = None) -
     take the decoy down. The preflight script checks the file is valid JSON before every run.
     Entries with a missing or unparseable expires_at are ignored (a block always needs an expiry).
     """
+    action_id, _revision = check_with_revision(ip, path, now)
+    return action_id
+
+
+def check_with_revision(ip: str, path: Optional[str] = None,
+                        now: Optional[datetime] = None) -> tuple[Optional[str], Optional[int]]:
+    """Return the action and its enforced policy revision from one atomic file snapshot."""
     now = now or datetime.now(timezone.utc)
     try:
         with open(path or DEFAULT_PATH, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         entries = data.get("entries", [])
+        version = data.get("version")
     except (OSError, ValueError, AttributeError):
-        return None
+        return None, None
     if not isinstance(entries, list):
-        return None
+        return None, None
     for entry in entries:
         if not isinstance(entry, dict) or entry.get("ip") != ip:
             continue
@@ -51,5 +59,6 @@ def check(ip: str, path: Optional[str] = None, now: Optional[datetime] = None) -
         if expires is not None and expires > now:
             action_id = entry.get("action_id")
             if isinstance(action_id, str) and action_id:
-                return action_id
-    return None
+                revision = entry.get("policy_revision", version)
+                return action_id, revision if isinstance(revision, int) and not isinstance(revision, bool) else None
+    return None, version if isinstance(version, int) and not isinstance(version, bool) else None

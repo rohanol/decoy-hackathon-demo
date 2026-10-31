@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from policy import check
+from policy import check, check_with_revision
 
 NOW = datetime(2026, 11, 1, 5, 0, 0, tzinfo=timezone.utc)
 
@@ -13,7 +13,7 @@ def write(tmp_path, entries):
 
 
 def entry(ip, minutes, action="act_01"):
-    return {"ip": ip, "action_id": action, "expires_at": (NOW + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")}
+    return {"ip": ip, "action_id": action, "expires_at": (NOW + timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ"), "policy_revision": 3}
 
 
 def test_active_entry_blocks(tmp_path):
@@ -38,3 +38,8 @@ def test_missing_file_and_garbage_fail_open(tmp_path):
 def test_entry_without_expiry_ignored(tmp_path):
     p = write(tmp_path, [{"ip": "192.168.77.10", "action_id": "act_01"}])
     assert check("192.168.77.10", p, NOW) is None
+
+
+def test_action_and_policy_revision_come_from_same_snapshot(tmp_path):
+    path = write(tmp_path, [entry("192.168.77.10", 2)])
+    assert check_with_revision("192.168.77.10", path, NOW) == ("act_01", 3)
