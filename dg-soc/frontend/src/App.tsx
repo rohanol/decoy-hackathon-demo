@@ -1,9 +1,9 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell';
+import { IncidentDetail } from './screens/IncidentDetail';
 import { LiveFeed } from './screens/LiveFeed';
 import {
   AttackGraph,
-  IncidentDetail,
   IncidentList,
   NotFound,
   Overview,

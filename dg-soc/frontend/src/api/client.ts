@@ -37,13 +37,18 @@ function isErrorBody(value: unknown): value is ApiErrorBody {
   return typeof (err as { code?: unknown }).code === 'string';
 }
 
-async function get<T>(path: string): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
-      headers: { Accept: 'application/json' },
+      ...init,
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...init?.headers,
+      },
     });
-  } catch (cause) {
+  } catch {
     throw new ApiError(
       'network_unreachable',
       `Cannot reach the backend at ${API_BASE}. Is it running?`,
@@ -69,6 +74,14 @@ async function get<T>(path: string): Promise<T> {
   }
 
   return body as T;
+}
+
+function get<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+
+function post<T>(path: string, body: unknown): Promise<T> {
+  return request<T>(path, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export interface EventsQuery {
@@ -99,7 +112,27 @@ export function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
 }
 
 export function fetchIncident(incidentId: string): Promise<Incident> {
+  if (USE_FIXTURES) return fixtures.fetchIncident(incidentId);
   return get<Incident>(`/api/incidents/${encodeURIComponent(incidentId)}`);
+}
+
+/**
+ * The analyst's decision on a cross-decoy link. Confirm makes R05 count, and
+ * R09 too when the link is a strong candidate (AGENTS.md section 4).
+ * Reversible: another decision overwrites it.
+ */
+export function postLinkDecision(
+  linkId: string,
+  decision: 'confirm' | 'reject',
+  rationale: string,
+): Promise<Link> {
+  if (USE_FIXTURES) return fixtures.postLinkDecision(linkId, decision, rationale);
+  return post<Link>(`/api/links/${encodeURIComponent(linkId)}/decision`, { decision, rationale });
+}
+
+/** Download URL for the incident export. No password hashes (API.md). */
+export function incidentExportUrl(incidentId: string): string {
+  return `${API_BASE}/api/incidents/${encodeURIComponent(incidentId)}/export`;
 }
 
 export function fetchTranscript(incidentId: string, sessionId: string): Promise<Transcript> {
@@ -110,6 +143,7 @@ export function fetchTranscript(incidentId: string, sessionId: string): Promise<
 }
 
 export function fetchLinks(): Promise<{ items: Link[] }> {
+  if (USE_FIXTURES) return fixtures.fetchLinks();
   return get<{ items: Link[] }>('/api/links');
 }
 

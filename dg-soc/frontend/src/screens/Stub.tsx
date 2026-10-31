@@ -46,13 +46,6 @@ export const IncidentList = () => (
   />
 );
 
-export const IncidentDetail = () => (
-  <Stub
-    title="Incident"
-    specSection="section 9"
-    buildOrder="Build order 2 of 7. Needs GET /api/incidents/{incident_id} from M3."
-  />
-);
 
 export const TranscriptReplay = () => (
   <Stub

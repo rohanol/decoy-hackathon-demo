@@ -17,9 +17,13 @@
 import fixtureFile from '../../../contracts/examples/events_p3.json';
 import type {
   EventsPage,
+  Finding,
   Health,
+  Incident,
   IncidentSummary,
   IngestEvent,
+  Link,
+  ScoreBreakdownRow,
   SocEvent,
   WsMessage,
 } from '../types/api';
@@ -79,7 +83,11 @@ function released(): SocEvent[] {
 export async function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
   await sleep(FAKE_LATENCY_MS);
 
-  let items = released();
+  // The progressive-release gate exists to make the live feed stream. A query
+  // for one incident is asking for that incident's record, which a real backend
+  // would answer in full — so it bypasses the gate. Without this, evidence ids
+  // on the incident page are unresolvable until the stream catches up.
+  let items = query.incident_id ? ALL_EVENTS : released();
   if (query.incident_id) items = items.filter((e) => e.incident_id === query.incident_id);
   if (query.sensor_id) items = items.filter((e) => e.sensor_id === query.sensor_id);
   if (query.since_seq !== undefined) {
@@ -110,40 +118,259 @@ export async function fetchHealth(): Promise<Health> {
   return { ok: true, sensors };
 }
 
-/**
- * Placeholder incidents so sidebar counts and navigation work before M3 ships.
- * Score and severity here are NOT computed from the events — the real backend
- * owns scoring (config/scoring.yaml). These are stand-in values, and the
- * FIXTURES chip in the topbar makes that visible on screen.
+/*
+ * ---------------------------------------------------------------------------
+ * Mock incident for inc_01.
+ *
+ * Hand-authored to match the P3 demo narrative in scenarios/demo_p3.md, citing
+ * the real event ids this file generates. Scores and severities are NOT
+ * computed here from the events — they are stand-in values written to match
+ * config/scoring.yaml, exactly as the real backend would report them. Scoring
+ * belongs to M3.
+ *
+ * Note which rules fire: R01, R02, R03, R04, R07, plus R05 and R09 once the
+ * analyst confirms the link. R08 does NOT fire, because the fixture has no
+ * hidden-path probing or 404 burst. That leaves the recon stage genuinely
+ * unobserved, which is what the kill-chain bar should show.
+ * ---------------------------------------------------------------------------
  */
+
+const AUTH_FAILURE_EVENTS = [
+  'evt_dba0082e',
+  'evt_8c09b371',
+  'evt_01dc6054',
+  'evt_f3bc8220',
+  'evt_4e90553f',
+  'evt_b6b3be77',
+];
+
+/** Mutable: the analyst's decision changes it, as it would on the backend. */
+let fixtureLink: Link = {
+  link_id: 'lnk_01',
+  from_event_id: 'evt_569c0a23',
+  to_event_id: 'evt_9daf2fae',
+  from_sensor: 'ssh-decoy-01',
+  to_sensor: 'web-decoy-01',
+  kind: 'strong_candidate',
+  basis: 'honeytoken tok_portal_01',
+  status: 'open',
+  decided_at: null,
+  rationale: null,
+};
+
+function buildFindings(linkConfirmed: boolean): Finding[] {
+  return [
+    {
+      finding_id: 'fnd_01',
+      rule_id: 'R01',
+      rule_version: 'R01@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: ['T1110.001'],
+      stage: 'credential_attack',
+      label: 'Repeated SSH password guessing (6 failures in 60 s)',
+      limitation: 'Does not show the account was compromised.',
+      evidence_event_ids: AUTH_FAILURE_EVENTS,
+      points: 25,
+      created_at: '2026-11-01T04:30:11Z',
+    },
+    {
+      finding_id: 'fnd_02',
+      rule_id: 'R02',
+      rule_version: 'R02@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: ['T1059.004'],
+      stage: 'post_access',
+      label: 'Commands submitted to the emulated shell after an accepted login',
+      limitation: 'Nothing executed on a real host. The shell is emulated.',
+      evidence_event_ids: ['evt_877b597a', 'evt_083bc808', 'evt_cb51c275', 'evt_569c0a23'],
+      points: 15,
+      created_at: '2026-11-01T04:30:23Z',
+    },
+    {
+      finding_id: 'fnd_03',
+      rule_id: 'R03',
+      rule_version: 'R03@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: ['T1083'],
+      stage: 'post_access',
+      label: 'Directory listing attempted in the emulated shell',
+      limitation: 'Shows a discovery attempt only. Nothing was enumerated on a real host.',
+      evidence_event_ids: ['evt_cb51c275'],
+      points: 10,
+      created_at: '2026-11-01T04:30:27Z',
+    },
+    {
+      finding_id: 'fnd_04',
+      rule_id: 'R07',
+      rule_version: 'R07@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: ['T1190'],
+      stage: 'exploit_attempt',
+      label: 'Web attack attempt against /search',
+      limitation: 'Does not show successful exploitation. The decoy returned a canned error.',
+      evidence_event_ids: ['evt_bc86cf44'],
+      points: 15,
+      web_attack_class: ['sqli'],
+      created_at: '2026-11-01T04:31:20Z',
+    },
+    {
+      finding_id: 'fnd_05',
+      rule_id: 'R04',
+      rule_version: 'R04@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: ['T1005'],
+      stage: 'data_access',
+      label: 'Synthetic file served (customer_data.csv)',
+      limitation: 'The file was synthetic. No real data exists in this lab.',
+      evidence_event_ids: ['evt_c2eeed76', 'evt_f06aa469'],
+      points: 30,
+      created_at: '2026-11-01T04:31:30Z',
+    },
+    {
+      finding_id: 'fnd_06',
+      rule_id: 'R09',
+      rule_version: 'R09@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: [],
+      stage: 'none',
+      label: 'Honeytoken planted on ssh-decoy-01 presented on web-decoy-01',
+      limitation: linkConfirmed
+        ? 'Shows the same source followed our planted trail. Does not identify a person.'
+        : 'Awaiting analyst confirmation.',
+      evidence_event_ids: ['evt_569c0a23', 'evt_9daf2fae'],
+      points: linkConfirmed ? 15 : 0,
+      pending_confirmation: !linkConfirmed,
+      created_at: '2026-11-01T04:31:10Z',
+    },
+    {
+      finding_id: 'fnd_07',
+      rule_id: 'R05',
+      rule_version: 'R05@1',
+      incident_id: 'inc_01',
+      src_ip: '192.168.77.10',
+      technique_ids: [],
+      stage: 'none',
+      label: 'Analyst-confirmed link between ssh-decoy-01 and web-decoy-01',
+      limitation: linkConfirmed
+        ? 'A confirmed link does not identify a person.'
+        : 'Awaiting analyst confirmation.',
+      evidence_event_ids: ['evt_569c0a23', 'evt_9daf2fae'],
+      points: linkConfirmed ? 15 : 0,
+      pending_confirmation: !linkConfirmed,
+      created_at: '2026-11-01T04:31:10Z',
+    },
+  ];
+}
+
+function buildBreakdown(linkConfirmed: boolean): ScoreBreakdownRow[] {
+  return [
+    { rule_id: 'R01', points: 25, counted: true, reason: 'first R01' },
+    { rule_id: 'R02', points: 15, counted: true, reason: 'first R02' },
+    { rule_id: 'R03', points: 10, counted: true, reason: 'first R03' },
+    { rule_id: 'R04', points: 30, counted: true, reason: 'first R04' },
+    { rule_id: 'R07', points: 15, counted: true, reason: 'first R07' },
+    {
+      rule_id: 'R05',
+      points: linkConfirmed ? 15 : 0,
+      counted: linkConfirmed,
+      reason: linkConfirmed ? 'link confirmed by analyst' : 'awaiting link confirmation',
+    },
+    {
+      rule_id: 'R09',
+      points: linkConfirmed ? 15 : 0,
+      counted: linkConfirmed,
+      reason: linkConfirmed ? 'link confirmed by analyst' : 'awaiting link confirmation',
+    },
+  ];
+}
+
+function summaryFor(linkConfirmed: boolean): string {
+  const base =
+    'Six SSH password attempts from 192.168.77.10 against dg_demo were rejected by the decoy, ' +
+    'then one was accepted by the emulated shell. Three commands were submitted to the emulated ' +
+    'shell. A web attack attempt reached /search on the web decoy, and a synthetic file was served.';
+  return linkConfirmed
+    ? `${base} An analyst confirmed that a honeytoken planted on ssh-decoy-01 was presented on web-decoy-01.`
+    : `${base} A honeytoken planted on ssh-decoy-01 was presented on web-decoy-01, awaiting analyst confirmation.`;
+}
+
+function incidentSummary(): IncidentSummary {
+  const confirmed = fixtureLink.status === 'confirmed';
+  return {
+    incident_id: 'inc_01',
+    src_ip: '192.168.77.10',
+    lab_run_id: 'run-fixture',
+    // Stand-in values matching config/scoring.yaml. 95 before confirmation;
+    // 125 raw after, capped at 100.
+    score: confirmed ? 100 : 95,
+    severity: 'critical',
+    // No R08, so recon is genuinely not observed.
+    stages_observed: ['credential_attack', 'exploit_attempt', 'post_access', 'data_access'],
+    first_seen: '2026-11-01T04:30:00Z',
+    last_seen: '2026-11-01T04:32:30Z',
+    event_count: ALL_EVENTS.length,
+  };
+}
+
 export async function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
   await sleep(FAKE_LATENCY_MS);
-  const byIncident = new Map<string, SocEvent[]>();
-  for (const event of released()) {
-    const id = event.incident_id ?? 'inc_unknown';
-    const bucket = byIncident.get(id);
-    if (bucket) bucket.push(event);
-    else byIncident.set(id, [event]);
-  }
+  return { items: [incidentSummary()] };
+}
 
-  const items: IncidentSummary[] = [];
-  for (const [incidentId, events] of byIncident) {
-    const first = events[0];
-    if (!first) continue;
-    const times = events.map((e) => e.occurred_at).sort();
-    items.push({
-      incident_id: incidentId,
-      src_ip: first.src_ip,
-      lab_run_id: first.lab_run_id,
-      score: 0,
-      severity: 'low',
-      stages_observed: [],
-      first_seen: times[0] ?? first.occurred_at,
-      last_seen: times[times.length - 1] ?? first.occurred_at,
-      event_count: events.length,
-    });
+export async function fetchIncident(incidentId: string): Promise<Incident> {
+  await sleep(FAKE_LATENCY_MS);
+  if (incidentId !== 'inc_01') {
+    throw new Error(`fixture has no incident ${incidentId}`);
   }
-  return { items };
+  const confirmed = fixtureLink.status === 'confirmed';
+  return {
+    ...incidentSummary(),
+    findings: buildFindings(confirmed),
+    score_breakdown: buildBreakdown(confirmed),
+    links: [fixtureLink],
+    sessions: [
+      { session_id: 'hyd0', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:00Z', commands: 0 },
+      { session_id: 'hyd1', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:02Z', commands: 0 },
+      { session_id: 'hyd2', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:04Z', commands: 0 },
+      { session_id: 'hyd3', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:06Z', commands: 0 },
+      { session_id: 'hyd4', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:08Z', commands: 0 },
+      { session_id: 'hyd5', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:10Z', commands: 0 },
+      { session_id: 'sess01', sensor_id: 'ssh-decoy-01', started_at: '2026-11-01T04:30:20Z', commands: 3 },
+    ],
+    summary: {
+      source: 'rules',
+      text: summaryFor(confirmed),
+      cited_event_ids: ['evt_dba0082e', 'evt_877b597a', 'evt_569c0a23', 'evt_bc86cf44', 'evt_f06aa469'],
+    },
+    active_block: null,
+  };
+}
+
+export async function fetchLinks(): Promise<{ items: Link[] }> {
+  await sleep(FAKE_LATENCY_MS);
+  return { items: [fixtureLink] };
+}
+
+export async function postLinkDecision(
+  linkId: string,
+  decision: 'confirm' | 'reject',
+  rationale: string,
+): Promise<Link> {
+  await sleep(FAKE_LATENCY_MS);
+  if (linkId !== fixtureLink.link_id) throw new Error(`fixture has no link ${linkId}`);
+  fixtureLink = {
+    ...fixtureLink,
+    status: decision === 'confirm' ? 'confirmed' : 'rejected',
+    decided_at: new Date().toISOString(),
+    rationale,
+  };
+  return fixtureLink;
 }
 
 export interface FixtureSocket {

@@ -104,10 +104,21 @@ around it in the UI.
   snapshot reload on every reconnect
 - All six global states on the feed: loading, empty, error, filtered, capped,
   no-backend
+- Incident detail: header with severity and score, kill-chain bar with a
+  clickable stage filter and a real "not observed" segment, rule-based summary
+  with clickable citations, finding cards showing label *and* limitation with
+  every evidence id opening its raw event, score breakdown including uncounted
+  rows and the cap note, cross-decoy links, sessions with replay links, and the
+  response panel
+- Link decision modal: both evidence events inline, mandatory rationale with a
+  live character count, confirm and reject, reversible, and a reload from the
+  API rather than an optimistic restyle
 
 ## Known gaps
 
-- Screens 1 and 3–7 are stubs that name their spec section and build order
+- Screens 1 and 5–7 are stubs that name their spec section and build order
+- The incident Block button is disabled until M2's response router exists
+- Export needs the live backend, so it is disabled in fixture mode
 - The drawer closes on `Esc` and autofocuses, but does not fully trap focus yet
 - Sensor health polls every 15s, so it can lag the feed by up to that long
 - `GET /api/events` has no `src_ip` filter in the contract, so IP filtering is

@@ -514,8 +514,13 @@ inc_01 · run-2026-11-01-01 · 42 events · 04:30:00Z → 04:32:30Z · 2m 30s
 incident ID. Beneath it, a metadata line: `incident_id`, `lab_run_id`, event count,
 first → last seen, duration.
 
-Right side: score as `100 / 100` at 32/600 in the severity colour, with the severity badge
-above it. The `/ 100` matters — it shows the cap is a known bound, not a coincidence.
+Right side: the score at 32/600 in the severity colour, with the severity badge above it.
+
+**Built as the bare number, not `100 / 100`.** The denominator would have to be the cap from
+`config/scoring.yaml`, which the API does not expose — hardcoding `100` means the UI starts
+lying the day M3 changes it. The cap still gets shown where it actually does something, in
+the breakdown footer (§9.3). Open question 7 asks Rohan to expose `score_cap`; if he does,
+restore the denominator.
 
 Buttons: **Export** (`GET /api/incidents/{id}/export`, downloads; tooltip "JSON export,
 password hashes excluded") and **Block** (opens the block flow, §12).
@@ -761,9 +766,12 @@ Clicking an **open** edge opens it:
   Enforce the minimum in the UI so the analyst never meets a server-side rejection mid-demo.
 - Show both evidence events inline with their IDs and a one-line detail. The analyst is
   making a judgement call; the judgement needs its evidence on the same surface.
-- The points sentence is built from `config/scoring.yaml` values **as reported by the API's
-  score breakdown**, not hardcoded. Phrase it as a consequence, not a recommendation — the
-  UI must not nudge toward confirming.
+- The consequence sentence names **which rules** confirming makes count, without point
+  values: a pending rule's `score_breakdown` row reports `points: 0`, so the UI has no
+  honest source for "+15" and will not invent one. Open question 8 asks whether pending rows
+  can carry their would-be points; until then the analyst sees the real delta when the score
+  updates. Phrase it as a consequence, not a recommendation — the UI must not nudge toward
+  confirming.
 - The closing caveat is mandatory, straight from `demo_p3.md`.
 - A decision is reversible: a decided link reopens this modal pre-filled with the previous
   rationale, and the primary button reads "Change decision".
@@ -965,6 +973,12 @@ Ask these in the group chat early — all are small, and each one blocks a panel
    with `counted: false`? §9.3 renders both, and uncounted rows are a credibility feature.
 6. Does `GET /api/health` include `lab_run_id`? The topbar currently takes it from events,
    which is empty before the first event arrives.
+7. Can the incident carry `score_cap` (the `cap` from `config/scoring.yaml`)? Without it the
+   header shows a bare score rather than `100 / 100`, because hardcoding the denominator
+   means the UI lies if the cap ever changes.
+8. For a rule awaiting confirmation, does its `score_breakdown` row report `points: 0`, or
+   the points it *would* contribute? If the latter, the link decision modal can tell the
+   analyst the exact delta before they decide, which is strictly better.
 
 None of these block the H4 gate. Build screen 2 on fixtures now.
 
