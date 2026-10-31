@@ -22,7 +22,7 @@ import {
 } from 'react';
 import { ApiError, fetchEvents, fetchHealth } from '../api/client';
 import { createEventStream, type ConnectionStatus, type EventStream } from '../api/socket';
-import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS } from '../api/config';
+import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS, MAX_SNAPSHOT_PAGES } from '../api/config';
 import type { CaptureMode, Health, SocEvent, WsMessage } from '../types/api';
 
 interface LiveStoreValue {
@@ -43,6 +43,12 @@ interface LiveStoreValue {
   labRunId: string | null;
   /** When data last arrived, for the offline pill and stale banners. */
   lastDataAt: Date | null;
+  /**
+   * Increments on every RE-connection (not the first). API.md requires the
+   * whole snapshot to be reloaded on reconnect, including incidents and links
+   * — so screens that hold their own data depend on this to resync.
+   */
+  connectionEpoch: number;
   setPaused: (paused: boolean) => void;
   retryNow: () => void;
   reload: () => void;
@@ -67,6 +73,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
   const [lastDataAt, setLastDataAt] = useState<Date | null>(null);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
 
   /** Highest seq applied. The gate for every incoming message. */
   const lastSeqRef = useRef(0);
@@ -77,6 +84,8 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const loadTokenRef = useRef(0);
   /** Screens listening for finding/incident/link/action messages. */
   const subscribersRef = useRef(new Set<(message: WsMessage) => void>());
+  /** The first connection is the initial load, not a resync. */
+  const hasConnectedRef = useRef(false);
 
   const subscribe = useCallback((handler: (message: WsMessage) => void) => {
     subscribersRef.current.add(handler);
@@ -100,11 +109,30 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     const token = ++loadTokenRef.current;
     setLoading(true);
     try {
-      const page = await fetchEvents({ limit: EVENTS_PAGE_LIMIT });
-      if (token !== loadTokenRef.current) return;
+      // GET /api/events returns events ASCENDING from since_seq, and next_seq is
+      // a forward cursor, not the global maximum. A single call therefore
+      // returns the OLDEST page — so for a run longer than one page the feed
+      // would show the oldest events and the socket would then append new ones
+      // on top, leaving a silent hole in the middle. Page forward to the end.
+      const collected: SocEvent[] = [];
+      let cursor = 0;
+      let lastSeq = 0;
+      for (let guard = 0; guard < MAX_SNAPSHOT_PAGES; guard += 1) {
+        const page = await fetchEvents({ since_seq: cursor, limit: EVENTS_PAGE_LIMIT });
+        if (token !== loadTokenRef.current) return;
+        collected.push(...page.items);
+        lastSeq = Math.max(lastSeq, page.next_seq ?? 0);
+        // Stop at a short page, or if the cursor stops advancing.
+        if (page.items.length < EVENTS_PAGE_LIMIT) break;
+        if (page.next_seq === undefined || page.next_seq <= cursor) break;
+        cursor = page.next_seq;
+      }
 
-      const ordered = [...page.items].sort((a, b) => b.seq - a.seq);
-      const maxSeq = ordered.reduce((max, event) => Math.max(max, event.seq), 0);
+      const ordered = collected.sort((a, b) => b.seq - a.seq);
+      const maxSeq = Math.max(
+        lastSeq,
+        ordered.reduce((max, event) => Math.max(max, event.seq), 0),
+      );
 
       // Reconnect discards the list rather than patching the gap (API.md).
       lastSeqRef.current = maxSeq;
@@ -152,13 +180,19 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     const stream = createEventStream({
       onStatus: setStatus,
       onConnected: () => {
+        if (hasConnectedRef.current) setConnectionEpoch((value) => value + 1);
+        else hasConnectedRef.current = true;
         void loadSnapshot();
       },
       onMessage: (message) => {
-        // Hand every message to the screens listening for their own type.
+        // Hand every message to the screens listening for their own type,
+        // BEFORE the seq gate below. API.md: a finding, link or incident
+        // message often reuses the previous event's seq, and an analyst
+        // decision sends messages with no new event at all — so those three
+        // types must never be dropped by seq.
         for (const handler of subscribersRef.current) handler(message);
 
-        // Only events feed the live feed itself.
+        // The seq gate applies to events only.
         if (message.type !== 'event') return;
         if (message.seq <= lastSeqRef.current) return;
         lastSeqRef.current = message.seq;
@@ -218,6 +252,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       captureMode,
       labRunId,
       lastDataAt,
+      connectionEpoch,
       setPaused,
       retryNow: () => streamRef.current?.retryNow(),
       reload: () => void loadSnapshot(),
@@ -236,6 +271,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       captureMode,
       labRunId,
       lastDataAt,
+      connectionEpoch,
       setPaused,
       loadSnapshot,
       subscribe,

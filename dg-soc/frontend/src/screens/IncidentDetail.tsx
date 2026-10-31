@@ -10,18 +10,21 @@
  * cap note rather than replacing the real score.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
 import { ApiError, fetchEvents, fetchIncident, incidentExportUrl } from '../api/client';
 import { USE_FIXTURES } from '../api/config';
 import { FindingCard } from '../components/FindingCard';
 import { KillChainBar } from '../components/KillChainBar';
+import { ActionCard } from '../components/ActionCard';
+import { BlockFlowModal } from '../components/BlockFlowModal';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { Card, EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
 import { STAGE_LABEL, linkPhrase } from '../copy';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
+import { useLiveStore } from '../state/LiveStore';
 import type { Incident, Link, SocEvent, Stage } from '../types/api';
 
 /** "2m 30s" between two timestamps. Presentation only. */
@@ -66,6 +69,8 @@ function LinkRow({ link, onDecide }: { link: Link; onDecide: (link: Link) => voi
 
 export function IncidentDetail() {
   const { incidentId } = useParams<{ incidentId: string }>();
+  const { subscribe, connectionEpoch } = useLiveStore();
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [incident, setIncident] = useState<Incident | null>(null);
   const [eventsById, setEventsById] = useState<Map<string, SocEvent>>(new Map());
@@ -75,6 +80,7 @@ export function IncidentDetail() {
   const [stageFilter, setStageFilter] = useState<Stage | null>(null);
   const [openEvent, setOpenEvent] = useState<SocEvent | null>(null);
   const [decidingLink, setDecidingLink] = useState<Link | null>(null);
+  const [blocking, setBlocking] = useState(false);
 
   const load = useCallback(async () => {
     if (!incidentId) return;
@@ -103,6 +109,48 @@ export function IncidentDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Resync after a dropped connection: API.md requires the whole snapshot to be
+  // reloaded on reconnect, not just the event feed.
+  useEffect(() => {
+    if (connectionEpoch > 0) void load();
+  }, [connectionEpoch, load]);
+
+  /**
+   * Live updates. API.md: when an `incident` message arrives for the page you
+   * have open, re-fetch GET /api/incidents/{id}.
+   *
+   * We re-fetch on `finding` and `link` too, rather than patching items in
+   * place. The whole page is derived from one GET, and in-place replacement
+   * cannot express a removal — a rejected link drops its R05 finding and no
+   * delete message is sent, so a patched page would keep showing a finding the
+   * backend no longer has. Re-fetching is always correct.
+   *
+   * Debounced, because a single analyst decision produces a burst of messages.
+   */
+  useEffect(() => {
+    const unsubscribe = subscribe((message) => {
+      if (message.type === 'event' || message.type === 'action') return;
+
+      // `link` carries no incident_id, so it cannot be filtered by incident.
+      // Findings and incidents can be, and are.
+      if (message.type === 'incident') {
+        const summary = message.data as { incident_id?: string };
+        if (summary?.incident_id !== incidentId) return;
+      } else if (message.type === 'finding') {
+        const finding = message.data as { incident_id?: string };
+        if (finding?.incident_id !== incidentId) return;
+      }
+
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+      refetchTimer.current = setTimeout(() => void load(), 250);
+    });
+
+    return () => {
+      unsubscribe();
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    };
+  }, [subscribe, incidentId, load]);
 
   const visibleFindings = useMemo(() => {
     if (!incident) return [];
@@ -158,8 +206,8 @@ export function IncidentDetail() {
         <button
           type="button"
           className="btn"
-          disabled
-          title="Response router not built yet — build order 7 of 7, needs M2"
+          onClick={() => setBlocking(true)}
+          title="Preview a 120 s block of this source on the web decoy"
         >
           Block
         </button>
@@ -326,18 +374,16 @@ export function IncidentDetail() {
           <Card title="Response">
             <div className="card__body">
               {incident.active_block === null ? (
-                <p className="state__hint" style={{ textAlign: 'left' }}>
-                  No action applied.
-                </p>
+                <>
+                  <p className="state__hint" style={{ textAlign: 'left' }}>
+                    No action applied.
+                  </p>
+                  <button type="button" className="btn" onClick={() => setBlocking(true)}>
+                    Preview block
+                  </button>
+                </>
               ) : (
-                <div className="kv">
-                  <span className="kv__k">action_id</span>
-                  <span className="kv__v">{incident.active_block.action_id}</span>
-                  <span className="kv__k">status</span>
-                  <span className="kv__v">{incident.active_block.status}</span>
-                  <span className="kv__k">until</span>
-                  <span className="kv__v">{timeUtcZ(incident.active_block.until)}</span>
-                </div>
+                <ActionCard action={incident.active_block} onExpired={() => void load()} />
               )}
             </div>
           </Card>
@@ -346,6 +392,17 @@ export function IncidentDetail() {
 
       {openEvent ? (
         <RawEventDrawer event={openEvent} onClose={() => setOpenEvent(null)} />
+      ) : null}
+
+      {blocking ? (
+        <BlockFlowModal
+          incidentId={incident.incident_id}
+          onClose={() => {
+            setBlocking(false);
+            void load();
+          }}
+          onChanged={() => void load()}
+        />
       ) : null}
 
       {decidingLink ? (

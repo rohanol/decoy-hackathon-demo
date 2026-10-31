@@ -35,10 +35,19 @@ def file_checker(path, allowed_ips):
 
 
 def resolve_checker(path, allowed_ips):
+    guarded = file_checker(path, allowed_ips)
     try:
         from decoys.policy.policy import check
     except ModuleNotFoundError as error:
         if error.name not in {"decoys.policy", "decoys.policy.policy"}:
             raise
-        return file_checker(path, allowed_ips)
-    return check
+        return guarded
+
+    def m2_check(ip):
+        # M2's check() fails open and defaults to /state/blocklist.json. Validate the configured
+        # file first, so missing or malformed state still fails closed exactly as it does in the
+        # container (whose build context has no decoys/policy), then ask M2 about that same file.
+        guarded(ip)
+        return check(ip, str(path))
+
+    return m2_check

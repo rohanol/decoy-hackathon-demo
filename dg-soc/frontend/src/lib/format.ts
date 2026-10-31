@@ -58,3 +58,14 @@ export function clamp(value: string, max: number): string {
 export function shortHash(value: string): string {
   return value.length <= 12 ? value : `${value.slice(0, 12)}…`;
 }
+
+/**
+ * A duration in seconds, with precision that suits the magnitude. A bulk
+ * fixture load produces values like 0.013, which "0.0 s" would render as if
+ * nothing were measured at all.
+ */
+export function seconds(value: number): string {
+  if (value >= 10) return `${value.toFixed(0)} s`;
+  if (value >= 1) return `${value.toFixed(1)} s`;
+  return `${value.toFixed(2)} s`;
+}

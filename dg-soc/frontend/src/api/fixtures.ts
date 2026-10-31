@@ -15,7 +15,9 @@
  */
 
 import fixtureFile from '../../../contracts/examples/events_p3.json';
+import { ApiError } from './error';
 import type {
+  BlockPreview,
   EventsPage,
   Finding,
   Health,
@@ -23,8 +25,11 @@ import type {
   IncidentSummary,
   IngestEvent,
   Link,
+  ResponseAction,
+  RuleId,
   ScoreBreakdownRow,
   SocEvent,
+  StatsOverview,
   Transcript,
   TranscriptLine,
   TranscriptLineKind,
@@ -99,9 +104,12 @@ export async function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> 
   }
 
   const limit = query.limit ?? 200;
-  // Newest first, matching how the feed renders.
-  const ordered = [...items].sort((a, b) => b.seq - a.seq).slice(0, limit);
-  const nextSeq = items.reduce((max, e) => Math.max(max, e.seq), 0);
+  // ASCENDING, with next_seq as a forward cursor — the real backend's
+  // semantics, verified against it. The fixture used to return newest-first,
+  // which hid a paging bug in the feed: keep these in step, or fixtures stop
+  // being a useful rehearsal for the real thing.
+  const ordered = [...items].sort((a, b) => a.seq - b.seq).slice(0, limit);
+  const nextSeq = ordered.length > 0 ? (ordered[ordered.length - 1]?.seq ?? 0) : (query.since_seq ?? 0);
 
   return { items: ordered, next_seq: nextSeq };
 }
@@ -305,6 +313,12 @@ function summaryFor(linkConfirmed: boolean): string {
 
 function incidentSummary(): IncidentSummary {
   const confirmed = fixtureLink.status === 'confirmed';
+  // Counts and timestamps grow as events are released, the way a real
+  // backend's incident does. This is also what makes a live re-fetch
+  // observable rather than a no-op.
+  const seen = released();
+  const firstSeen = seen[0]?.occurred_at ?? '2026-11-01T04:30:00Z';
+  const lastSeen = seen[seen.length - 1]?.occurred_at ?? firstSeen;
   return {
     incident_id: 'inc_01',
     src_ip: '192.168.77.10',
@@ -315,9 +329,9 @@ function incidentSummary(): IncidentSummary {
     severity: 'critical',
     // No R08, so recon is genuinely not observed.
     stages_observed: ['credential_attack', 'exploit_attempt', 'post_access', 'data_access'],
-    first_seen: '2026-11-01T04:30:00Z',
-    last_seen: '2026-11-01T04:32:30Z',
-    event_count: ALL_EVENTS.length,
+    first_seen: firstSeen,
+    last_seen: lastSeen,
+    event_count: seen.length,
   };
 }
 
@@ -400,6 +414,26 @@ export async function fetchTranscript(sessionId: string): Promise<Transcript> {
   return { session_id: sessionId, lines };
 }
 
+export async function fetchOverview(): Promise<StatsOverview> {
+  await sleep(FAKE_LATENCY_MS);
+  const confirmed = fixtureLink.status === 'confirmed';
+  // Derived from the same findings the incident page shows, so R05 appears
+  // here exactly when it appears there.
+  const findingsByRule: Partial<Record<RuleId, number>> = {};
+  for (const finding of buildFindings(confirmed)) {
+    if (finding.pending_confirmation === true) continue;
+    findingsByRule[finding.rule_id] = (findingsByRule[finding.rule_id] ?? 0) + 1;
+  }
+  const seen = released();
+  return {
+    raw_events: seen.length,
+    incidents: seen.length > 0 ? 1 : 0,
+    low_priority_incidents: 0,
+    findings_by_rule: findingsByRule,
+    first_alert_seconds: seen.length > 0 ? 4.2 : null,
+  };
+}
+
 export async function fetchLinks(): Promise<{ items: Link[] }> {
   await sleep(FAKE_LATENCY_MS);
   return { items: [fixtureLink] };
@@ -441,7 +475,8 @@ export function openFixtureSocket(onMessage: (message: WsMessage) => void): Fixt
       // A real backend pushes after each DB commit, so the incident summary
       // lands on the wire too. Emitting it here keeps the incident list's
       // live-update path exercised in fixture mode.
-      onMessage({ seq: releasedSeq + 1, type: 'incident', data: incidentSummary() });
+      // API.md: seq is the newest event seq at send time, not a new number.
+      onMessage({ seq: releasedSeq, type: 'incident', data: incidentSummary() });
       return;
     }
     index += 1;
@@ -455,4 +490,129 @@ export function openFixtureSocket(onMessage: (message: WsMessage) => void): Fixt
       clearInterval(timer);
     },
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * Response mock (stands in for M2's response/router.py).
+ *
+ * Until that router exists the real backend answers 503 with
+ * {"error":{"code":"response_unavailable", ...}}. This mock lets the whole
+ * block flow be built and rehearsed now, and throws the same ApiError type the
+ * real client does so the failure paths are exercised too.
+ *
+ * Action state is derived on read rather than driven by timers: no leaks, and
+ * the same answer however long the page sat idle.
+ * ------------------------------------------------------------------------- */
+
+/** deployment/lab.env ATTACKER_IPS. Never the defender, loopback, or a range. */
+const ALLOWED_TARGETS = ['192.168.77.10'];
+const PREVIEW_VALID_MS = 60_000;
+/** How long the mock waits before a blocked_request "arrives" and verifies. */
+const VERIFY_AFTER_MS = 4_000;
+
+interface StoredPreview {
+  preview_id: string;
+  incident_id: string;
+  target_ip: string;
+  scope: string;
+  ttl_seconds: number;
+  expires_at: string;
+}
+
+const previews = new Map<string, StoredPreview>();
+let actions: ResponseAction[] = [];
+let actionCounter = 0;
+
+/** Lazily applies verification and expiry, so stored state stays simple. */
+function materialise(action: ResponseAction): ResponseAction {
+  if (action.status === 'revoked') return action;
+  const now = Date.now();
+  if (now >= Date.parse(action.until)) return { ...action, status: 'expired' };
+  if (action.status === 'applied' && now - Date.parse(action.created_at) >= VERIFY_AFTER_MS) {
+    return { ...action, status: 'verified', verified_by_event_id: 'evt_mockblocked01' };
+  }
+  return action;
+}
+
+export async function fetchActions(): Promise<{ items: ResponseAction[] }> {
+  await sleep(FAKE_LATENCY_MS);
+  return { items: actions.map(materialise) };
+}
+
+export async function postBlockPreview(
+  incidentId: string,
+  ttlSeconds: number,
+): Promise<BlockPreview> {
+  await sleep(FAKE_LATENCY_MS);
+  const incident = incidentSummary();
+  if (incidentId !== incident.incident_id) {
+    throw new ApiError('not_found', `No incident ${incidentId}.`, 404);
+  }
+  // AGENTS.md section 6: exact lab IPs only.
+  if (!ALLOWED_TARGETS.includes(incident.src_ip)) {
+    throw new ApiError(
+      'target_not_allowed',
+      `${incident.src_ip} is not an allowed lab target.`,
+      400,
+    );
+  }
+
+  const previewId = `pre_${Math.random().toString(16).slice(2, 8)}`;
+  const stored: StoredPreview = {
+    preview_id: previewId,
+    incident_id: incidentId,
+    target_ip: incident.src_ip,
+    scope: 'web-decoy-01 only',
+    ttl_seconds: ttlSeconds,
+    expires_at: new Date(Date.now() + PREVIEW_VALID_MS).toISOString(),
+  };
+  previews.set(previewId, stored);
+  return {
+    preview_id: stored.preview_id,
+    target_ip: stored.target_ip,
+    scope: stored.scope,
+    ttl_seconds: stored.ttl_seconds,
+    expires_at: stored.expires_at,
+  };
+}
+
+export async function postBlockApply(
+  previewId: string,
+  reason: string,
+): Promise<ResponseAction> {
+  await sleep(FAKE_LATENCY_MS);
+  const preview = previews.get(previewId);
+  if (!preview) throw new ApiError('preview_not_found', 'That preview is unknown.', 404);
+  if (Date.now() >= Date.parse(preview.expires_at)) {
+    previews.delete(previewId);
+    throw new ApiError('preview_expired', 'That preview expired. Request a new one.', 400);
+  }
+  if (reason.trim().length < 5) {
+    throw new ApiError('reason_too_short', 'A reason of at least 5 characters is required.', 400);
+  }
+
+  previews.delete(previewId);
+  actionCounter += 1;
+  const now = new Date();
+  const action: ResponseAction = {
+    action_id: `act_${String(actionCounter).padStart(2, '0')}`,
+    target_ip: preview.target_ip,
+    status: 'applied',
+    reason: reason.trim(),
+    created_at: now.toISOString(),
+    until: new Date(now.getTime() + preview.ttl_seconds * 1000).toISOString(),
+    verified_by_event_id: null,
+  };
+  actions = [action, ...actions];
+  return action;
+}
+
+export async function postBlockRevoke(actionId: string): Promise<ResponseAction> {
+  await sleep(FAKE_LATENCY_MS);
+  const index = actions.findIndex((a) => a.action_id === actionId);
+  const existing = index === -1 ? undefined : actions[index];
+  if (!existing) throw new ApiError('not_found', `No action ${actionId}.`, 404);
+  const revoked: ResponseAction = { ...existing, status: 'revoked' };
+  actions = actions.map((a) => (a.action_id === actionId ? revoked : a));
+  return revoked;
 }

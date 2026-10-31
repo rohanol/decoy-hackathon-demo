@@ -151,13 +151,21 @@ def test_policy_rejects_forbidden_targets(tmp_path, ip):
         file_checker(tmp_path / "state", [ip])
 
 
-def test_m2_policy_is_used_when_installed(monkeypatch):
+def test_m2_policy_is_used_when_installed(monkeypatch, tmp_path):
     from types import ModuleType
+    state = tmp_path / "blocklist.json"
+    state.write_text(json.dumps({"version": 0, "entries": []}))
     package, policy = ModuleType("decoys.policy"), ModuleType("decoys.policy.policy")
-    policy.check = lambda ip: "m2_action"
+    seen = []
+    policy.check = lambda ip, path=None, now=None: seen.append(path) or "m2_action"
     monkeypatch.setitem(sys.modules, "decoys.policy", package)
     monkeypatch.setitem(sys.modules, "decoys.policy.policy", policy)
-    assert resolve_checker("unused", ["192.168.77.10"])("192.168.77.10") == "m2_action"
+    assert resolve_checker(state, ["192.168.77.10"])("192.168.77.10") == "m2_action"
+    # M2's check() must read the decoy's configured file, not its own /state default.
+    assert seen == [str(state)]
+    state.write_text("{not json")
+    with pytest.raises(ValueError):  # still fails closed with M2 installed
+        resolve_checker(state, ["192.168.77.10"])("192.168.77.10")
 
 
 def test_redaction_encoded_query_forms_headers_and_lengths(portal):

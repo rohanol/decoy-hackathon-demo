@@ -128,7 +128,7 @@ const NAV = [
   { to: '/', label: 'Overview', end: true },
   { to: '/events', label: 'Live Feed', end: false },
   { to: '/incidents', label: 'Incidents', end: false },
-  { to: '/graph', label: 'Attack Graph', end: false },
+  { to: '/graph', label: 'ChakraView', end: false },
   { to: '/response', label: 'Response', end: false },
 ] as const;
 

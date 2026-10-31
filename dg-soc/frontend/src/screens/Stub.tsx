@@ -30,32 +30,11 @@ export function Stub({
   );
 }
 
-export const Overview = () => (
-  <Stub
-    title="Overview"
-    specSection="section 6"
-    buildOrder="Build order 4 of 7. Needs GET /api/stats/overview from M3."
-  />
-);
 
 
 
 
-export const AttackGraph = () => (
-  <Stub
-    title="Attack Graph"
-    specSection="section 11"
-    buildOrder="Build order 6 of 7. Needs GET /api/links from M3."
-  />
-);
 
-export const ResponseCenter = () => (
-  <Stub
-    title="Response Center"
-    specSection="sections 12 and 13"
-    buildOrder="Build order 7 of 7. Needs the response router from M2."
-  />
-);
 
 export const NotFound = () => (
   <div className="page">

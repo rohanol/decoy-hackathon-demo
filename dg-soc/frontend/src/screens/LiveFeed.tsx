@@ -6,7 +6,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, ErrorCard, SkeletonRows, AttackerText } from '../components/primitives';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { COPY, EVENT_TYPE_LABEL } from '../copy';
@@ -155,7 +155,11 @@ export function LiveFeed() {
     reload,
   } = useLiveStore();
 
-  const [sensorFilter, setSensorFilter] = useState<string>('');
+  // The attack graph's sensor nodes deep-link here with ?sensor=<id>.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [sensorFilter, setSensorFilter] = useState<string>(
+    () => searchParams.get('sensor') ?? '',
+  );
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [ipFilter, setIpFilter] = useState<string>('');
   const [selected, setSelected] = useState<SocEvent | null>(null);
@@ -191,7 +195,10 @@ export function LiveFeed() {
           className="select"
           aria-label="Filter by sensor"
           value={sensorFilter}
-          onChange={(changeEvent) => setSensorFilter(changeEvent.target.value)}
+          onChange={(changeEvent) => {
+            setSensorFilter(changeEvent.target.value);
+            setSearchParams({}, { replace: true });
+          }}
         >
           <option value="">All sensors</option>
           {SENSOR_IDS.map((sensorId) => (
@@ -241,6 +248,7 @@ export function LiveFeed() {
               setSensorFilter('');
               setTypeFilter('');
               setIpFilter('');
+              setSearchParams({}, { replace: true });
             }}
           >
             Clear filters
