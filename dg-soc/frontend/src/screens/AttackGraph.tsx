@@ -24,6 +24,7 @@ import { ErrorCard, SkeletonRows } from '../components/primitives';
 import { SENSOR_LABEL, linkPhrase } from '../copy';
 import { number } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
+import { GraphViewToggle } from './GraphViewToggle';
 import {
   SENSOR_IDS,
   type IncidentSummary,
@@ -267,6 +268,7 @@ export function AttackGraph() {
             {openLinks} link{openLinks === 1 ? '' : 's'} awaiting decision
           </span>
         ) : null}
+        <GraphViewToggle current="network" />
       </div>
 
       <section className="card">

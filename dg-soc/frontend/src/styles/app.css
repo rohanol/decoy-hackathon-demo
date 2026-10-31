@@ -2164,3 +2164,884 @@ button.killchain__seg:hover {
   font-size: 13px;
   color: var(--ok);
 }
+
+/* ---------- ChakraView ---------- */
+
+.chakra__tagline {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.segmented__btn {
+  padding: 5px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.segmented__btn + .segmented__btn {
+  border-left: 1px solid var(--border);
+}
+
+.segmented__btn--active {
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.segmented__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.chakra__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin-bottom: var(--s3);
+}
+
+.csource {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-pill);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.csource--active {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.chakra {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  align-items: stretch;
+}
+
+.chakra__wheel {
+  padding: var(--s4);
+  min-width: 0;
+}
+
+.chakra__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: calc(100vh - 220px);
+  min-height: 360px;
+}
+
+.chakra__legend {
+  justify-content: center;
+}
+
+.chakra__panel {
+  border-left: 1px solid var(--border);
+  background: var(--bg-inset);
+  min-width: 0;
+}
+
+@media (max-width: 1180px) {
+  .chakra {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chakra__panel {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .chakra__svg {
+    max-height: none;
+  }
+}
+
+/* frame: decoration never takes a click from a lure or a chord */
+.chakra__glow,
+.chakra__seam,
+.chakra__sector,
+.cring,
+.cring__label,
+.cspoke,
+.ctrail,
+.cgate,
+.cbounce__label {
+  pointer-events: none;
+}
+
+
+.chakra__sector {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  fill: var(--text-muted);
+}
+
+.chakra__seam {
+  stroke: var(--border-strong);
+  stroke-width: 1;
+  stroke-dasharray: 2 6;
+}
+
+.cring {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+  transition: stroke 400ms ease;
+}
+
+.cring--reached {
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+}
+
+.cring__label {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-anchor: middle;
+  fill: var(--text-muted);
+  paint-order: stroke;
+  stroke: var(--bg-surface);
+  stroke-width: 6px;
+  stroke-linejoin: round;
+}
+
+.cring__label--reached {
+  fill: var(--text-secondary);
+}
+
+.cspoke {
+  stroke: var(--border);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+.cspoke--lit {
+  stroke: var(--accent);
+  opacity: 0.35;
+}
+
+.ctrail {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+
+/* lures */
+
+.cnode {
+  cursor: pointer;
+}
+
+.cnode:focus {
+  outline: none;
+}
+
+.cnode__core {
+  fill: var(--bg-inset);
+  stroke: var(--border-strong);
+  stroke-width: 1.5;
+  stroke-dasharray: 3 3;
+  transition: fill 300ms ease, stroke 300ms ease;
+}
+
+.cnode__bait {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 1 3;
+}
+
+.cnode__label {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  fill: var(--text-muted);
+  paint-order: stroke;
+  stroke: var(--bg-surface);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.cnode__sub {
+  font-size: 10.5px;
+  fill: var(--text-muted);
+  opacity: 0.8;
+  paint-order: stroke;
+  stroke: var(--bg-surface);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.cnode__rules {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  fill: var(--sev-critical-text);
+  paint-order: stroke;
+  stroke: var(--bg-surface);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.cnode__badge circle {
+  fill: var(--accent);
+  stroke: var(--bg-surface);
+  stroke-width: 2;
+}
+
+.cnode__badge text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  fill: var(--bg-base);
+}
+
+/* reached: solid, accent */
+.cnode--touched .cnode__core {
+  fill: var(--accent-weak);
+  stroke: var(--accent);
+  stroke-dasharray: none;
+  stroke-width: 2;
+}
+
+.cnode--touched .cnode__label,
+.cnode--flagged .cnode__label {
+  fill: var(--text-primary);
+}
+
+.cnode--touched .cnode__sub,
+.cnode--flagged .cnode__sub {
+  fill: var(--text-secondary);
+}
+
+/* a finding cites it: red, and a thicker ring */
+.cnode--flagged .cnode__core {
+  fill: var(--sev-critical-fill);
+  stroke: var(--sev-critical);
+  stroke-dasharray: none;
+  stroke-width: 3;
+}
+
+.cnode--flagged.cnode--bait .cnode__bait,
+.cnode--touched.cnode--bait .cnode__bait {
+  stroke: var(--pending);
+  stroke-width: 1.5;
+  stroke-dasharray: 2 3;
+}
+
+.cnode:hover .cnode__core {
+  stroke: var(--text-primary);
+}
+
+.cnode:focus-visible .cnode__core,
+.cnode--selected .cnode__core {
+  stroke: var(--text-primary);
+  stroke-width: 3;
+  filter: drop-shadow(0 0 6px var(--accent));
+}
+
+/* the crown jewel */
+.cnode--crown .cnode__core {
+  stroke-width: 2;
+}
+
+.cnode--crown.cnode--flagged .cnode__core {
+  stroke-width: 4;
+  fill: rgba(217, 57, 75, 0.22);
+}
+
+.cnode__crownword {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-anchor: middle;
+  fill: var(--text-muted);
+}
+
+.cnode__crownstate {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-anchor: middle;
+  fill: var(--text-muted);
+}
+
+.cnode--crown.cnode--touched .cnode__crownword,
+.cnode--crown.cnode--flagged .cnode__crownword {
+  fill: var(--text-primary);
+}
+
+.cnode--crown.cnode--flagged .cnode__crownstate {
+  fill: var(--sev-critical-text);
+  font-weight: 600;
+}
+
+/* A lure reached while you watch: one expanding ring, once. */
+.cnode__ignite {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: chakra-ignite 900ms ease-out forwards;
+  pointer-events: none;
+}
+
+.cnode--flagged .cnode__ignite {
+  stroke: var(--sev-critical);
+}
+
+@keyframes chakra-ignite {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+
+/* A bait lure whose token link waits for the analyst. */
+.cnode--awaiting .cnode__bait {
+  stroke: var(--pending);
+  stroke-width: 2;
+  stroke-dasharray: none;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* chords */
+
+.cchord {
+  cursor: pointer;
+}
+
+.cchord:focus {
+  outline: none;
+}
+
+.cchord__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 22;
+}
+
+.cchord__line {
+  fill: none;
+  stroke: var(--pending);
+  stroke-width: 2;
+  stroke-dasharray: 7 5;
+  stroke-linecap: round;
+}
+
+.cchord--strong_candidate .cchord__line {
+  stroke-width: 3.5;
+}
+
+.cchord--confirmed .cchord__line {
+  stroke: var(--ok);
+  stroke-width: 4;
+  stroke-dasharray: none;
+  animation: chakra-snap 600ms ease-out;
+}
+
+@keyframes chakra-snap {
+  0% {
+    stroke: var(--pending);
+    stroke-width: 3.5;
+    filter: drop-shadow(0 0 0 var(--ok));
+  }
+  40% {
+    stroke: var(--ok);
+    stroke-width: 7;
+    filter: drop-shadow(0 0 10px var(--ok));
+  }
+  100% {
+    stroke: var(--ok);
+    stroke-width: 4;
+    filter: none;
+  }
+}
+
+.cchord--rejected .cchord__line {
+  stroke: var(--neutral);
+  stroke-width: 1.5;
+  stroke-dasharray: none;
+  opacity: 0.45;
+}
+
+.cchord:hover .cchord__line,
+.cchord--selected .cchord__line,
+.cchord:focus-visible .cchord__line {
+  filter: drop-shadow(0 0 5px var(--pending));
+}
+
+.cchord--confirmed:hover .cchord__line,
+.cchord--confirmed.cchord--selected .cchord__line {
+  filter: drop-shadow(0 0 5px var(--ok));
+}
+
+.cchord__comet {
+  fill: var(--text-primary);
+  filter: drop-shadow(0 0 6px var(--pending));
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cchord--confirmed .cchord__comet {
+  filter: drop-shadow(0 0 6px var(--ok));
+}
+
+.cchord__labelbg {
+  fill: var(--bg-surface);
+  stroke: var(--pending);
+  stroke-width: 1;
+}
+
+.cchord__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-anchor: middle;
+  fill: var(--pending);
+}
+
+.cchord--confirmed .cchord__labelbg {
+  stroke: var(--ok);
+}
+
+.cchord--confirmed .cchord__label {
+  fill: var(--ok);
+}
+
+.cchord--rejected .cchord__labelbg {
+  stroke: var(--border);
+}
+
+.cchord--rejected .cchord__label {
+  fill: var(--text-muted);
+}
+
+/* the web gate and the requests that bounced off it */
+
+.cgate__arc {
+  fill: none;
+  stroke: var(--pending);
+  stroke-width: 5;
+  stroke-dasharray: 10 6;
+  stroke-linecap: round;
+}
+
+.cgate--verified .cgate__arc {
+  stroke: var(--ok);
+  stroke-width: 7;
+  stroke-dasharray: none;
+  animation: chakra-gate 700ms ease-out;
+}
+
+@keyframes chakra-gate {
+  from {
+    stroke-width: 14;
+    filter: drop-shadow(0 0 12px var(--ok));
+  }
+  to {
+    stroke-width: 7;
+    filter: none;
+  }
+}
+
+.cgate__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  fill: var(--pending);
+}
+
+.cgate--verified .cgate__label {
+  fill: var(--ok);
+}
+
+.cgate__sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  fill: var(--text-secondary);
+}
+
+.cbounce circle {
+  fill: var(--bg-surface);
+  stroke: var(--ok);
+  stroke-width: 1.5;
+}
+
+.cbounce line {
+  stroke: var(--ok);
+  stroke-width: 1.5;
+}
+
+.cbounce__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  fill: var(--ok);
+}
+
+/* legend swatches */
+
+.clegend {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-inset);
+}
+
+.clegend--untouched {
+  border-style: dashed;
+}
+
+.clegend--touched {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.clegend--flagged {
+  border: 3px solid var(--sev-critical);
+  background: var(--sev-critical-fill);
+}
+
+.clegend--bait {
+  border: 1.5px dotted var(--pending);
+  background: transparent;
+  box-shadow: inset 0 0 0 3px var(--bg-surface), inset 0 0 0 5px var(--border-strong);
+}
+
+/* the side panel */
+
+.cpanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s4);
+  font-size: 13px;
+}
+
+.cpanel__back {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.cpanel__eyebrow {
+  margin-top: var(--s3);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.cpanel__eyebrow:first-child,
+.cpanel__back + .cpanel__eyebrow {
+  margin-top: 0;
+}
+
+.cpanel__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cpanel__text {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.cpanel__hint {
+  margin: var(--s2) 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.cpanel__source {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.cpanel__ip {
+  font-size: 17px;
+  color: var(--text-primary);
+}
+
+.cpanel__stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+  margin-top: var(--s2);
+}
+
+.cstat {
+  padding: var(--s3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+}
+
+.cstat__value {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.cstat__of {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.cstat__label {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.cpanel__chords,
+.cpanel__findings,
+.cpanel__events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.cpanel__untouched {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cchip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 4px 10px;
+  border: 1px solid var(--pending);
+  border-radius: var(--r-pill);
+  background: var(--pending-fill);
+  color: var(--pending);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cchip--confirmed {
+  border-color: var(--ok);
+  background: var(--ok-fill);
+  color: var(--ok);
+}
+
+.cchip--rejected,
+.cchip--dim {
+  border-color: var(--border);
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.cchip--dim:hover {
+  color: var(--text-secondary);
+  border-color: var(--border-strong);
+}
+
+.cpill--dim {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.cpanel__statusline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.cpanel__step {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cpanel__time {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.cpanel__source-file {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.ctoken {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--pending);
+  border-radius: var(--r-sm);
+  color: var(--pending);
+  font-size: 12px;
+}
+
+.cpanel__findings li {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: var(--s2);
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.cpanel__rule {
+  color: var(--sev-critical-text);
+  font-weight: 600;
+}
+
+.cpanel__pending {
+  margin-left: 6px;
+  padding: 0 6px;
+  font-size: 10.5px;
+}
+
+.cpanel__limit {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.cpanel__event {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: var(--s2);
+  row-gap: 2px;
+  padding: var(--s2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-surface);
+}
+
+.cpanel__etype {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.cpanel__gist {
+  grid-column: 1 / -1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.cpanel__eid {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.cpanel__more {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.cpanel__open {
+  align-self: flex-start;
+  margin-top: var(--s3);
+}
+
+/* chord provenance */
+
+.cprov {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  border-left: 2px solid var(--border-strong);
+  padding-left: var(--s3);
+}
+
+.cprov li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.cprov strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.cprov__step {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pending);
+}
+
+.cprov__meta {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.cverdict {
+  margin: var(--s2) 0 0;
+  padding: var(--s2) var(--s3);
+  border-radius: var(--r-md);
+  border: 1px solid;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.cverdict--strong {
+  border-color: var(--ok);
+  background: var(--ok-fill);
+  color: var(--text-primary);
+}
+
+.cverdict--weak {
+  border-color: var(--warn);
+  background: var(--warn-fill);
+  color: var(--text-primary);
+}
