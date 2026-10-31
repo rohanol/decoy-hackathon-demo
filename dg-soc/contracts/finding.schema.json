@@ -46,8 +46,12 @@
     "points": { "type": "integer", "description": "Points this finding contributes now. 0 if its rule already counted or it waits for confirmation." },
     "pending_confirmation": { "type": "boolean", "description": "True for R09 until the analyst confirms the link" },
     "token_relation": {
-      "enum": ["linked", "orphan"],
-      "description": "v1.1, R09 only. linked = a bait_served record for this token exists in the same run and a strong_candidate link cites it. orphan = the token was presented but no bait-service record was found; visible, never scored, no link invented."
+      "enum": ["linked", "request_only", "orphan"],
+      "description": "v1.1, R09 only. linked = a bait_served result record for this token exists in the same run and a strong_candidate link cites it. request_only = only a bait-read command (requested_asset_id) was seen; a weaker candidate link cites it. orphan = no serving or request was found; visible, never scored, no link invented."
+    },
+    "attribution": {
+      "enum": ["unique", "ambiguous", "request_only"],
+      "description": "v1.1, R09 only. ambiguous = several issuances of the same static credential were eligible, so the backend does not claim which one was reused."
     },
     "web_attack_class": {
       "type": "array",

@@ -73,15 +73,63 @@ def test_examples_cover_the_cases_the_contract_names():
                               and e["event_type"] == "auth_success" and e["src_ip"] == "192.168.77.10"}
     assert len(ssh_sessions_on_one_ip) >= 2                                   # two sessions, one IP
     bait = [e for e in evs if e["event_type"] == "bait_served"]
-    assert {b["attributes"]["evidence_basis"] for b in bait} == {"sensor_response", "derived_from_command"}
+    assert {b["attributes"]["evidence_basis"] for b in bait} == {"sensor_response", "session_output_log"}
+    requested = [e for e in evs if e["attributes"].get("requested_asset_id")]
+    assert requested and all(e["event_type"] == "command_input" for e in requested)  # a command stays a request
+    env_issuances = {b["attributes"]["issuance_id"] for b in bait if b["attributes"]["asset_id"] == "web:/.env"}
+    assert len(env_issuances) >= 2                                            # static credential served twice
+    assert any("input_features" in e["attributes"] for e in evs)
     record_ids = {e["source_record_id"] for e in evs}
-    for b in bait:
-        if b["attributes"]["evidence_basis"] == "derived_from_command":
-            assert b["attributes"]["derived_from_record_id"] in record_ids    # cites a real command record
     modes = {(e["lab_run_id"], e["capture_mode"]) for e in evs}
     assert len({run for run, _ in modes}) == len(modes)                       # no run mixes modes
     assert any(e.get("origin_record_id") in record_ids for e in evs if e["capture_mode"] == "replay")
     assert any(f.get("token_relation") == "orphan" for f in API_V11["findings"])
+
+
+V10_SCHEMA_V = validator(load("history/event.schema.v1.0.json"))
+
+
+def v10_event(**attrs_and_top):
+    attrs = attrs_and_top.pop("attributes", {})
+    ev = {"schema_version": "1.0", "source_record_id": "compat-1", "sensor_id": "web-decoy-01",
+          "event_type": "synthetic_file_access", "occurred_at": "2026-11-01T04:31:30Z", "src_ip": "192.168.77.10",
+          "lab_run_id": "run-01", "capture_mode": "live", "attributes": attrs}
+    ev.update(attrs_and_top)
+    return ev
+
+
+V10_EDGE_CASES = [
+    # the reported counterexamples: extensible 1.0 attributes the 1.1 rules would reject
+    v10_event(attributes={"asset_id": "customer_data.csv", "fixture_version": 1, "digest_scope": "full_response"}),
+    v10_event(attributes={"observation_kind": 7, "request_id": {"nested": True}, "honeytoken_ids": []}),
+    v10_event(attributes={"evidence_basis": "derived_from_command", "input_features": "anything"}),
+    v10_event(attributes={"method": "X" * 100, "password_sha256": "p" * 300, "block_action_id": "a" * 200}),
+    # top-level values 1.0 never bounded
+    v10_event(source_record_id="", lab_run_id="r" * 300, session_id="s" * 500, src_port=99999),
+    v10_event(lab_run_id=""),
+]
+
+
+@pytest.mark.parametrize("ev", V10_EDGE_CASES)
+def test_every_v10_edge_case_valid_under_old_schema_stays_valid(ev):
+    assert errors(V10_SCHEMA_V, ev) == []            # it really was valid under 1.0
+    assert errors(EVENT_V, ev) == []                 # and still is
+
+
+@pytest.mark.parametrize("ev", V10_EDGE_CASES[:3])
+def test_same_attributes_are_checked_strictly_under_v11(ev):
+    assert errors(EVENT_V, dict(ev, schema_version="1.1"))
+
+
+@pytest.mark.parametrize("ev", [
+    v10_event(event_type="bait_served", attributes={"asset_id": "web:/.env", "honeytoken_ids": ["tok_backup_01"],
+                                                     "issuance_id": "i", "evidence_basis": "sensor_response"}),
+    v10_event(origin_record_id=None),
+    v10_event(attributes={"outcome": "attempted"}),
+])
+def test_v10_rejections_unchanged(ev):
+    """Things 1.0 rejected are still rejected for 1.0 events."""
+    assert errors(V10_SCHEMA_V, ev) and errors(EVENT_V, ev)
 
 
 def test_bait_assets_name_known_tokens():

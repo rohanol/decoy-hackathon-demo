@@ -50,10 +50,23 @@
       "web_attack_class": ["sqli"], "points": 15, "pending_confirmation": false, "created_at": "2026-11-01T04:31:20.010Z" },
     { "finding_id": "fnd_r09_linked_example", "rule_id": "R09", "rule_version": "R09@2", "incident_id": "inc_05", "src_ip": "192.168.77.10",
       "technique_ids": [], "mapping": [], "mapping_version": "map@2", "stage": "none",
-      "label": "Honeytoken tok_portal_01 presented on web-decoy-01; served earlier by ssh:/home/dg_demo/notes.txt (derived from command)",
+      "label": "Honeytoken tok_portal_01 presented on web-decoy-01; served earlier by ssh:/home/dg_demo/notes.txt (session output log)",
       "limitation": "Token reuse shows where a credential came from, not that it is the same person.",
       "evidence_event_ids": ["evt_bait_notes", "evt_login"], "evidence_roles": { "evt_bait_notes": "bait", "evt_login": "presentation" },
-      "points": 15, "pending_confirmation": false, "token_relation": "linked", "created_at": "2026-11-01T04:31:10.030Z" },
+      "points": 15, "pending_confirmation": false, "token_relation": "linked", "attribution": "unique", "created_at": "2026-11-01T04:31:10.030Z" },
+    { "finding_id": "fnd_r09_ambiguous_example", "rule_id": "R09", "rule_version": "R09@2", "incident_id": "inc_10", "src_ip": "192.168.77.10",
+      "technique_ids": [], "mapping": [], "mapping_version": "map@2", "stage": "none",
+      "label": "Honeytoken tok_backup_01 presented on ssh-decoy-01; served 2 times by web:/.env in this run, so which serving was reused is unknown",
+      "limitation": "A static credential served more than once cannot be tied to one serving.",
+      "evidence_event_ids": ["evt_env_bait_1", "evt_env_bait_2", "evt_backup_login"],
+      "evidence_roles": { "evt_env_bait_1": "bait", "evt_env_bait_2": "bait", "evt_backup_login": "presentation" },
+      "points": 0, "pending_confirmation": true, "token_relation": "linked", "attribution": "ambiguous", "created_at": "2026-11-01T04:31:40.020Z" },
+    { "finding_id": "fnd_r09_request_only_example", "rule_id": "R09", "rule_version": "R09@2", "incident_id": "inc_11", "src_ip": "192.168.77.10",
+      "technique_ids": [], "mapping": [], "mapping_version": "map@2", "stage": "none",
+      "label": "Honeytoken tok_portal_01 presented on web-decoy-01; a read of ssh:/home/dg_demo/notes.txt was requested earlier, output not recorded",
+      "limitation": "A read command does not prove the file content was returned.",
+      "evidence_event_ids": ["evt_cat_cmd", "evt_login_2"], "evidence_roles": { "evt_cat_cmd": "request", "evt_login_2": "presentation" },
+      "points": 0, "pending_confirmation": true, "token_relation": "request_only", "attribution": "request_only", "created_at": "2026-11-01T04:40:00.020Z" },
     { "finding_id": "fnd_r09_orphan_example", "rule_id": "R09", "rule_version": "R09@2", "incident_id": "inc_09", "src_ip": "192.168.77.10",
       "technique_ids": [], "mapping": [], "mapping_version": "map@2", "stage": "none",
       "label": "Honeytoken tok_portal_01 presented on web-decoy-01; no record of it being served in this run",
@@ -64,11 +77,18 @@
   "links": [
     { "link_id": "lnk_strong_example", "from_event_id": "evt_bait_notes", "to_event_id": "evt_login",
       "from_sensor": "ssh-decoy-01", "to_sensor": "web-decoy-01", "from_incident_id": "inc_03", "to_incident_id": "inc_05",
-      "kind": "strong_candidate", "basis": "honeytoken tok_portal_01 served by ssh:/home/dg_demo/notes.txt (derived from command)",
+      "kind": "strong_candidate", "basis": "honeytoken tok_portal_01 served by ssh:/home/dg_demo/notes.txt (session output log)",
+      "attribution": "unique", "candidate_issuance_ids": [],
       "status": "confirmed", "decided_at": "2026-11-01T04:33:00.000Z", "rationale": "token from notes.txt reused on the portal" },
+    { "link_id": "lnk_ambiguous_example", "from_event_id": "evt_env_bait_2", "to_event_id": "evt_backup_login",
+      "from_sensor": "web-decoy-01", "to_sensor": "ssh-decoy-01", "from_incident_id": "inc_05", "to_incident_id": "inc_10",
+      "kind": "strong_candidate", "basis": "honeytoken tok_backup_01 served by web:/.env (sensor response); 2 servings eligible",
+      "attribution": "ambiguous", "candidate_issuance_ids": ["iss_a_env_req2", "iss_a_env_req2b"],
+      "status": "open", "decided_at": null, "rationale": null },
     { "link_id": "lnk_candidate_example", "from_event_id": "evt_s1_open", "to_event_id": "evt_login",
       "from_sensor": "ssh-decoy-01", "to_sensor": "web-decoy-01", "from_incident_id": "inc_03", "to_incident_id": "inc_05",
-      "kind": "candidate", "basis": "same src_ip within 5 min", "status": "open", "decided_at": null, "rationale": null }
+      "kind": "candidate", "basis": "same src_ip within 5 min", "attribution": null, "candidate_issuance_ids": [],
+      "status": "open", "decided_at": null, "rationale": null }
   ],
   "source_profile": {
     "src_ip": "192.168.77.10", "lab_run_id": "run-2026-11-01-01", "capture_mode": "live",
@@ -86,22 +106,30 @@
     "eligible_live": { "eligible": true, "target_ip": "192.168.77.10", "lab_run_id": "run-2026-11-01-01", "capture_mode": "live",
       "reasons": [], "last_web_observation_at": "2026-11-01T04:31:30Z", "checked_at": "2026-11-01T04:33:10.000Z" },
     "ineligible_replay": { "eligible": false, "target_ip": "192.168.77.10", "lab_run_id": "replay-2026-11-01-a", "capture_mode": "replay",
-      "reasons": ["case is replay evidence", "run is not the active live run", "no web-decoy-01 event from this address in the last 10 minutes"],
+      "reasons": [ { "code": "replay_data", "message": "case is replay evidence" },
+                   { "code": "no_live_run", "message": "run replay-2026-11-01-a is not the active live run" },
+                   { "code": "stale_observation", "message": "no web-decoy-01 event from this address in the last 10 minutes" } ],
       "last_web_observation_at": null, "checked_at": "2026-11-01T04:33:10.000Z" }
   },
   "heartbeat_request": {
     "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40Z",
-    "sensor_process": "up", "last_read_at": "2026-11-01T04:31:39Z", "last_ingest_ok_at": "2026-11-01T04:31:38Z",
-    "backlog_lines": 0, "oldest_backlog_age_s": 0, "errors_total": 0, "rejected_total": 1, "quarantined_total": 1
+    "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z", "last_ingest_at": "2026-11-01T04:31:38Z",
+    "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+    "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 }
   },
   "health": {
     "ok": true,
     "sensors": { "ssh-decoy-01": "2026-11-01T04:31:40Z", "web-decoy-01": "2026-11-01T04:31:30Z" },
     "sensor_health": {
-      "ssh-decoy-01": { "service": "up", "collection": "ok", "activity": "recent", "last_heartbeat_at": "2026-11-01T04:31:40Z",
-                        "last_event_at": "2026-11-01T04:31:40Z", "backlog_lines": 0, "rejected_total": 1, "quarantined_total": 1, "clock_skew_s": 0.4 },
-      "web-decoy-01": { "service": "unknown", "collection": "never", "activity": "recent", "last_heartbeat_at": null,
-                        "last_event_at": "2026-11-01T04:31:30Z", "backlog_lines": null, "rejected_total": null, "quarantined_total": null, "clock_skew_s": null }
+      "ssh-decoy-01": { "service": "up", "collection": "ok", "activity": "recent",
+                        "heartbeat_at": "2026-11-01T04:31:40Z", "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z",
+                        "last_ingest_at": "2026-11-01T04:31:38Z", "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+                        "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 },
+                        "clock_skew_s": 0.4, "last_event_at": "2026-11-01T04:31:40Z" },
+      "web-decoy-01": { "service": "unknown", "collection": "never", "activity": "recent",
+                        "heartbeat_at": null, "process_state": null, "last_read_at": null, "last_ingest_at": null,
+                        "backlog_records": null, "oldest_backlog_age_s": null, "error_count": null, "ingest": null,
+                        "clock_skew_s": null, "last_event_at": "2026-11-01T04:31:30Z" }
     }
   },
   "runs": { "items": [

@@ -1,6 +1,11 @@
 # API contract v1.1 (v1.0 compatible)
 
-v1.1 is in review (branch `m3/evidence-boundaries`). Everything marked v1.1 is additive; a v1.0 client keeps working. The new rules are in **Evidence boundaries (v1.1)** at the end, and the backend implements them in the later PRs listed under Migration.
+v1.1 is in review (branch `m3/evidence-boundaries`). The new rules are in **Evidence boundaries (v1.1)** at the end, and the backend implements them in the later PRs listed under Migration.
+
+Compatibility, precisely:
+- `schema_version` selects the validation rules. A `"1.0"` event is checked exactly as before; the frozen copy is `contracts/history/event.schema.v1.0.json`, and `backend/tests/test_contracts.py` runs edge cases through both. Every new or stricter rule applies only to `"1.1"` events.
+- One semantic difference applies to 1.0 too: a run can no longer mix live and replay events.
+- Producers switch to `"1.1"` only after the backend accepts it (PR 2). Until then M4 keeps its v1.1 producer mode disabled.
 
 Backend: `http://127.0.0.1:8000`. All JSON snake_case, timestamps RFC 3339 UTC. Errors: `{"error": {"code": "not_found", "message": "..."}}`. No auth (SOC is loopback only).
 
@@ -173,19 +178,34 @@ Every event has an `observation_kind`. If a producer omits it, the backend deriv
 
 An `auth_success` on a decoy is still a request record. It shows the decoy accepted a login, and that is all it shows.
 
-A **`bait_served`** event (new) says that a sensor returned content containing honeytokens. Required attributes: `asset_id`, `honeytoken_ids`, `issuance_id` and `evidence_basis`. Recommended: `sha256` with `digest_scope`, `fixture_version`, `issued_expires_at`, and `request_id` for web.
+A **`bait_served`** event (new) says that the sensor's **own result record** shows it returned content containing honeytokens. Required attributes: `asset_id`, `honeytoken_ids`, `issuance_id` and `evidence_basis`. Recommended: `sha256` with `digest_scope`, `fixture_version`, `issued_expires_at`, and `request_id` for web.
 
-- Web decoy, `evidence_basis: "sensor_response"`: logged by the app when it returns `/.env`. It has the same `request_id` as the request record.
-- SSH, `evidence_basis: "derived_from_command"`: Cowrie does not log file output. The adapter may emit `bait_served` when a `command_input` reads a registered bait path that exists in the emulated filesystem, for example `cat /home/dg_demo/notes.txt` or `cat notes.txt` in that home directory. It must set `derived_from_record_id` to the command record. The UI shows this as weaker evidence: "read command for a bait file; output not logged".
-- Bait asset ids are `ssh:/home/dg_demo/notes.txt` (contains `tok_portal_01`) and `web:/.env` (contains `tok_backup_01`). The registry lives with the token list in `config/honeytokens.yaml` (M4) as `bait_assets: [ { asset_id, sensor_id, path, honeytoken_ids, fixture_version } ]`.
+- Web decoy, `evidence_basis: "sensor_response"`: logged by the app when it actually returns `/.env`. It has the same `request_id` as the request record.
+- SSH, `evidence_basis: "session_output_log"`: only when the sensor's own recorded output for that session (for example the Cowrie TTY log) contains the bait. That is real result evidence.
+- **A command alone is never result evidence.** When the adapter recognises a read of a registered bait asset, such as `cat notes.txt` in `/home/dg_demo`, it tags the `command_input` with `requested_asset_id` and `honeytoken_ids`. It stays a request record with outcome `attempted`. It does not become `bait_served`.
+- Bait asset ids are `ssh:/home/dg_demo/notes.txt` (contains `tok_portal_01`) and `web:/.env` (contains `tok_backup_01`). The registry lives with the token list in `config/honeytokens.yaml` (M4) as `bait_assets: [ { asset_id, sensor_id, path, honeytoken_ids, fixture_version } ]`. `fixture_version` is a string such as `"env@1"`.
+- Web `session_id` is a non-reusable reference derived by the decoy, never the bearer cookie.
+
+**Input features and processing metadata** (M4, web 1.1). These let the backend classify request bodies without storing values:
+
+- `attributes.input_features = { source, field_count, field_names[≤32], max_value_length, indicators[≤16], truncated }`. `indicators` uses a fixed vocabulary computed on decoded input: `sql_quote`, `sql_keyword`, `sql_comment`, `script_tag`, `event_handler`, `js_scheme`, `path_traversal`, `sensitive_file_path`, `php_wrapper`, `remote_url_in_param`, `shell_metachar_command`, `command_substitution`, `null_byte` and `encoded_payload`. Values never appear, sensitive or not.
+- `attributes.processing = { parse_status, body_bytes, body_consumed, redaction_version, producer_version }`. `parse_status` is `parsed`, `no_body`, `rejected_too_large`, `unsupported_type` or `malformed`. A missing feature on a body that was not parsed means "not inspected", not "clean". A full-content digest is valid only when `body_consumed` is true.
+- The backend owns classification. R07 combines the URL-pattern match with these classes: `sqli` = `sql_quote` plus `sql_keyword` or `sql_comment`; `xss` = `script_tag`, `event_handler` or `js_scheme`; `lfi` = `path_traversal`, `sensitive_file_path` or `php_wrapper`; `rfi` = `remote_url_in_param`; `cmd_injection` = `shell_metachar_command` or `command_substitution`. `null_byte` and `encoded_payload` are supporting only.
 
 **Causal token matching** (review section 11, T05 and T06):
 
 1. A token presentation is an event with `attributes.honeytoken_id` on a sensor other than the token's `planted_on`.
-2. It matches the newest `bait_served` that meets all of these: it lists that token, it is in the same `lab_run_id` and `capture_mode`, its `sensor_id` equals the token's `planted_on`, its `occurred_at` is not after the presentation, and it has not expired.
-3. Match → a `strong_candidate` link from the `bait_served` event to the presentation. The basis reads, for example, `honeytoken tok_portal_01 served by ssh:/home/dg_demo/notes.txt (derived from command)`. The R09 finding has `token_relation: "linked"`.
-4. No match → no link is created and no source event is invented. The R09 finding still appears with `token_relation: "orphan"`, label "Honeytoken tok_x presented; no record of it being served in this run", 0 points, and it is never scored.
-5. Two clients who received different issuances stay distinguishable through `issuance_id`.
+2. Eligible servings are every `bait_served` that meets all of these: it lists that token, it is in the same `lab_run_id` and `capture_mode`, its `sensor_id` equals the token's `planted_on`, its `occurred_at` is not after the presentation, and it has not expired.
+3. **Exactly one eligible issuance** → a `strong_candidate` link from that `bait_served` event to the presentation, with `attribution: "unique"`. The basis reads, for example, `honeytoken tok_backup_01 served by web:/.env (sensor response)`. The R09 finding has `token_relation: "linked"`.
+4. **Several eligible issuances of the same static credential** → the backend cannot know which serving caused the reuse, and it does not pick one.
+   - It creates one `strong_candidate` link per distinct source case among them, each with `attribution: "ambiguous"` and `candidate_issuance_ids` listing all of them. `from_event_id` is the newest serving in that case.
+   - The R09 finding has `token_relation: "linked"` and `attribution: "ambiguous"`.
+   - The analyst can confirm at most one of these links; confirming one does not confirm the others.
+   - Per-issuance credentials remove the ambiguity, because each issuance then has its own token.
+5. **No serving, but an earlier `command_input` with `requested_asset_id` naming an asset that holds the token** (same run, mode and planted sensor) → a `candidate` link (not strong) with `attribution: "request_only"`. The basis reads `honeytoken tok_portal_01; bait read requested by command, output not recorded`. The R09 finding has `token_relation: "request_only"`, and it scores only if the analyst confirms that link.
+6. **Neither** → no link is created and no source event is invented. The R09 finding still appears with `token_relation: "orphan"`, label "Honeytoken tok_x presented; no record of it being served in this run", 0 points, and it is never scored.
+
+Links gain `attribution` (`unique`, `ambiguous`, `request_only` or null for IP/time candidates) and `candidate_issuance_ids` (empty unless ambiguous).
 
 `candidate` links keep their v1.0 meaning (same `src_ip`, both sensors, within 300 s), now also requiring the same run and mode. They are possible evidence only, never proof.
 
@@ -207,6 +227,8 @@ A **`bait_served`** event (new) says that a sensor returned content containing h
 
 `GET /api/incidents/{incident_id}/response-eligibility` (backend, new). Example in `examples/api_v1_1.json`.
 
+The route returns `{ "eligible", "target_ip", "lab_run_id", "capture_mode", "reasons": [ { "code", "message" } ], "last_web_observation_at", "checked_at" }`.
+
 `eligible` is true only if all of these hold:
 
 1. The case is `live`.
@@ -214,7 +236,17 @@ A **`bait_served`** event (new) says that a sensor returned content containing h
 3. The case's `src_ip` has a `web-decoy-01` event in that run less than 10 minutes old.
 4. The case is not `dissolved`.
 
-Otherwise `reasons` lists every failed check. The allowed-IP check stays in `response/` (M2). Preview and apply must both call this route. Apply re-checks at execution time and refuses with 409 `not_eligible` (review T03). The lookup `response/` already makes switches from `GET /api/incidents/{id}` to this route.
+Otherwise `reasons` lists every failed check as `{ "code", "message" }`. The codes match M1's `EligibilityReason`:
+
+| Code | Means |
+|---|---|
+| `replay_data` | the case is replay evidence |
+| `no_live_run` | its run is not the active live run |
+| `stale_observation` | no fresh web observation |
+| `case_dissolved` | the case was dissolved |
+| `sensor_not_registered` | reserved for the enforcing-sensor check |
+
+The allowed-IP check stays in `response/` (M2). Preview and apply must both call this route. Apply re-checks at execution time and refuses with 409 `not_eligible` (review T03). The lookup `response/` already makes switches from `GET /api/incidents/{id}` to this route.
 
 Verification tuple (M2's `on_event`, review T04). An action becomes `verified` only when a `blocked_request` meets all of these:
 
@@ -225,20 +257,39 @@ Verification tuple (M2's `on_event`, review T04). An action becomes `verified` o
 5. `lab_run_id` equals the run recorded at apply.
 6. `occurred_at` falls within `[applied_at, until]`.
 
-A mismatch leaves the action unchanged. It is recorded in the action's `verification_rejects: [ { "event_id", "reason" } ]`, at most 20 entries.
+7. `attributes.policy_revision` equals the action's policy revision.
+
+M2 (PR #8) implements this. The backend calls `on_event(event, trusted_context)` after commit, with `trusted_context = { "source": "backend_ingest", "persisted_event_id", "received_at" }` built by the backend, never from sensor fields.
+
+A mismatch leaves the action unchanged and is appended to the action's `verification_mismatches`, which `GET /api/response/actions` returns and the M1 UI shows as rejected attempts. Each entry is:
+
+```json
+{ "event_id": "evt_...", "received_at": "...", "sensor_id": "ssh-decoy-01", "src_ip": "192.168.77.11", "capture_mode": "replay", "reason": "wrong_sensor" }
+```
+
+`reason` is one code from M1's `MismatchReason`: `wrong_sensor`, `wrong_source`, `replay_mode`, `wrong_run`, `outside_window`, `stale_policy_revision`, `duplicate` or `unknown_action`. Report the first failing check; the generic `verification_context_mismatch` should become one of these. A restart reconciliation uses status `reconciliation_required`, as in PR #8.
 
 ### Health
 
-Collectors (the adapter, M2) post a heartbeat every 10 s to `POST /api/ingest/heartbeat`. The body is in `examples/api_v1_1.json`; `sensor_process` is `up`, `down` or `unknown`, and the response is `{ "ok": true }`. Heartbeats are stored apart from events and never reach rules, scores or the feed.
+Collectors (the adapter, M2) post one heartbeat per sensor every 10 s to `POST /api/ingest/heartbeat`. The response is `{ "ok": true }`. Field names follow M1's `CollectorHealth` and M2's adapter counters (PR #8):
+
+```json
+{ "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40Z",
+  "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z", "last_ingest_at": "2026-11-01T04:31:38Z",
+  "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+  "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 } }
+```
+
+`process_state` is `running`, `stopped` or `unknown`. The `ingest` counts are cumulative since the adapter started. Heartbeats are stored apart from events and never reach rules, scores or the feed.
 
 `GET /api/health` keeps `ok` and `sensors` (v1.0) and adds `sensor_health.<sensor_id>`:
 
 | Field | Values | Rule |
 |---|---|---|
-| `service` | `up`, `down` or `unknown` | taken from the latest heartbeat; `unknown` if there is none or it is older than 30 s |
+| `service` | `up`, `down` or `unknown` | taken from the latest heartbeat's `process_state` (`running` = `up`, `stopped` = `down`); `unknown` if there is none or it is older than 30 s |
 | `collection` | `ok`, `stale` or `never` | `ok` = heartbeat younger than 30 s; `never` = no heartbeat yet |
 | `activity` | `recent`, `quiet` or `none` | `recent` = an event in the last 5 min; `quiet` = older; `none` = no events. A quiet sensor is not a broken one |
-| `last_heartbeat_at`, `last_event_at`, `backlog_lines`, `rejected_total`, `quarantined_total`, `clock_skew_s` | | taken from the heartbeat and the event table; null if unknown |
+| `heartbeat_at`, `process_state`, `last_read_at`, `last_ingest_at`, `backlog_records`, `oldest_backlog_age_s`, `error_count`, `ingest`, `clock_skew_s`, `last_event_at` | | copied from the latest heartbeat (M1's `CollectorHealth`) or the event table; null if unknown |
 
 `clock_skew_s` is the heartbeat's `sent_at` minus the backend's receive time. An event time in the future never makes a sensor look healthy. `ok` means only that the backend is up.
 
@@ -246,8 +297,8 @@ Collectors (the adapter, M2) post a heartbeat every 10 s to `POST /api/ingest/he
 
 | Consumer | What changes for it |
 |---|---|
-| Adapter, M2 | Nothing breaks. To adopt: heartbeat, `observation_kind`, `bait_served` (derived) for the notes.txt read, the verification tuple, and the eligibility call |
-| Web decoy, M4 | Nothing breaks. To adopt: `request_id` on every record, a `bait_served` record when `/.env` is returned, a session cookie id in `session_id`, and `bait_assets` in `honeytokens.yaml` |
+| Adapter, M2 | Nothing breaks. To adopt: heartbeat; `requested_asset_id` on bait-read commands; `bait_served` only from the session output log; verification mismatch reason codes; the eligibility call |
+| Web decoy, M4 | Nothing breaks while it sends 1.0. Aligned for 1.1: `request_id`; a `bait_served` with `sensor_response` when `/.env` is returned; a derived (non-cookie) `session_id`; `input_features` and `processing`; string `fixture_version`; `bait_assets` in `honeytokens.yaml`. Keep the 1.1 producer mode off until PR 2 is merged |
 | Frontend, M1 | All v1.0 fields stay. New fields can be ignored at first. Behaviour that changes: the incident list holds more, smaller cases; per-case scores are lower until the analyst confirms a link (the 25→100 demo climb happens on the investigation); R04 shows stage `lure_access`; R07 shows fewer technique ids; R09 can be `orphan` with no link |
 | Backend tests | Several v1.0 tests encode the old grouping (one incident per IP). They change on purpose in the implementation PRs, each with a note |
 
@@ -256,7 +307,7 @@ Collectors (the adapter, M2) post a heartbeat every 10 s to `POST /api/ingest/he
 The order follows review section 12. Each step is its own PR with real test output:
 
 1. **This PR**: contract, examples, schema tests, and the gaps reproduced as expected-failure tests.
-2. Ingest accepts 1.1, derives `observation_kind`, enforces run mode, adds the dedup namespace and `/api/runs`. DB migration 1 adds columns only.
+2. Ingest accepts 1.1 (version-gated validation, `input_features` and `processing` bounded, R07 consuming the indicators), derives `observation_kind`, enforces one mode per run, and adds the dedup namespace and `/api/runs`. DB migration 1 adds columns and a `runs` table. It rebuilds the `events` table once, copying every row unchanged including `seq`, because SQLite cannot drop the old unique key in place. The file is backed up first.
 3. Case model: cases, credential window, profiles, investigations and dissolve. DB migration 2 adds `cases`, `case_events` and `investigations`. Cases are **derived**: they are rebuilt from the untouched `events` table.
 4. Causal token matching, orphan R09, corrected mappings and rule versions.
 5. Eligibility route, health and heartbeat. M2 then wires preview, apply and verification. M4 and M2 emit `bait_served`.

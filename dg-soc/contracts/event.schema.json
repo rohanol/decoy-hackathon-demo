@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dg-soc/event.schema.json",
   "title": "Ingest event (adapter -> backend)",
-  "description": "One normalised sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at. Version 1.1 is additive: every valid 1.0 event is still valid. See contracts/API.md 'Evidence boundaries (v1.1)'.",
+  "description": "One normalised sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at. schema_version selects the rules: \"1.0\" events are checked exactly as contracts/history/event.schema.v1.0.json did (backend/tests/test_contracts.py proves this on edge cases), and every stricter or new rule applies only to \"1.1\" events. See contracts/API.md 'Evidence boundaries (v1.1)'.",
   "type": "object",
   "required": ["schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip", "lab_run_id", "capture_mode"],
   "additionalProperties": false,
@@ -10,14 +10,13 @@
     "schema_version": { "enum": ["1.0", "1.1"] },
     "source_record_id": {
       "type": "string",
-      "minLength": 1,
       "maxLength": 128,
       "description": "Stable per sensor record. Cowrie: sha256 of the raw JSON line. Web: request uuid. Dedup key is (ingest namespace, sensor_id, source_record_id); the namespace is 'live' for live events and 'replay:<lab_run_id>' for replay events."
     },
     "origin_record_id": {
       "type": ["string", "null"],
       "maxLength": 128,
-      "description": "v1.1. Replay only: source_record_id of the original captured record this replay copies. Null or absent for live events."
+      "description": "1.1 only. Replay: source_record_id of the original captured record this replay copies. Must be null or absent on live events."
     },
     "sensor_id": { "enum": ["ssh-decoy-01", "web-decoy-01"] },
     "event_type": {
@@ -32,24 +31,87 @@
         "blocked_request",
         "bait_served"
       ],
-      "description": "bait_served is v1.1: the sensor returned content containing one or more honeytokens."
+      "description": "bait_served is 1.1 only: the sensor's own result record shows it returned content containing honeytokens."
     },
     "occurred_at": { "type": "string", "format": "date-time", "description": "UTC, from the sensor log" },
     "src_ip": { "type": "string", "format": "ipv4" },
-    "src_port": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+    "src_port": { "type": ["integer", "null"] },
     "session_id": {
       "type": ["string", "null"],
-      "maxLength": 128,
-      "description": "Sensor session id. Cowrie: its session id. Web: the decoy's session cookie id once it issues one, else null (backend then groups by a documented 5-minute inactivity bucket)."
+      "description": "Sensor session reference. Cowrie: its session id. Web (1.1): a non-reusable reference derived by the decoy (for example a keyed digest of the session cookie with a per-run key), never the bearer cookie itself; null when the decoy has no session."
     },
     "lab_run_id": {
       "type": "string",
-      "minLength": 1,
-      "maxLength": 128,
       "description": "Set once per run. A run has exactly one capture_mode: the first accepted event fixes it, and events with the other mode for that run are rejected. Use a 'replay-' prefix for replay runs by convention."
     },
     "capture_mode": { "enum": ["live", "replay"] },
-    "attributes": {
+    "attributes": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "schema_version": { "const": "1.0" } }, "required": ["schema_version"] },
+      "then": {
+        "properties": {
+          "origin_record_id": false,
+          "event_type": { "not": { "const": "bait_served" } },
+          "attributes": { "$ref": "#/$defs/attributes_v1_0" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "schema_version": { "const": "1.1" } }, "required": ["schema_version"] },
+      "then": {
+        "properties": {
+          "source_record_id": { "minLength": 1 },
+          "src_port": { "minimum": 0, "maximum": 65535 },
+          "session_id": { "maxLength": 128 },
+          "lab_run_id": { "minLength": 1, "maxLength": 128 },
+          "attributes": { "$ref": "#/$defs/attributes_v1_1" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "event_type": { "const": "bait_served" } }, "required": ["event_type"] },
+      "then": {
+        "required": ["attributes"],
+        "properties": {
+          "attributes": {
+            "required": ["asset_id", "honeytoken_ids", "issuance_id", "evidence_basis"],
+            "properties": { "evidence_role": { "const": "bait" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "capture_mode": { "const": "live" } }, "required": ["capture_mode"] },
+      "then": { "properties": { "origin_record_id": { "type": "null" } } }
+    }
+  ],
+  "$defs": {
+    "attributes_v1_0": {
+      "description": "Frozen copy of the 1.0 attribute rules (contracts/history/event.schema.v1.0.json). Do not tighten.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "username": { "type": "string", "maxLength": 128 },
+        "password_sha256": { "type": "string" },
+        "client_version": { "type": "string", "maxLength": 256 },
+        "command": { "type": "string", "maxLength": 4096 },
+        "method": { "type": "string" },
+        "path": { "type": "string", "maxLength": 4096 },
+        "query_redacted": { "type": "string", "maxLength": 4096 },
+        "user_agent": { "type": "string", "maxLength": 512 },
+        "status_code": { "type": "integer" },
+        "response_class": { "enum": ["normal", "fake_error", "fake_data", "blocked"] },
+        "honeytoken_id": { "type": "string" },
+        "asset_id": { "type": "string" },
+        "size_bytes": { "type": "integer" },
+        "sha256": { "type": "string" },
+        "outcome": { "enum": ["served", "denied", "not_found"] },
+        "block_action_id": { "type": "string" }
+      }
+    },
+    "attributes_v1_1": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
@@ -63,69 +125,78 @@
         "user_agent": { "type": "string", "maxLength": 512, "description": "Client-claimed. A claim, not identity." },
         "status_code": { "type": "integer" },
         "response_class": { "enum": ["normal", "fake_error", "fake_data", "blocked"] },
-        "honeytoken_id": { "type": "string", "maxLength": 128, "description": "A honeytoken PRESENTED by the client (login, query). For served bait use honeytoken_ids." },
-        "asset_id": { "type": "string", "maxLength": 128, "description": "Synthetic object id. v1.1 bait assets: 'ssh:/home/dg_demo/notes.txt', 'web:/.env'." },
+        "honeytoken_id": { "type": "string", "maxLength": 128, "description": "A honeytoken PRESENTED by the client (login, query). Served bait uses honeytoken_ids." },
+        "asset_id": { "type": "string", "maxLength": 128, "description": "Registered synthetic object id, e.g. 'ssh:/home/dg_demo/notes.txt', 'web:/.env', 'customer_data.csv'." },
         "size_bytes": { "type": "integer", "minimum": 0 },
-        "sha256": { "type": "string", "maxLength": 64, "description": "Digest of the full served content (see digest_scope)." },
+        "sha256": { "type": "string", "maxLength": 64, "description": "Digest of the content named by digest_scope." },
         "outcome": {
           "enum": ["served", "denied", "not_found", "attempted", "emulated_success", "failed", "unknown"],
-          "description": "1.0 values served/denied/not_found keep their meaning. v1.1 adds attempted, emulated_success, failed, unknown. 'served' equals emulated_success for a synthetic file."
+          "description": "1.0 values keep their meaning ('served' = emulated_success for a synthetic file)."
         },
         "block_action_id": { "type": "string", "maxLength": 64 },
-
+        "policy_revision": { "type": "integer", "minimum": 0, "description": "blocked_request: revision of the policy snapshot that denied it (M2)." },
         "observation_kind": {
           "enum": ["network_input", "command_input", "emulated_result", "policy_result"],
-          "description": "v1.1. What the record observed: client input on the wire, a shell command, the decoy's emulated result, or a policy decision. If absent the backend derives it from event_type (API.md)."
+          "description": "What the record observed. If absent the backend derives it from event_type (API.md)."
         },
-        "evidence_role": {
-          "enum": ["request", "result", "bait"],
-          "description": "v1.1. Shorthand used by findings and links: request = client input, result = the decoy's answer or policy outcome, bait = content carrying a honeytoken was served."
-        },
-        "request_id": { "type": "string", "maxLength": 64, "description": "v1.1, web. One id per HTTP request; every record about that request carries it." },
+        "evidence_role": { "enum": ["request", "result", "bait"] },
+        "request_id": { "type": "string", "maxLength": 64, "description": "Web: one id per HTTP request; every record about that request carries it." },
         "honeytoken_ids": {
-          "type": "array",
-          "items": { "type": "string", "maxLength": 128 },
-          "minItems": 1,
-          "maxItems": 16,
-          "uniqueItems": true,
-          "description": "v1.1, bait_served only. Tokens contained in the served content. Ids only, never values."
+          "type": "array", "items": { "type": "string", "maxLength": 128 },
+          "minItems": 1, "maxItems": 16, "uniqueItems": true,
+          "description": "bait_served (and command_input with requested_asset_id): tokens contained in the asset. Ids only, never values."
         },
-        "issuance_id": { "type": "string", "maxLength": 64, "description": "v1.1, bait_served. Unique per serving (or per per-session token if the decoy mints them)." },
-        "issued_expires_at": { "type": ["string", "null"], "format": "date-time", "description": "v1.1, bait_served. Optional expiry; null = valid until the run ends." },
+        "issuance_id": { "type": "string", "maxLength": 64, "description": "bait_served: unique per serving. With a static credential several issuances carry the same token; the backend then keeps the attribution ambiguous." },
+        "issued_expires_at": { "type": ["string", "null"], "format": "date-time", "description": "bait_served: optional expiry; null = valid until the run ends." },
         "evidence_basis": {
-          "enum": ["sensor_response", "derived_from_command"],
-          "description": "v1.1, bait_served. sensor_response = the decoy itself recorded sending the content. derived_from_command = the adapter inferred it from a read command on a known bait path in the emulated filesystem (weaker; shown as such)."
+          "enum": ["sensor_response", "session_output_log"],
+          "description": "bait_served: what shows the content was actually returned. sensor_response = the decoy logged sending the response (web). session_output_log = the sensor's own recorded output stream for the session contains the bait (e.g. a Cowrie TTY log). A command alone is never enough; see requested_asset_id."
         },
-        "derived_from_record_id": { "type": "string", "maxLength": 128, "description": "v1.1, required when evidence_basis = derived_from_command: source_record_id of the command record it was derived from." },
-        "fixture_version": { "type": "string", "maxLength": 32, "description": "v1.1. Version of the synthetic asset or bait file." },
-        "digest_scope": { "enum": ["full_sanitised_response", "full_asset", "partial"], "description": "v1.1. What sha256 covers." }
-      }
-    }
-  },
-  "allOf": [
-    {
-      "if": { "properties": { "event_type": { "const": "bait_served" } }, "required": ["event_type"] },
-      "then": {
-        "properties": {
-          "schema_version": { "const": "1.1" },
-          "attributes": {
-            "required": ["asset_id", "honeytoken_ids", "issuance_id", "evidence_basis"],
-            "properties": { "evidence_role": { "const": "bait" } }
-          }
-        },
-        "required": ["attributes"]
+        "requested_asset_id": { "type": "string", "maxLength": 128, "description": "command_input: the adapter recognised a read of this registered bait asset (e.g. 'cat notes.txt'). A request, not proof the content was returned." },
+        "fixture_version": { "type": "string", "maxLength": 32, "description": "Version label of the synthetic asset, a string such as 'env@1'." },
+        "digest_scope": { "enum": ["full_response", "full_sanitised_response", "full_asset", "partial"], "description": "What sha256 covers. 'partial' digests must never be presented as whole-content proof." },
+        "input_features": { "$ref": "#/$defs/input_features" },
+        "processing": { "$ref": "#/$defs/processing" }
       }
     },
-    {
-      "if": {
-        "properties": { "attributes": { "properties": { "evidence_basis": { "const": "derived_from_command" } }, "required": ["evidence_basis"] } },
-        "required": ["attributes"]
-      },
-      "then": { "properties": { "attributes": { "required": ["derived_from_record_id"] } } }
+    "input_features": {
+      "description": "M4. Sanitised, bounded description of client input (query, form or JSON body) without any raw value. Lets the backend classify body payloads without storing them.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "field_count", "indicators"],
+      "properties": {
+        "source": { "enum": ["query", "form", "json", "multipart", "none"] },
+        "field_count": { "type": "integer", "minimum": 0, "maximum": 256 },
+        "field_names": {
+          "type": "array", "maxItems": 32,
+          "items": { "type": "string", "maxLength": 64 },
+          "description": "Names only. Values are never included, sensitive or not."
+        },
+        "max_value_length": { "type": "integer", "minimum": 0 },
+        "indicators": {
+          "type": "array", "maxItems": 16, "uniqueItems": true,
+          "items": {
+            "enum": ["sql_quote", "sql_keyword", "sql_comment", "script_tag", "event_handler", "js_scheme",
+                     "path_traversal", "sensitive_file_path", "php_wrapper", "remote_url_in_param",
+                     "shell_metachar_command", "command_substitution", "null_byte", "encoded_payload"]
+          },
+          "description": "Fixed vocabulary computed by the producer on decoded input. The backend owns the classification it derives from these."
+        },
+        "truncated": { "type": "boolean", "description": "True if feature extraction stopped at a limit." }
+      }
     },
-    {
-      "if": { "properties": { "capture_mode": { "const": "live" } }, "required": ["capture_mode"] },
-      "then": { "properties": { "origin_record_id": { "type": "null" } } }
+    "processing": {
+      "description": "M4. How the producer handled the request body, so an absent feature is not mistaken for a clean request.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parse_status"],
+      "properties": {
+        "parse_status": { "enum": ["parsed", "no_body", "rejected_too_large", "unsupported_type", "malformed"] },
+        "body_bytes": { "type": "integer", "minimum": 0, "description": "Bytes received (may exceed what was parsed)." },
+        "body_consumed": { "type": "boolean", "description": "True only if the whole body was read; a full digest is valid only then." },
+        "redaction_version": { "type": "string", "maxLength": 32 },
+        "producer_version": { "type": "string", "maxLength": 32 }
+      }
     }
-  ]
+  }
 }
