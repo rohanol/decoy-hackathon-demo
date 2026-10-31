@@ -123,7 +123,10 @@ def test_search_inputs_remain_observable_without_real_queries(portal, location):
     assert response.status_code == 500 and b"SQLSTATE" in response.data
     row = events(log)[-1]
     assert row["event_type"] == "http_request"
-    assert row["attributes"]["input_features"] == [{"location": location, "field": "q", "value": payload}]
+    features = row["attributes"]["input_features"]
+    assert features["source"] == location and features["field_names"] == ["q"]
+    assert {"sql_quote", "sql_keyword", "sql_comment"} <= set(features["indicators"])
+    assert payload not in json.dumps(features)
     assert row["attributes"]["response_class"] == "fake_error"
     assert "web_attack_class" not in row["attributes"]  # M3 owns classification.
 
@@ -152,10 +155,11 @@ def test_bait_proof_is_for_a_real_get_not_head_or_connection(portal):
     attrs = proof["attributes"]
     assert proof["event_type"] == "synthetic_file_access"
     assert attrs["evidence_kind"] == "bait_served"
-    assert attrs["asset_id"] == "backup_env" and attrs["honeytoken_id"] == "tok_backup_01"
+    assert attrs["asset_id"] == "web:/.env" and attrs["honeytoken_ids"] == ["tok_backup_01"]
+    assert "honeytoken_id" not in attrs  # Serving is not token presentation.
     assert attrs["sha256"] == hashlib.sha256(response.data).hexdigest()
     assert attrs["size_bytes"] == len(response.data)
-    assert attrs["digest_scope"] == "full_response"
+    assert attrs["digest_scope"] == "full_asset"
     client.get("/.env")
     assert events(log)[-1]["attributes"]["issuance_id"] != attrs["issuance_id"]
     assert "DGLAB-Bkp-2210" not in log.read_text()
@@ -227,7 +231,8 @@ def test_uninspectable_body_suppresses_cross_location_free_text(portal, data, mi
     _, client, log, _, _ = portal
     client.post("/search?q=hidden", data=data, content_type=mimetype, headers={"User-Agent": "hidden"})
     attrs = events(log)[-1]["attributes"]
-    assert attrs["input_features"] == []
+    assert attrs["input_features"]["indicators"] == []
+    assert attrs["input_features"]["field_names"] == []
     assert attrs["query_redacted"] == "<not retained>"
     assert attrs["user_agent"] == "<not retained>"
 
@@ -247,7 +252,7 @@ def test_unknown_routes_and_wrong_methods_still_capture_form_context(portal):
     _, client, log, _, _ = portal
     assert client.post("/unknown", data={"q": "<script>example</script>"}).status_code == 404
     assert client.post("/download", json={"q": "<script>example</script>"}).status_code == 405
-    assert all(row["attributes"]["input_features"] for row in events(log))
+    assert all(row["attributes"]["input_features"]["indicators"] == ["script_tag"] for row in events(log))
 
 
 def test_upload_requires_login_and_discards_complete_text(portal, tmp_path):
@@ -261,7 +266,7 @@ def test_upload_requires_login_and_discards_complete_text(portal, tmp_path):
     attrs = events(log)[-1]["attributes"]
     assert attrs["upload_outcome"] == "accepted_discarded"
     assert attrs["sha256"] == hashlib.sha256(data).hexdigest()
-    assert attrs["digest_scope"] == "full_accepted_file" and attrs["size_bytes"] == len(data)
+    assert attrs["digest_scope"] == "full_asset" and attrs["size_bytes"] == len(data)
     assert data.decode() not in log.read_text() and b"never execute" not in response.data
     assert set(tmp_path.iterdir()) == before
 
@@ -347,3 +352,85 @@ def test_payloads_never_open_networks_or_run_processes(portal, monkeypatch):
         response = client.post(route, json={"q": "$(id); curl https://example.invalid/never", "file": "/etc/passwd"})
         assert b"$(id)" not in response.data and b"example.invalid" not in response.data
     assert client.post("/upload", data={"report": (io.BytesIO(b"synthetic text"), "report.txt", "text/plain")}).status_code == 200
+
+
+def test_enforcement_revision_comes_from_same_snapshot_and_fails_closed(portal, monkeypatch):
+    from decoys.policy import policy
+    app, client, log, state, _ = portal
+    # Even a present legacy/fail-open M2 module cannot bypass the web guard.
+    monkeypatch.setattr(policy, "check_with_revision", lambda *args: (None, None), raising=False)
+    state.write_text(json.dumps({"version": 8, "entries": [{"ip": "192.168.77.10", "action_id": "act_revision",
+        "policy_revision": 7, "expires_at": "2099-01-01T00:00:00Z"}]}))
+    assert client.get("/", environ_overrides={"REMOTE_ADDR": "192.168.77.10"}).status_code == 403
+    assert events(log)[-1]["attributes"]["policy_revision"] == 7
+    for malformed in ["{bad", "{}", '{"version":true,"entries":[]}',
+                      '{"version":9,"entries":[{"ip":"192.168.77.10","action_id":"act_x","expires_at":"2099-01-01T00:00:00Z","policy_revision":true}]}']:
+        state.write_text(malformed)
+        assert client.get("/").status_code == 503
+    state.unlink()
+    assert client.get("/").status_code == 503
+
+
+def test_opt_in_v11_bait_record_is_separate_from_legacy_default(tmp_path):
+    state = tmp_path / "policy.json"
+    state.write_text('{"version":0,"entries":[]}')
+    log = tmp_path / "v11.json"
+    app = create_app({"TESTING": True, "BLOCKLIST_PATH": str(state), "LOG_PATH": str(log),
+                      "HONEYTOKENS_PATH": str(ROOT / "config/honeytokens.yaml"),
+                      "WEB_EVENT_SCHEMA_VERSION": "1.1"})
+    response = app.test_client().get("/.env")
+    assert response.status_code == 200
+    http, bait = events(log)
+    assert http["schema_version"] == bait["schema_version"] == "1.1"
+    assert [http["event_type"], bait["event_type"]] == ["http_request", "bait_served"]
+    assert bait["attributes"]["evidence_role"] == "bait"
+    assert bait["attributes"]["evidence_basis"] == "sensor_response"
+    assert bait["attributes"]["honeytoken_ids"] == ["tok_backup_01"]
+    assert bait["attributes"]["fixture_version"] == "1"
+    assert "honeytoken_id" not in bait["attributes"]
+
+
+@pytest.mark.parametrize("field,value,indicator", [
+    ("q", "'", "sql_quote"), ("q", "UNION SELECT", "sql_keyword"),
+    ("q", "report--", "sql_comment"), ("q", "<script>example</script>", "script_tag"),
+    ("q", "onerror=example", "event_handler"), ("q", "javascript:example", "js_scheme"),
+    ("q", "../../example", "path_traversal"), ("q", "/etc/passwd", "sensitive_file_path"),
+    ("q", "php://filter", "php_wrapper"), ("page", "https://example.invalid/bait", "remote_url_in_param"),
+    ("q", "; whoami", "shell_metachar_command"), ("q", "$(id)", "command_substitution"),
+    ("q", "\x00", "null_byte"), ("q", "%253Cscript%253E", "encoded_payload"),
+])
+def test_contract_indicators_never_contain_body_values(portal, field, value, indicator):
+    _, client, log, _, _ = portal
+    client.post("/search", json={field: value})
+    attrs = events(log)[-1]["attributes"]
+    features = attrs["input_features"]
+    assert indicator in features["indicators"]
+    assert features["source"] == "json" and features["field_count"] == 1
+    assert features["field_names"] == [field] and "value" not in features
+    assert value not in json.dumps(features) or len(value) <= 1
+    assert attrs["processing"]["parse_status"] == "parsed"
+    assert attrs["processing"]["body_consumed"] is True
+
+
+def test_sensitive_field_does_not_contribute_attack_indicators(portal):
+    _, client, log, _, _ = portal
+    client.post("/search", json={"q": "quarterly report--", "password": "'<script>private</script>"})
+    attrs = events(log)[-1]["attributes"]
+    assert attrs["input_features"]["indicators"] == ["sql_comment"]
+    assert "private" not in log.read_text()
+
+
+def test_processing_distinguishes_absent_malformed_and_unread_body(portal):
+    _, client, log, _, _ = portal
+    client.get("/")
+    assert events(log)[-1]["attributes"]["processing"]["parse_status"] == "no_body"
+    for data, status in [(b'{"q":', "malformed"), (b"x" * 17000, "rejected_too_large")]:
+        client.post("/search", data=data, content_type="application/json")
+        processing = events(log)[-1]["attributes"]["processing"]
+        assert processing["parse_status"] == status
+        if status == "rejected_too_large":
+            assert processing["body_consumed"] is False and "body_bytes" not in processing
+        else:
+            assert processing["body_consumed"] is True and processing["body_bytes"] == len(data)
+    client.get("/search?q=private-get", data=b"private-get", content_type="text/plain")
+    assert "private-get" not in log.read_text()

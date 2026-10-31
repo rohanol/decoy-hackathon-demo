@@ -5,6 +5,37 @@ Base: `d1adbaab41b73295ed05768fe6b1456498d52f96` (integrated main,
 including the frontend redesign). Changes are prepared locally for owner review;
 no GitHub push, PR, VM deployment or new physical-lab verification is implied.
 
+## Coordination update after PRs 8, 9, 10 and 11
+
+The first implementation is preserved in local commit 7cdaade. Subsequent M4
+adjustments align with draft PR #9 at 20041a9: string fixture versions,
+`digest_scope=full_asset`, registered `web:/.env` / `ssh:/home/dg_demo/notes.txt`
+asset IDs and `bait_assets` in honeytokens.yaml. Served credentials use plural
+`honeytoken_ids`, not the singular client-presentation field. Auth observations
+use the draft network_input/request roles. The bearer cookie remains private;
+session_id is its non-reusable derived reference.
+
+Default output remains v1.0. `WEB_EVENT_SCHEMA_VERSION=1.1` is an explicit opt-in
+for the future coordinated release, producing the draft bait_served event.
+Do not enable it while either current adapter or backend rejects schema 1.1.
+
+The web bridge emits policy_revision from the same validated snapshot as
+block_action_id and fails closed independent of optional host policy imports.
+M2 at 715b278 has fixed the original canonical fail-open regression and now
+requires authoritative eligibility on preview and apply. That backend route is
+still pending. Preserve the trusted post-commit callback and both teams' guards.
+
+Latest producer input_features now matches PR #9/#11: an object containing
+source, field_count, field_names, max_value_length, indicators and truncated.
+No body values are emitted. Processing reports parse_status, bytes actually read,
+body_consumed and string producer/redaction versions. The 14 indicators are
+lexical evidence; M3 owns their class mapping, confidence and ATT&CK labels.
+
+Fresh M4 validation: 302 passed, 1 Starlette/httpx deprecation warning (Windows
+Python 3.12, explicit Git Bash). See the separate integration review for actual
+combined-branch receipts. M2 at 715b278 still rejects schema 1.1; keep producer
+mode 1.0 even after backend PR #11 merges until adapter support is delivered.
+
 ## What changed
 
 1. Bounded anonymous/authenticated synthetic sessions; login rotation, failed-login
@@ -37,15 +68,20 @@ no GitHub push, PR, VM deployment or new physical-lab verification is implied.
 ## Files and ownership
 
 - `decoys/web/app.py`: routes, sessions, policy-first lifecycle and event output.
+- `decoys/web/policy_bridge.py`: same-snapshot revision and fail-closed enforcement.
 - `decoys/web/observation.py`: bounded request metadata and redaction.
 - `decoys/web/sessions.py`: opaque cookie store and lifecycle.
 - `decoys/web/assets/manifest.json`: registered local fixtures.
 - `decoys/web/README.md`, `requirements-dev.txt`: setup/compatibility boundaries.
 - `tests/e2e/test_m4.py`, `test_m4_depth.py`, `smoke_web_container.py`: regression
   and compatibility coverage, with explicit Git Bash selection on Windows.
+- `tests/e2e/export_m4_records.py`: offline local-client producer samples for M1;
+  refuses overwrite and does not contact either lab VM.
 - `config/web_patterns.yaml`, `contracts/examples/payloads.json`: M4 pattern
   catalogue and corresponding benign examples; Rohan should review the catalogue
   change with the backend consumer before integration.
+- `config/honeytokens.yaml`: additive bait_assets registry, existing token hashes
+  unchanged.
 - `scenarios/web_depth.sh`, `attack_p3.sh`, `demo_p3.md`, `M4_HANDOFF.md` and this
   document: guarded workflow, corrected claims and handoff.
 
@@ -59,9 +95,9 @@ contract before the coordinated release.
 
 ### Rohan / M3
 
-- Consume `attributes.input_features` with location/field/value plus observation
-  metadata. Existing R07 still sees only URL path/query; M4 does not mislabel body
-  features as a URL query to conceal this missing consumer.
+- PR #11 consumes the fixed indicators without body values. Review benign text
+  containing both apostrophes and comment punctuation: lexical hints do not
+  independently establish SQL structure. Main's R07 still reads URL path/query.
 - Use actual served bait endpoints for causal matching. Existing planted_lookup
   still selects generic earlier source-sensor events. The new evidence does not
   automatically repair that lookup.
@@ -77,16 +113,18 @@ contract before the coordinated release.
 
 - Preserve complete v1 web observations and nested attributes in the adapter;
   the current mapper already passes them through, verified by an API test.
+- Add version-gated 1.1 validation and bait_served before enabling the producer.
+  Align heartbeat names and verification refusal fields with M3's latest draft.
 - Instrument successful SSH notes reads using the pinned release. M4 can prove
   its own web bait service but cannot prove SSH note delivery from command input.
-- Agree the canonical trusted policy-revision metadata with M3 and M4. Existing
-  block_action_id is preserved; M4 does not invent a revision by rereading policy
-  separately and racing the actual enforcement decision.
+- Consume canonical policy_revision, now read with the enforced action in one
+  validated snapshot. Never replace it with a second read of policy state.
 - Rebuild the web image with the whole decoys/web context. Keep one Gunicorn
   worker; the Dockerfile already copies the new modules/manifest. Preserve current
   mounts and log permissions. Session state resets on worker restart by design.
 - Run the revised Docker smoke and physical two-laptop workflow after review.
-  Do not mistake the current response verifier for the completed strict tuple.
+  The strict tuple is implemented; the full live response needs the missing
+  backend eligibility route and Linux validation.
 
 ### Pashmee / M1
 
@@ -115,12 +153,13 @@ An illustrative attributes subset for that result is:
   "request_id": "req_example",
   "observation_kind": "emulated_result",
   "evidence_kind": "bait_served",
-  "asset_id": "backup_env",
-  "fixture_version": 1,
-  "honeytoken_id": "tok_backup_01",
+  "asset_id": "web:/.env",
+  "fixture_version": "1",
+  "honeytoken_ids": ["tok_backup_01"],
+  "evidence_basis": "sensor_response",
   "issuance_id": "issue_example",
   "outcome": "served",
-  "digest_scope": "full_response"
+  "digest_scope": "full_asset"
 }
 ```
 
@@ -135,7 +174,7 @@ requirements plus web requirements-dev installed. No original VM state used.
 
 ```text
 python -m pytest backend sensors response decoys/policy decoys/ssh deployment tests/e2e -q
-284 passed, 1 warning in 21.99s
+302 passed, 1 warning in 23.49s
 ```
 
 Set DG_TEST_BASH to the functioning Git Bash executable on this Windows host.
@@ -163,7 +202,39 @@ real browser/VM end-to-end acceptance, physical route/packet isolation, real
 response/revoke workflow. The local Docker daemon is unavailable. These need
 the reviewed integration release and Vedant's native Linux engine.
 
-## Deployment and rollback
+## Combined local integration receipt (1 November 2026)
+
+Tested M2 715b278, M3 contract 20041a9 + ingest a61867c, M1 8bd3cba,
+plus this M4 implementation in a separate worktree. No remote merges or deployment.
+Three overlap resolutions are needed: API.md keeps both owners' notes (which still
+disagree on refusal fields), web app.py/policy_bridge.py retain M4 sessions and
+M2's same-snapshot action/revision semantics. This worktree deliberately removes
+the stale strict xfail on benign trailing dashes; M3 should do that on its branch.
+
+- Full combined Python suite: 432 passed, 6 xfailed, one deprecation warning in
+  35.96 seconds. The initial run was 415 passed, 6 xfailed and one strict XPASS
+  because M4 already fixed the trailing-dash gap; it was not a broken detector.
+- M1 unit tests: 30 passed using explicit file arguments on Node 24.16.0.
+  npm test alone ran zero tests on this Windows host because of its quoted glob.
+- M1 typecheck + production build passed; Vite reports an existing large chunk.
+- Actual generated default 1.0 and opt-in 1.1 records: 20 per mode passed the new
+  schema/Pydantic and direct API ingest; each second submission was 20 duplicates.
+  All 1.0 records passed M2 validate(); all 1.1 records failed schema_version.
+- M1's browser filter test passed against generated 1.0 records: 20 rows, six
+  session references, request filter and run/mode filter, no page errors. A
+  separate check showed the shared login request/result pair as exactly two rows.
+- Direct 1.1 API -> M1 browser check: 20 rows, two 'bait served' fallback labels,
+  no page errors. This bypasses M2 and does not justify enabling producer 1.1.
+  Browser checks used installed headless Edge because Playwright Chromium was
+  absent. First v1.1 assertion used an underscore instead of the actual fallback's
+  space; correcting the selector passed. No frontend source was changed.
+- New body-mapping probes: apostrophe + trailing comment punctuation is still
+  a false positive, and UNION SELECT without a quote is missed by PR #11's
+  indicator mapping. Both require M3's mapping review and regressions.
+- Eligibility and heartbeat routes return 404; M2/M3 heartbeat and verification
+  refusal field names still differ. No full live response success is claimed.
+
+## Deployment and rollback procedure
 
 Use a reviewed commit/branch and preserve the existing VM backup, lab.env,
 logs/database and Cowrie mounted-file permissions. Do not overlay an unreviewed

@@ -2,6 +2,17 @@
 # The adapter (M2) and web decoy (M4) hash every presented password and compare against these.
 # Match -> set attributes.honeytoken_id on the event. Never store the raw value anywhere.
 version: 1
+bait_assets:
+  - asset_id: "ssh:/home/dg_demo/notes.txt"
+    sensor_id: ssh-decoy-01
+    path: /home/dg_demo/notes.txt
+    honeytoken_ids: [tok_portal_01]
+    fixture_version: "1"
+  - asset_id: "web:/.env"
+    sensor_id: web-decoy-01
+    path: /.env
+    honeytoken_ids: [tok_backup_01]
+    fixture_version: "1"
 tokens:
   - id: tok_portal_01
     description: Web portal login for svc_portal

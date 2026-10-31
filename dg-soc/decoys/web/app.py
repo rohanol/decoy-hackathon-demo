@@ -14,7 +14,7 @@ import yaml
 from flask import Flask, Response, g, request
 
 from .observation import RequestObservation, decode
-from .policy_bridge import resolve_checker
+from .policy_bridge import resolve_enforcer
 from .sessions import SessionStore
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,10 +44,13 @@ def create_app(config=None, *, policy_check=None):
         LAB_RUN_ID=os.environ.get("LAB_RUN_ID", "run-01"),
         ATTACKER_IPS=os.environ.get("ATTACKER_IPS", "192.168.77.10"),
         DECOY_SESSION_TTL=900, DECOY_SESSION_CAPACITY=512, UPLOAD_FILE_LIMIT=8192,
+        WEB_EVENT_SCHEMA_VERSION=os.environ.get("WEB_EVENT_SCHEMA_VERSION", "1.0"),
     )
     app.config.update(config or {})
     tokens = yaml.safe_load(Path(app.config["HONEYTOKENS_PATH"]).read_text())["tokens"]
-    checker = policy_check or resolve_checker(
+    if app.config["WEB_EVENT_SCHEMA_VERSION"] not in {"1.0", "1.1"}:
+        raise ValueError("Unsupported web event schema version")
+    checker = policy_check or resolve_enforcer(
         app.config["BLOCKLIST_PATH"], app.config["ATTACKER_IPS"].replace(",", " ").split()
     )
     session_args = {"ttl": app.config["DECOY_SESSION_TTL"], "capacity": app.config["DECOY_SESSION_CAPACITY"]}
@@ -92,12 +95,15 @@ def create_app(config=None, *, policy_check=None):
         except (ipaddress.AddressValueError, TypeError):
             return page("<h2>IPv4 lab connection required</h2>", 400)
         try:
-            action_id = checker(g.src_ip)
+            enforcement = checker(g.src_ip)
+            action_id, revision = enforcement if isinstance(enforcement, tuple) else (enforcement, None)
         except (OSError, ValueError, KeyError, TypeError):
             return page("<h2>Portal temporarily unavailable</h2>", 503)
         if action_id:
             g.response_class = "blocked"
             semantic("blocked_request", block_action_id=action_id, outcome="denied")
+            if type(revision) is int:
+                g.semantic_attrs["policy_revision"] = revision
             return page("<h2>Access denied</h2>", 403)
         if not g.session:
             g.cookie, g.session = sessions.create(app.config["LAB_RUN_ID"])
@@ -120,6 +126,7 @@ def create_app(config=None, *, policy_check=None):
             method=request.method, status_code=response.status_code,
             response_class=g.response_class, request_id=g.request_id,
             observation_kind="network_input",
+            evidence_role="request",
             session_state="authenticated" if g.session and g.session.authenticated else "anonymous",
         )
         if response.status_code >= 400 and not g.semantic_type:
@@ -134,13 +141,16 @@ def create_app(config=None, *, policy_check=None):
             attrs.update(g.semantic_attrs)
             if "username" in attrs:
                 attrs["username"] = g.observation.clean(attrs["username"], 128)
-            attrs["observation_kind"] = "policy_result" if g.semantic_type == "blocked_request" else "emulated_result"
+            attrs["observation_kind"] = ("policy_result" if g.semantic_type == "blocked_request" else
+                                         "network_input" if g.semantic_type in {"auth_success", "auth_failure"} else "emulated_result")
+            attrs["evidence_role"] = ("request" if g.semantic_type in {"auth_success", "auth_failure"} else
+                                      "bait" if g.semantic_type == "bait_served" else "result")
             observations.append((g.semantic_type, attrs))
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         rows = []
         for kind, attrs in observations:
             rows.append({
-                "schema_version": "1.0", "source_record_id": str(uuid.uuid4()),
+                "schema_version": app.config["WEB_EVENT_SCHEMA_VERSION"], "source_record_id": str(uuid.uuid4()),
                 "sensor_id": "web-decoy-01", "event_type": kind, "occurred_at": timestamp,
                 "src_ip": g.src_ip or "0.0.0.0", "session_id": g.session.reference if g.session else None,
                 "lab_run_id": app.config["LAB_RUN_ID"], "capture_mode": "live", "attributes": attrs,
@@ -236,7 +246,7 @@ def create_app(config=None, *, policy_check=None):
             g.response_class = "fake_data"
             semantic("synthetic_file_access", asset_id="customer_data.csv", size_bytes=len(data),
                      sha256=hashlib.sha256(data).hexdigest(), outcome="served",
-                     fixture_version=1, digest_scope="full_response", evidence_kind="asset_served")
+                     fixture_version="1", digest_scope="full_asset", evidence_kind="asset_served")
         return Response(data, mimetype="text/csv", headers={"Content-Disposition": 'attachment; filename="customer_data.csv"'})
 
     @app.route("/upload", methods=["GET", "POST"])
@@ -252,19 +262,19 @@ def create_app(config=None, *, policy_check=None):
             return page("<h2>A plain text report is required</h2>", 415)
         data = file.stream.read(app.config["UPLOAD_FILE_LIMIT"] + 1)
         if len(data) > app.config["UPLOAD_FILE_LIMIT"]:
-            g.semantic_attrs.update(upload_outcome="rejected_size", digest_scope="none")
+            g.semantic_attrs.update(upload_outcome="rejected_size")
             return page("<h2>Report too large</h2>", 413)
         try:
             text = data.decode("utf-8")
             if "\x00" in text:
                 raise ValueError("binary")
         except (UnicodeDecodeError, ValueError):
-            g.semantic_attrs.update(upload_outcome="rejected_encoding", digest_scope="none")
+            g.semantic_attrs.update(upload_outcome="rejected_encoding")
             return page("<h2>UTF-8 text required</h2>", 415)
         # No uploaded bytes are saved, reflected, executed, unpacked or served.
         g.semantic_attrs.update(upload_outcome="accepted_discarded", asset_id="submitted_text_report",
                                 size_bytes=len(data), sha256=hashlib.sha256(data).hexdigest(),
-                                digest_scope="full_accepted_file", observation_kind="emulated_result")
+                                digest_scope="full_asset", observation_kind="emulated_result", evidence_role="result")
         return page("<h2>Report received</h2><p>Lab metadata recorded; content discarded.</p>")
 
     @app.get("/ping")
@@ -275,10 +285,12 @@ def create_app(config=None, *, policy_check=None):
     def env_bait():
         data = f"APP_ENV=internal\nBACKUP_SSH_USER=backup\nBACKUP_SSH_PASS={BAIT_TOKEN}\n".encode()
         if request.method == "GET":
-            semantic("synthetic_file_access", asset_id="backup_env", fixture_version=1,
-                     honeytoken_id="tok_backup_01", issuance_id="issue_" + uuid.uuid4().hex,
+            kind = "bait_served" if app.config["WEB_EVENT_SCHEMA_VERSION"] == "1.1" else "synthetic_file_access"
+            semantic(kind, asset_id="web:/.env", fixture_version="1",
+                     honeytoken_ids=["tok_backup_01"], issuance_id="issue_" + uuid.uuid4().hex,
+                     evidence_basis="sensor_response",
                      evidence_kind="bait_served", outcome="served", size_bytes=len(data),
-                     sha256=hashlib.sha256(data).hexdigest(), digest_scope="full_response")
+                     sha256=hashlib.sha256(data).hexdigest(), digest_scope="full_asset")
         return Response(data, mimetype="text/plain")
 
     @app.get("/.git/HEAD")

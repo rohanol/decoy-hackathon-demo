@@ -3,7 +3,7 @@
   "assets": [
     {
       "asset_id": "customer_data.csv",
-      "fixture_version": 1,
+      "fixture_version": "1",
       "path": "assets/customer_data.csv",
       "access": "authenticated_decoy_session",
       "size_bytes": 3728,
@@ -11,8 +11,8 @@
       "synthetic": true
     },
     {
-      "asset_id": "backup_env",
-      "fixture_version": 1,
+      "asset_id": "web:/.env",
+      "fixture_version": "1",
       "route": "/.env",
       "access": "intentional_public_bait",
       "honeytoken_id": "tok_backup_01",

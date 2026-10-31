@@ -42,8 +42,11 @@ session store and JSONL serialization; do not silently increase worker count.
 
 ## Event compatibility and M3 handoff
 
-The v1.0 envelope, event enums and current API routes are preserved. New context
-is inside existing extensible `attributes`, not unapproved top-level fields.
+The default v1.0 envelope, event enums and current API routes are preserved.
+New context is inside existing extensible `attributes`. The opt-in configuration
+`WEB_EVENT_SCHEMA_VERSION=1.1` uses PR #9's schema and emits `bait_served`.
+Keep the default `1.0` until both the adapter and backend implement v1.1; a draft
+JSON Schema accepting records is not proof that ingestion accepts them.
 
 Each request produces `http_request`. Auth and successful file/bait results add
 a second semantic record. The pair has one `attributes.request_id`, timestamp,
@@ -62,17 +65,22 @@ New attribute context:
 | --- | --- |
 | `request_id`, `session_state` | Request join and synthetic anonymous/authenticated state |
 | `previous_session_id`, `session_transition` | Rotation/logout references; no cookie value |
-| `input_features` | Sanitised scalar location/field/value records, not a classifier |
+| `input_features` | Source, bounded field names/counts/length and fixed indicators; no values |
+| `processing` | Parse status, actual bytes read, whether the complete body was read, producer/redaction versions |
 | `body_observation`, `input_truncated` | What was inspected or intentionally suppressed |
-| `normalisation_version`, `redaction_version` | Producer processing version, currently 1 |
+| `normalisation_version`, `redaction_version` | Bounded decoding version 1; redaction version 2 |
 | `observation_kind` | network_input, emulated_result or policy_result |
 | `evidence_kind`, `fixture_version`, `digest_scope` | Registered synthetic result context |
 | `issuance_id` | Unique observation of the public backup lure being served |
 | `upload_outcome` | accepted_discarded or an explicit rejection reason |
 
-The `.env` semantic record uses existing `synthetic_file_access`, with
-`evidence_kind=bait_served`, asset `backup_env`, token `tok_backup_01`, a unique
-issuance observation, returned-byte count and full-response digest. A HEAD or
+The default `.env` result uses existing `synthetic_file_access`; opt-in v1.1 uses
+`bait_served`. Both carry `evidence_kind=bait_served`, asset `web:/.env`,
+`honeytoken_ids=[tok_backup_01]`, `evidence_basis=sensor_response`, a unique
+issuance observation, string fixture version and `digest_scope=full_asset` over
+the complete returned fixture. Served tokens never use `honeytoken_id`, which
+is reserved for client presentations. The `bait_assets` registry lives alongside
+the existing hashes in `config/honeytokens.yaml`. A HEAD or
 blocked request emits no successful bait-service claim. This is a server-side
 response observation, not proof of client receipt or human identity.
 
@@ -83,26 +91,31 @@ IMPORTANT INTEGRATION LIMITS:
 - M3 must consume actual bait evidence for causal matching and isolate replay;
   the old planted_lookup still chooses generic prior events.
 - M2 must instrument the SSH note read and integrate denied channel evidence.
-- M3 must consume `input_features` for form/JSON classification; old R07 only
-  reads path/query. The decoy does not copy body values into a falsely labelled
-  query string to work around that limitation.
+- M3 PR #11 consumes the fixed body indicators for R07. Main's old R07 only
+  reads path/query. The decoy does not copy body values into a query string.
 - M3 must correct R04/R07 mappings. Existing R04 currently labels every served
   synthetic file T1005, including the new explicit public bait result.
-- M2/M3 must agree trusted policy revision metadata and response eligibility.
-  This web change does not by itself repair the current response verifier.
-- New attribute names are a compatibility implementation and handoff proposal;
-  reconcile them with the shared contracts before the integrated release.
+- The web bridge now supplies `policy_revision` with its action from one validated
+  atomic snapshot and fails closed even if an optional M2 checker fails open.
+  Preserve this guard when integrating PR #8. M2 at 715b278 has strict preview/
+  apply wiring and canonical fail-closed enforcement. The backend eligibility
+  endpoint is still pending; response remains unavailable until it exists.
+- Shared input names match PR #9 at 20041a9 and PR #11 at a61867c. M2's adapter
+  at 715b278 still rejects schema 1.1. Backend acceptance alone is insufficient
+  to enable the producer. Heartbeat and verification-field alignment also remain.
 
 ## Input and secret handling
 
 The unchanged 16 KiB request cap is enforced for body-bearing routes, including
 unsupported routes and methods. Form parsing is bounded; JSON depth is capped at
-4; at most 16 scalar previews and a 4 KiB preview-value budget are retained.
-Query capture is capped at 4 KiB/256 fields. Individual previews and emitted
+4; at most 16 scalar values and a 4 KiB inspection budget are held in memory.
+Body values never leave the observation object: only the fixed 14-indicator
+vocabulary and bounded names/counts/length are emitted. Query capture is capped
+at 4 KiB/256 fields. Inspected values and emitted
 strings are bounded by ASCII JSON size to remain within backend attribute limits.
 
 Sensitive named values, cookie values, Authorization material and known planted
-values are removed before preview/query encoding. Copied secrets in inspected
+values are removed before feature extraction/query encoding. Copied secrets in inspected
 fields, paths and User-Agent are redacted. No raw body is logged. Bounded percent
 decoding is applied for inspection; normalization is versioned, not an unlimited
 recursive decoder. Malformed/opaque/oversized/deep/truncated requests suppress
@@ -135,6 +148,19 @@ and temporary state. Only refusal arguments are executed for scenario scripts.
 WebMapper, Pydantic model and FastAPI ingest/storage API and checks deduplication.
 That integration disables the response callback: action enforcement has separate
 tests, and no real policy files are changed by this producer compatibility test.
+
+Export actual producer output for M1 without starting Docker or generating lab
+traffic (choose a new output path; the helper refuses overwrites):
+
+```bash
+python tests/e2e/export_m4_records.py --output /tmp/m4-web-v1.jsonl
+python tests/e2e/export_m4_records.py --schema-version 1.1 --output /tmp/m4-web-v11.jsonl
+```
+
+These are local Flask test clients with a supplied peer address, not physical
+source-IP evidence. Each export contains 20 records from two independent clients,
+14 request IDs and six session references including login/logout rotations.
+The 1.1 export is for direct backend/schema testing until M2 supports ingestion.
 
 ## Build and isolated Linux verification
 
