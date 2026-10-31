@@ -1,82 +1,84 @@
 #!/usr/bin/env python3
-"""Add /home/dg_demo/notes.txt to Cowrie's fake filesystem pickle so `ls` and `cat` show it. Owner: M2.
-
-Why: honeyfs only supplies file CONTENT. A file must also be an entry in fs.pickle, or `ls` will not list it.
-
-Usage (see build_fs.sh, which extracts the pickle from the pinned image and runs this):
-    python3 patch_fs.py IN.pickle OUT.pickle ../../deployment/cowrie/honeyfs/home/dg_demo/notes.txt
-
-The pickle is Cowrie's own plain nested-list tree, taken from the image we pin. Only load pickles you
-extracted from that image yourself, never one received from someone else.
-Node layout (from Cowrie's shell/fs.py, verify against your pinned image):
-  [name, type, uid, gid, size, mode, ctime, contents, target, realfile]
-  type: 0 link, 1 directory, 2 file. A directory's `contents` is a list of child nodes.
-The script verifies its own result and exits 1 if the entry is not there after reload.
-"""
+"""Patch only a trusted, digest-pinned Cowrie image pickle, never uploaded data."""
 import pickle
 import sys
 import time
+from pathlib import Path
 
 A_NAME, A_TYPE, A_UID, A_GID, A_SIZE, A_MODE, A_CTIME, A_CONTENTS, A_TARGET, A_REALFILE = range(10)
 T_DIR, T_FILE = 1, 2
-UID = GID = 1000  # dg_demo
+PASSWD_LINE = b"dg_demo:x:1000:1000:Demo user:/home/dg_demo:/bin/bash\n"
 
 
 def find(node, name):
-    for child in node[A_CONTENTS]:
-        if child[A_NAME] == name:
-            return child
-    return None
+    return next((child for child in node[A_CONTENTS] if child[A_NAME] == name), None)
 
 
 def ensure_dir(parent, name, now):
     node = find(parent, name)
     if node is None:
-        node = [name, T_DIR, UID if name == "dg_demo" else 0, GID if name == "dg_demo" else 0, 4096, 0o40755, now, [], None, None]
+        owner = 1000 if name == "dg_demo" else 0
+        node = [name, T_DIR, owner, owner, 4096, 0o40755, now, [], None, None]
         parent[A_CONTENTS].append(node)
-    elif node[A_TYPE] != T_DIR:
-        raise SystemExit(f"{name} exists and is not a directory")
+    if node[A_TYPE] != T_DIR:
+        raise ValueError(f"{name} is not a directory")
     return node
 
 
-def patch(root, content_len, now):
+def write_file(parent, name, content, now, owner=0):
+    node = find(parent, name)
+    if node is None:
+        node = [name, T_FILE, owner, owner, len(content), 0o100644, now, content, None, None]
+        parent[A_CONTENTS].append(node)
+    elif node[A_TYPE] != T_FILE:
+        raise ValueError(f"{name} is not a regular file")
+    node[A_CONTENTS], node[A_SIZE], node[A_REALFILE] = content, len(content), None
+    node[A_UID] = node[A_GID] = owner
+    return node
+
+
+def patch(root, notes, now):
+    if not isinstance(notes, bytes):
+        raise TypeError("Pass note bytes, not just their length")
+    etc = ensure_dir(root, "etc", now)
+    passwd = find(etc, "passwd")
+    previous = passwd[A_CONTENTS] if passwd else b""
+    if not isinstance(previous, bytes):
+        raise ValueError("Trusted image passwd must have embedded bytes")
+    # Preserve all other image users and replace/add exactly one demo entry.
+    lines = [line for line in previous.splitlines() if not line.startswith(b"dg_demo:")]
+    write_file(etc, "passwd", b"\n".join(lines) + (b"\n" if lines else b"") + PASSWD_LINE, now)
     home = ensure_dir(root, "home", now)
     user = ensure_dir(home, "dg_demo", now)
-    note = find(user, "notes.txt")
-    if note is None:
-        user[A_CONTENTS].append(["notes.txt", T_FILE, UID, GID, content_len, 0o100644, now, [], None, None])
-    else:
-        note[A_SIZE] = content_len
+    write_file(user, "notes.txt", notes, now, owner=1000)
     return root
 
 
-def verify(path, content_len):
-    with open(path, "rb") as fh:
-        root = pickle.load(fh)  # noqa: S301 - our own image's file, see docstring
+def verify(path, notes):
+    with open(path, "rb") as stream:
+        root = pickle.load(stream)  # trusted image or our own generated output only
     note = find(find(find(root, "home"), "dg_demo"), "notes.txt")
-    assert note and note[A_TYPE] == T_FILE and note[A_SIZE] == content_len, "notes.txt entry missing or wrong size"
+    passwd = find(find(root, "etc"), "passwd")
+    assert note[A_TYPE] == T_FILE and note[A_CONTENTS] == notes and note[A_SIZE] == len(notes)
+    assert passwd[A_CONTENTS].splitlines().count(PASSWD_LINE.rstrip(b"\n")) == 1
+    assert note[A_REALFILE] is None
     return note
 
 
 def main(argv):
     if len(argv) != 4:
-        print(__doc__)
+        print("Usage: patch_fs.py TRUSTED_IMAGE.pickle OUTPUT.pickle notes.txt", file=sys.stderr)
         return 2
-    src, dst, notes = argv[1:]
-    content_len = len(open(notes, "rb").read())
-    with open(src, "rb") as fh:
-        root = pickle.load(fh)  # noqa: S301
-    patch(root, content_len, time.time())
-    with open(dst, "wb") as fh:
-        pickle.dump(root, fh)
-    try:
-        note = verify(dst, content_len)
-    except (AssertionError, TypeError) as exc:
-        print("VERIFY FAILED:", exc)
-        return 1
-    print(f"OK: /home/dg_demo/notes.txt present, size={note[A_SIZE]} bytes, mode={oct(note[A_MODE])}")
+    source, destination, notes_path = map(Path, argv[1:])
+    notes = notes_path.read_bytes()
+    with source.open("rb") as stream:
+        root = pickle.load(stream)  # only run against the verified pinned image
+    patch(root, notes, time.time())
+    destination.write_bytes(pickle.dumps(root))
+    verify(destination, notes)
+    print(f"OK: embedded notes.txt ({len(notes)} bytes) and persistent dg_demo passwd entry")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv))
+    raise SystemExit(main(sys.argv))

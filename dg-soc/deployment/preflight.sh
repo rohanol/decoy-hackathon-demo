@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Owner: M2. Run on Laptop B before every demo run. Read-only checks, changes nothing.
 set -u
+if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --static ]; }; then
+  echo "Usage: preflight.sh [--static]" >&2; exit 2
+fi
 source "$(dirname "$0")/lab.env"
+export ATTACKER_IPS
+python3 "$(dirname "$0")/lab_checks.py" host || exit 1
 fail=0
 pass() { echo "PASS  $1"; }
 bad()  { echo "FAIL  $1"; fail=1; }
@@ -35,8 +40,23 @@ for c in dg-cowrie dg-web-decoy; do
 done
 
 grep -q 'backend *= *shell' "$(dirname "$0")/cowrie/cowrie.cfg" && pass "cowrie in emulated shell mode" || bad "cowrie backend is not shell"
+python3 "$(dirname "$0")/lab_checks.py" profile && pass "read-only Cowrie lab command profile" || bad "Cowrie command profile not active"
 
-curl -fsS "${BACKEND_URL}/api/health" >/dev/null 2>&1 && pass "backend health" || bad "backend health"
+curl --connect-timeout 2 --max-time 5 -fsS "${BACKEND_URL}/api/health" >/dev/null 2>&1 && pass "backend health" || bad "backend health"
+
+# --- M2 additions: state files, adapter, lab.env safety ---
+[ -f "$(dirname "$0")/state/blocklist.json" ] && python3 -c "import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d['entries'],list)" "$(dirname "$0")/state/blocklist.json" 2>/dev/null \
+  && pass "blocklist.json exists and is valid JSON" || bad "blocklist.json missing or invalid (run deployment/bootstrap_state.sh)"
+[ -f "$(dirname "$0")/../decoys/ssh/fs.pickle" ] && pass "cowrie fs.pickle built" || bad "decoys/ssh/fs.pickle missing (run decoys/ssh/build_fs.sh)"
+pgrep -f '^python3? .*sensors/adapter\.py' >/dev/null && pass "adapter running" || bad "adapter not running (python sensors/adapter.py)"
+echo "$ATTACKER_IPS" | tr ',' '\n' | grep -qxE "${LAB_HOST_IP}|127\.0\.0\.1|.*/.*" && bad "ATTACKER_IPS contains the lab host, loopback or a range" || pass "ATTACKER_IPS are exact attacker IPs"
+grep -qE '^[[:space:]]*image:[[:space:]]*cowrie/cowrie@sha256:[0-9a-f]{64}' "$(dirname "$0")/docker-compose.yml" && pass "cowrie image pinned by digest" || bad "cowrie image not pinned (deployment/pin_cowrie.sh)"
+
+if [ "${1:-}" = --static ]; then
+  [ $fail -eq 0 ] && echo "STATIC PASS; real source IPs remain unverified" || exit 1
+  exit 0
+fi
+python3 "$(dirname "$0")/lab_checks.py" source "$(dirname "$0")/state/cowrie-log/cowrie.json" "$(dirname "$0")/state/web-log/web.json" || fail=1
 
 echo
 [ $fail -eq 0 ] && echo "ALL PASS" || { echo "FIX FAILURES BEFORE ANY TRAFFIC"; exit 1; }

@@ -7,19 +7,19 @@
 
 services:
   cowrie:
-    image: cowrie/cowrie:latest   # NOT PINNED YET: run deployment/pin_cowrie.sh (needs Docker + internet) to replace with cowrie/cowrie@sha256:...
+    image: cowrie/cowrie@sha256:baf351038db967704dfa39f7ce860e8875c9456cdab72a9d3257c4247211050d
     container_name: dg-cowrie
     restart: unless-stopped
     ports:
       - "${LAB_HOST_IP}:2222:2222"
     volumes:
-      # Verify these in-container paths against the image you pull:
-      #   docker run --rm --entrypoint ls cowrie/cowrie /cowrie/cowrie-git/etc
+      # Image paths are checked via stopped-container extraction by pin_cowrie.sh.
       - ./cowrie/cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
       - ./cowrie/userdb.txt:/cowrie/cowrie-git/etc/userdb.txt:ro
-      - ./cowrie/honeyfs/home/dg_demo/notes.txt:/cowrie/cowrie-git/honeyfs/home/dg_demo/notes.txt:ro
       # fake filesystem listing (makes notes.txt appear in `ls`). Build with: bash decoys/ssh/build_fs.sh
       - ../decoys/ssh/fs.pickle:/cowrie/cowrie-git/custom/fs.pickle:ro
+      - ../decoys/ssh/lab_command_registry.py:/cowrie/cowrie-git/src/cowrie/commands/__init__.py:ro
+      - ../decoys/ssh/lab_network.py:/cowrie/cowrie-git/src/cowrie/commands/lab_network.py:ro
       - ./state/cowrie-log:/cowrie/cowrie-git/var/log/cowrie   # adapter tails cowrie.json here
     security_opt:
       - no-new-privileges:true
