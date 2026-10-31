@@ -40,13 +40,6 @@ export const Overview = () => (
 
 
 
-export const TranscriptReplay = () => (
-  <Stub
-    title="Transcript Replay"
-    specSection="section 10"
-    buildOrder="Build order 5 of 7. Needs the transcript route from M3."
-  />
-);
 
 export const AttackGraph = () => (
   <Stub

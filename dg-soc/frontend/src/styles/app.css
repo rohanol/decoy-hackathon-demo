@@ -1506,3 +1506,106 @@ button.killchain__seg:hover {
 .killchain--compact .killchain__fill {
   height: 4px;
 }
+
+/* ---------- transcript replay ---------- */
+
+.terminal {
+  background: var(--bg-inset);
+  padding: var(--s3) 0;
+  min-height: 220px;
+}
+
+.tline {
+  display: grid;
+  grid-template-columns: 96px 18px minmax(0, 1fr) 110px;
+  gap: var(--s2);
+  align-items: baseline;
+  padding: 2px var(--s4);
+  border-left: 2px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 22px;
+}
+
+.tline--current {
+  border-left-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.tline__time {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tline__glyph--secondary {
+  color: var(--text-secondary);
+}
+.tline__glyph--muted {
+  color: var(--text-muted);
+}
+.tline__glyph--accent {
+  color: var(--accent);
+}
+.tline__glyph--warn {
+  color: var(--warn);
+}
+.tline__glyph--danger {
+  color: var(--danger);
+}
+
+.tline__text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+/* Our chrome, visually separate from the attacker's text beside it. */
+.tline__prompt {
+  color: var(--text-muted);
+  white-space: pre;
+}
+
+.tline__kind {
+  color: var(--text-secondary);
+}
+
+.tline__evid {
+  justify-self: end;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.tline__evid:hover {
+  text-decoration: underline;
+}
+
+.tline__evid--plain {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.replaybar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--border);
+}
+
+.replaybar__step {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding-left: var(--s3);
+}
+
+.replaybar__speed {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}

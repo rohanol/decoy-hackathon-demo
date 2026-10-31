@@ -115,10 +115,14 @@ around it in the UI.
   API rather than an optimistic restyle
 - Incident list: severity-bordered cards sorted by newest activity, each with
   the compact kill-chain strip, updating live from `type: "incident"` messages
+- Transcript replay: terminal-styled, mandatory non-dismissible banner, a dim
+  prompt prefix separating our chrome from attacker text, per-line timestamps
+  and clickable event ids, and a stepper with play/pause, speed and full
+  keyboard control (`←` `→` `Space` `Home` `End`)
 
 ## Known gaps
 
-- Screens 1 and 5–7 are stubs that name their spec section and build order
+- Screens 1, 6 and 7 are stubs that name their spec section and build order
 - The incident list has no rule chips or "awaiting decision" flag:
   `IncidentSummary` carries no findings and `Link` has no `incident_id`, so
   neither has an honest source at that endpoint (open question 2)

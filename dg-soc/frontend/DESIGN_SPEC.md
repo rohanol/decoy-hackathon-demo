@@ -649,10 +649,15 @@ Terminal styling: `--bg-inset`, mono 13/22, generous row padding. It should feel
 terminal without pretending to be a live one.
 
 Line kinds from the API (`login_failed`, `login_ok`, `command`, `close`) reuse the glyphs
-and colours from §7.2. `command` lines render a dim `--text-muted` prompt prefix
-(`dg_demo@srv-01:~$`) before the mono `text` — it reads as a shell session while keeping the
-attacker's text visually separate from our chrome. Never interpret or syntax-highlight the
-command. Render the string as-is.
+and colours from §7.2. `command` lines render a dim `--text-muted` prompt prefix before the mono `text` — it reads
+as a shell session while keeping the attacker's text visually separate from our chrome.
+Never interpret or syntax-highlight the command. Render the string as-is.
+
+**The prompt is `<user>@ssh-decoy-01:~$`, built from the `login_ok` line's username and the
+real sensor id** — not an invented hostname like `srv-01`. The host genuinely is the decoy,
+so there is no reason to make one up, and a fabricated hostname on screen is the kind of
+small fiction that costs credibility when a judge looks closely. With no accepted login in
+the session, the prefix falls back to a bare `$`.
 
 Every line shows its UTC timestamp (left, `--text-secondary`) and its `event_id` (right,
 clickable to the drawer).

@@ -136,6 +136,7 @@ export function incidentExportUrl(incidentId: string): string {
 }
 
 export function fetchTranscript(incidentId: string, sessionId: string): Promise<Transcript> {
+  if (USE_FIXTURES) return fixtures.fetchTranscript(sessionId);
   const params = new URLSearchParams({ session_id: sessionId });
   return get<Transcript>(
     `/api/incidents/${encodeURIComponent(incidentId)}/transcript?${params.toString()}`,

@@ -25,6 +25,9 @@ import type {
   Link,
   ScoreBreakdownRow,
   SocEvent,
+  Transcript,
+  TranscriptLine,
+  TranscriptLineKind,
   WsMessage,
 } from '../types/api';
 import type { EventsQuery } from './client';
@@ -350,6 +353,51 @@ export async function fetchIncident(incidentId: string): Promise<Incident> {
     },
     active_block: null,
   };
+}
+
+/**
+ * Transcript for one session, derived from the session's own events.
+ *
+ * Only the four kinds in the contract become lines. connection_open is not one
+ * of them, so it is skipped: the transcript is what was attempted against the
+ * shell, not the TCP story.
+ */
+export async function fetchTranscript(sessionId: string): Promise<Transcript> {
+  await sleep(FAKE_LATENCY_MS);
+
+  const lines: TranscriptLine[] = [];
+  for (const event of ALL_EVENTS) {
+    if (event.session_id !== sessionId) continue;
+    const attributes = event.attributes ?? {};
+
+    let kind: TranscriptLineKind | null = null;
+    let text = '';
+    switch (event.event_type) {
+      case 'auth_failure':
+        kind = 'login_failed';
+        text = attributes.username ?? '';
+        break;
+      case 'auth_success':
+        kind = 'login_ok';
+        text = attributes.username ?? '';
+        break;
+      case 'command_input':
+        kind = 'command';
+        text = attributes.command ?? '';
+        break;
+      case 'connection_close':
+        kind = 'close';
+        text = 'connection closed';
+        break;
+      default:
+        kind = null;
+    }
+    if (kind === null) continue;
+
+    lines.push({ event_id: event.event_id, occurred_at: event.occurred_at, kind, text });
+  }
+
+  return { session_id: sessionId, lines };
 }
 
 export async function fetchLinks(): Promise<{ items: Link[] }> {
