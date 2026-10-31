@@ -39,6 +39,12 @@ def profile_errors():
 
 
 def source_errors(paths, expected, now=None):
+    try:
+        if not expected or any(ipaddress.IPv4Address(ip) not in ipaddress.IPv4Network("192.168.77.0/24")
+                               or ip in {"192.168.77.0", "192.168.77.20", "192.168.77.255"} for ip in expected):
+            return ["ATTACKER_IPS must be exact lab attacker IPs; Docker gateways and the defender are not allowed"]
+    except ipaddress.AddressValueError:
+        return ["ATTACKER_IPS must contain valid exact lab IPv4 addresses"]
     now = now or datetime.now(timezone.utc)
     errors = []
     for name, path in paths.items():

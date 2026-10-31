@@ -57,6 +57,12 @@ def test_replay_events_do_not_establish_lab_readiness(tmp_path):
     assert lab_checks.source_errors({"web": path}, {"192.168.77.10"})
 
 
+def test_gateway_cannot_be_allowed_by_changing_expected_ips(tmp_path):
+    path = tmp_path / "gateway.json"
+    path.write_text(json.dumps({"timestamp": datetime.now(timezone.utc).isoformat(), "src_ip": "172.21.0.1"}))
+    assert lab_checks.source_errors({"ssh": path}, {"172.21.0.1"})
+
+
 def test_config_validation_handles_commented_supported_options(tmp_path):
     dist, config = tmp_path / "dist", tmp_path / "cfg"
     dist.write_text('[shell]\n#filesystem = fs.pickle\n')

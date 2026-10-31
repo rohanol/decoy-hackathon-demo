@@ -20,7 +20,7 @@ python decoys/ssh/check_image.py
 python -m pytest decoys/ssh/test_patch_fs.py deployment/test_lab_checks.py tests/e2e -q
 ```
 
-The combined M4 and new regression suite passed **64 tests**. The offline image
+The combined M4 and new regression suite passed **65 tests**. The offline image
 check passed using real Cowrie code; it opens no SSH service and sends no attack
 traffic. Generated image pickles remain ignored and are not committed. Active
 fixes under `dg-soc/` are mirrored into the M2 upload where relevant.
