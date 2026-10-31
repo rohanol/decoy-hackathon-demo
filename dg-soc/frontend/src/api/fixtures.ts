@@ -15,7 +15,9 @@
  */
 
 import fixtureFile from '../../../contracts/examples/events_p3.json';
+import { ApiError } from './error';
 import type {
+  BlockPreview,
   EventsPage,
   Finding,
   Health,
@@ -23,6 +25,7 @@ import type {
   IncidentSummary,
   IngestEvent,
   Link,
+  ResponseAction,
   RuleId,
   ScoreBreakdownRow,
   SocEvent,
@@ -487,4 +490,129 @@ export function openFixtureSocket(onMessage: (message: WsMessage) => void): Fixt
       clearInterval(timer);
     },
   };
+}
+
+/* ---------------------------------------------------------------------------
+ * Response mock (stands in for M2's response/router.py).
+ *
+ * Until that router exists the real backend answers 503 with
+ * {"error":{"code":"response_unavailable", ...}}. This mock lets the whole
+ * block flow be built and rehearsed now, and throws the same ApiError type the
+ * real client does so the failure paths are exercised too.
+ *
+ * Action state is derived on read rather than driven by timers: no leaks, and
+ * the same answer however long the page sat idle.
+ * ------------------------------------------------------------------------- */
+
+/** deployment/lab.env ATTACKER_IPS. Never the defender, loopback, or a range. */
+const ALLOWED_TARGETS = ['192.168.77.10'];
+const PREVIEW_VALID_MS = 60_000;
+/** How long the mock waits before a blocked_request "arrives" and verifies. */
+const VERIFY_AFTER_MS = 4_000;
+
+interface StoredPreview {
+  preview_id: string;
+  incident_id: string;
+  target_ip: string;
+  scope: string;
+  ttl_seconds: number;
+  expires_at: string;
+}
+
+const previews = new Map<string, StoredPreview>();
+let actions: ResponseAction[] = [];
+let actionCounter = 0;
+
+/** Lazily applies verification and expiry, so stored state stays simple. */
+function materialise(action: ResponseAction): ResponseAction {
+  if (action.status === 'revoked') return action;
+  const now = Date.now();
+  if (now >= Date.parse(action.until)) return { ...action, status: 'expired' };
+  if (action.status === 'applied' && now - Date.parse(action.created_at) >= VERIFY_AFTER_MS) {
+    return { ...action, status: 'verified', verified_by_event_id: 'evt_mockblocked01' };
+  }
+  return action;
+}
+
+export async function fetchActions(): Promise<{ items: ResponseAction[] }> {
+  await sleep(FAKE_LATENCY_MS);
+  return { items: actions.map(materialise) };
+}
+
+export async function postBlockPreview(
+  incidentId: string,
+  ttlSeconds: number,
+): Promise<BlockPreview> {
+  await sleep(FAKE_LATENCY_MS);
+  const incident = incidentSummary();
+  if (incidentId !== incident.incident_id) {
+    throw new ApiError('not_found', `No incident ${incidentId}.`, 404);
+  }
+  // AGENTS.md section 6: exact lab IPs only.
+  if (!ALLOWED_TARGETS.includes(incident.src_ip)) {
+    throw new ApiError(
+      'target_not_allowed',
+      `${incident.src_ip} is not an allowed lab target.`,
+      400,
+    );
+  }
+
+  const previewId = `pre_${Math.random().toString(16).slice(2, 8)}`;
+  const stored: StoredPreview = {
+    preview_id: previewId,
+    incident_id: incidentId,
+    target_ip: incident.src_ip,
+    scope: 'web-decoy-01 only',
+    ttl_seconds: ttlSeconds,
+    expires_at: new Date(Date.now() + PREVIEW_VALID_MS).toISOString(),
+  };
+  previews.set(previewId, stored);
+  return {
+    preview_id: stored.preview_id,
+    target_ip: stored.target_ip,
+    scope: stored.scope,
+    ttl_seconds: stored.ttl_seconds,
+    expires_at: stored.expires_at,
+  };
+}
+
+export async function postBlockApply(
+  previewId: string,
+  reason: string,
+): Promise<ResponseAction> {
+  await sleep(FAKE_LATENCY_MS);
+  const preview = previews.get(previewId);
+  if (!preview) throw new ApiError('preview_not_found', 'That preview is unknown.', 404);
+  if (Date.now() >= Date.parse(preview.expires_at)) {
+    previews.delete(previewId);
+    throw new ApiError('preview_expired', 'That preview expired. Request a new one.', 400);
+  }
+  if (reason.trim().length < 5) {
+    throw new ApiError('reason_too_short', 'A reason of at least 5 characters is required.', 400);
+  }
+
+  previews.delete(previewId);
+  actionCounter += 1;
+  const now = new Date();
+  const action: ResponseAction = {
+    action_id: `act_${String(actionCounter).padStart(2, '0')}`,
+    target_ip: preview.target_ip,
+    status: 'applied',
+    reason: reason.trim(),
+    created_at: now.toISOString(),
+    until: new Date(now.getTime() + preview.ttl_seconds * 1000).toISOString(),
+    verified_by_event_id: null,
+  };
+  actions = [action, ...actions];
+  return action;
+}
+
+export async function postBlockRevoke(actionId: string): Promise<ResponseAction> {
+  await sleep(FAKE_LATENCY_MS);
+  const index = actions.findIndex((a) => a.action_id === actionId);
+  const existing = index === -1 ? undefined : actions[index];
+  if (!existing) throw new ApiError('not_found', `No action ${actionId}.`, 404);
+  const revoked: ResponseAction = { ...existing, status: 'revoked' };
+  actions = actions.map((a) => (a.action_id === actionId ? revoked : a));
+  return revoked;
 }

@@ -1090,6 +1090,27 @@ with the clickable cited-ID chips rendered beneath it.
 
 ---
 
+## 13.5 Built against a mock
+
+M2's `response/router.py` does not exist yet, so the real backend answers every
+`/api/response/*` call with `503 response_unavailable`. The flow is therefore built and
+verified against a fixture mock that throws the same `ApiError` type the real client does,
+so the failure paths are exercised rather than assumed. `ApiError` moved to `src/api/error.ts`
+to make that possible without a circular import: a mock that fails differently from the real
+thing is a mock that hides bugs.
+
+The Response Center treats the 503 as a dependency that has not landed, not as an error:
+it names the file, its owner and the mount point, and says the flow is ready to wire. That
+is more useful to the team than a red error card, and more honest than hiding the screen.
+
+One bug this found: the verification poll was being torn down and restarted by the modal's
+own 1s clock tick, so it never survived long enough to fire. Verification took 12.5s against
+a mock that verifies at 4s. The callback and current action now go through refs, and the
+effect keys only on the action id and whether it is still awaiting verification — 3.5s after
+the fix. Worth remembering for any other interval living next to a ticking clock.
+
+---
+
 ## 17. Accessibility and demo-robustness checklist
 
 - Severity and status never communicated by colour alone — always a word too

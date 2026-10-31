@@ -133,6 +133,11 @@ around it in the UI.
   API rather than an optimistic restyle
 - Incident list: severity-bordered cards sorted by newest activity, each with
   the compact kill-chain strip, updating live from `type: "incident"` messages
+- Response Center and the block flow: preview, approve with a written reason
+  and an acknowledged scope, then a polled wait for verification, with undo.
+  Built against a mock of M2's router; the real backend answers 503
+  `response_unavailable` until `response/router.py` lands, which the screen
+  states plainly rather than treating as a failure
 - Overview: the noise-reduction counter, time to first alert, findings by
   rule with every rule visible at zero, and active incidents with their
   kill-chain silhouettes
@@ -146,6 +151,10 @@ around it in the UI.
   keyboard control (`←` `→` `Space` `Home` `End`)
 
 ## Known gaps
+
+- The block flow is verified against the fixture mock only. M2's
+  `response/router.py` does not exist yet, so `/api/response/*` returns 503 on
+  the real backend and the flow has never run against it
 
 - Screen 7 (Response Center) is a stub that name their spec section and build order
 - The incident list has no rule chips or "awaiting decision" flag:

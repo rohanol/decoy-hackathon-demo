@@ -35,13 +35,6 @@ export function Stub({
 
 
 
-export const ResponseCenter = () => (
-  <Stub
-    title="Response Center"
-    specSection="sections 12 and 13"
-    buildOrder="Build order 7 of 7. Needs the response router from M2."
-  />
-);
 
 export const NotFound = () => (
   <div className="page">

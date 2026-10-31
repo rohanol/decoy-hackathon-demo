@@ -16,6 +16,8 @@ import { ApiError, fetchEvents, fetchIncident, incidentExportUrl } from '../api/
 import { USE_FIXTURES } from '../api/config';
 import { FindingCard } from '../components/FindingCard';
 import { KillChainBar } from '../components/KillChainBar';
+import { ActionCard } from '../components/ActionCard';
+import { BlockFlowModal } from '../components/BlockFlowModal';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
@@ -78,6 +80,7 @@ export function IncidentDetail() {
   const [stageFilter, setStageFilter] = useState<Stage | null>(null);
   const [openEvent, setOpenEvent] = useState<SocEvent | null>(null);
   const [decidingLink, setDecidingLink] = useState<Link | null>(null);
+  const [blocking, setBlocking] = useState(false);
 
   const load = useCallback(async () => {
     if (!incidentId) return;
@@ -203,8 +206,8 @@ export function IncidentDetail() {
         <button
           type="button"
           className="btn"
-          disabled
-          title="Response router not built yet — build order 7 of 7, needs M2"
+          onClick={() => setBlocking(true)}
+          title="Preview a 120 s block of this source on the web decoy"
         >
           Block
         </button>
@@ -371,18 +374,16 @@ export function IncidentDetail() {
           <Card title="Response">
             <div className="card__body">
               {incident.active_block === null ? (
-                <p className="state__hint" style={{ textAlign: 'left' }}>
-                  No action applied.
-                </p>
+                <>
+                  <p className="state__hint" style={{ textAlign: 'left' }}>
+                    No action applied.
+                  </p>
+                  <button type="button" className="btn" onClick={() => setBlocking(true)}>
+                    Preview block
+                  </button>
+                </>
               ) : (
-                <div className="kv">
-                  <span className="kv__k">action_id</span>
-                  <span className="kv__v">{incident.active_block.action_id}</span>
-                  <span className="kv__k">status</span>
-                  <span className="kv__v">{incident.active_block.status}</span>
-                  <span className="kv__k">until</span>
-                  <span className="kv__v">{timeUtcZ(incident.active_block.until)}</span>
-                </div>
+                <ActionCard action={incident.active_block} onExpired={() => void load()} />
               )}
             </div>
           </Card>
@@ -391,6 +392,17 @@ export function IncidentDetail() {
 
       {openEvent ? (
         <RawEventDrawer event={openEvent} onClose={() => setOpenEvent(null)} />
+      ) : null}
+
+      {blocking ? (
+        <BlockFlowModal
+          incidentId={incident.incident_id}
+          onClose={() => {
+            setBlocking(false);
+            void load();
+          }}
+          onChanged={() => void load()}
+        />
       ) : null}
 
       {decidingLink ? (

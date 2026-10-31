@@ -5,30 +5,25 @@
  */
 
 import { API_BASE, EVENTS_PAGE_LIMIT, USE_FIXTURES } from './config';
+import { ApiError } from './error';
 import * as fixtures from './fixtures';
 import type {
   ApiErrorBody,
   EventsPage,
   Health,
+  BlockPreview,
   Incident,
   IncidentSummary,
   Link,
+  ResponseAction,
   StatsOverview,
   Transcript,
 } from '../types/api';
 
-/** Carries the backend's error envelope so the UI can show code and message. */
-export class ApiError extends Error {
-  readonly code: string;
-  readonly status: number;
-
-  constructor(code: string, message: string, status: number) {
-    super(message);
-    this.name = 'ApiError';
-    this.code = code;
-    this.status = status;
-  }
-}
+// Defined in ./error so the fixture backend can throw the same type without a
+// circular import. Re-exported here because every screen imports it from the
+// client alongside the fetchers.
+export { ApiError };
 
 function isErrorBody(value: unknown): value is ApiErrorBody {
   if (typeof value !== 'object' || value === null) return false;
@@ -151,4 +146,38 @@ export function fetchLinks(): Promise<{ items: Link[] }> {
 export function fetchOverview(): Promise<StatsOverview> {
   if (USE_FIXTURES) return fixtures.fetchOverview();
   return get<StatsOverview>('/api/stats/overview');
+}
+
+/* ---------- response (M2's router, mounted by the backend at /api/response) ----------
+ *
+ * Until response/router.py exists the backend answers 503 with
+ * {"error":{"code":"response_unavailable", ...}}, which the UI surfaces as-is.
+ */
+
+export function fetchActions(): Promise<{ items: ResponseAction[] }> {
+  if (USE_FIXTURES) return fixtures.fetchActions();
+  return get<{ items: ResponseAction[] }>('/api/response/actions');
+}
+
+/** Preview expires after 60s. Read every value back from the RESPONSE. */
+export function postBlockPreview(incidentId: string, ttlSeconds = 120): Promise<BlockPreview> {
+  if (USE_FIXTURES) return fixtures.postBlockPreview(incidentId, ttlSeconds);
+  return post<BlockPreview>('/api/response/preview', {
+    incident_id: incidentId,
+    ttl_seconds: ttlSeconds,
+  });
+}
+
+export function postBlockApply(previewId: string, reason: string): Promise<ResponseAction> {
+  if (USE_FIXTURES) return fixtures.postBlockApply(previewId, reason);
+  return post<ResponseAction>('/api/response/apply', {
+    preview_id: previewId,
+    reason,
+    confirm: true,
+  });
+}
+
+export function postBlockRevoke(actionId: string): Promise<ResponseAction> {
+  if (USE_FIXTURES) return fixtures.postBlockRevoke(actionId);
+  return post<ResponseAction>(`/api/response/${encodeURIComponent(actionId)}/revoke`, {});
 }

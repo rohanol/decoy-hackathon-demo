@@ -2060,3 +2060,107 @@ button.killchain__seg:hover {
   flex: 1;
   min-width: 0;
 }
+
+/* ---------- response actions ---------- */
+
+.actionlist {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+}
+
+.action {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3);
+  border-radius: var(--r-sm);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-strong);
+}
+
+.action--applied {
+  border-left-color: var(--warn);
+}
+.action--verified {
+  border-left-color: var(--ok);
+}
+.action--expired,
+.action--revoked {
+  border-left-color: var(--neutral);
+  opacity: 0.7;
+}
+
+.action__top {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+}
+
+.action__ip {
+  font-size: 15px;
+  color: var(--text-primary);
+}
+
+.action__remaining {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.action__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.action__reason {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.action__bar {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
+.action__fill {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+
+.action__fill--warn {
+  background: var(--warn);
+}
+
+.action__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sev-medium-text);
+}
+
+.action__actions {
+  margin-top: var(--s1);
+}
+
+.checkline {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.checkline input {
+  margin-top: 2px;
+}
+
+.modal__verified {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ok);
+}
