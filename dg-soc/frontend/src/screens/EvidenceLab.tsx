@@ -22,7 +22,7 @@ import {
 } from '../components/evidence/ResponseViews';
 import { BasisTag, EventFacets, EvidenceId, ModeBadge } from '../components/evidence/bits';
 import { AttackerText } from '../components/primitives';
-import { EVENT_TYPE_LABEL } from '../copy';
+import { eventTypeLabel } from '../copy';
 import { buildDevScenarios, type DevScenario } from '../evidence/devScenarios';
 import { timeUtcZ } from '../lib/format';
 import type { SocEvent } from '../types/api';
@@ -139,7 +139,7 @@ function Scenario({ scenario, onOpen }: { scenario: DevScenario; onOpen: (event:
                     <EvidenceId eventId={event.event_id} onOpen={handlers.onOpenEvent} />
                   </td>
                   <td className="mono">{timeUtcZ(event.occurred_at)}</td>
-                  <td>{EVENT_TYPE_LABEL[event.event_type]}</td>
+                  <td>{eventTypeLabel(event.event_type)}</td>
                   <td>
                     <ModeBadge mode={event.capture_mode} />
                   </td>

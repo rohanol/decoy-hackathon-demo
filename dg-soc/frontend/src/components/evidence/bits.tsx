@@ -6,13 +6,15 @@
  */
 
 import {
+  AUTHORITY_LABEL,
+  AUTHORITY_MEANING,
   BASIS_LABEL,
   BASIS_MEANING,
   OBSERVATION_KIND_LABEL,
   OUTCOME_LABEL,
   OUTCOME_MEANING,
 } from '../../copy';
-import { facetOf, type Basis, type Outcome } from '../../evidence/model';
+import { facetOf, type Authority, type Basis, type Outcome } from '../../evidence/model';
 import type { CaptureMode, SocEvent } from '../../types/api';
 
 /** Where a panel's values came from. Shown on every evidence panel. */
@@ -20,6 +22,15 @@ export function BasisTag({ basis }: { basis: Basis }) {
   return (
     <span className={`basistag basistag--${basis}`} title={BASIS_MEANING[basis]}>
       {BASIS_LABEL[basis]}
+    </span>
+  );
+}
+
+/** Who owns a grouping: the backend, or this browser for display only. */
+export function AuthorityTag({ authority }: { authority: Authority }) {
+  return (
+    <span className={`authtag authtag--${authority}`} title={AUTHORITY_MEANING[authority]}>
+      {AUTHORITY_LABEL[authority]}
     </span>
   );
 }

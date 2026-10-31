@@ -33,6 +33,7 @@ import {
   type ResponseVerification,
   type SessionCase,
   type SourceProfile,
+  type VerificationAttempt,
 } from './model.ts';
 
 const byTime = (a: SocEvent, b: SocEvent) =>
@@ -93,6 +94,8 @@ export function sessionCasesFromV1(events: SocEvent[], findings: Finding[]): Ses
     cases.push({
       case_id: caseId,
       basis: 'contract_v1',
+      // Built here from v1.0 events. Not a backend case (M3's case model, PR #9).
+      authority: 'display_grouping',
       sensor_id: first.sensor_id,
       session_id: first.session_id ?? null,
       boundary: first.session_id ? 'sensor_session' : 'bounded_fallback',
@@ -221,6 +224,8 @@ export function parentsFromV1(relations: CandidateRelation[]): ParentInvestigati
     .map((relation) => ({
       parent_id: `parent/${relation.relation_id}`,
       basis: 'contract_v1',
+      // A confirmed v1.0 link shown as a parent. Not a backend investigation.
+      authority: 'display_grouping',
       relation_ids: [relation.relation_id],
       case_ids: unique([relation.from.case_id, relation.to.case_id]),
       approved_at: relation.decided_at,
@@ -248,8 +253,52 @@ export function mappingsFromV1(findings: Finding[]): MappingView[] {
   }));
 }
 
-/** v1.0 action status, split into the stages the review asks to show. */
+/**
+ * Refusals the backend reports for one action. The field name is NOT YET
+ * AGREED: M2's router (PR #8) sends `verification_mismatches`
+ * ({event_id, received_at, reason}); M3's contract v1.1 (PR #9) specifies
+ * `verification_rejects` ({event_id, reason}). Both are read, each entry keeps
+ * the field it came from, and the same (event_id, reason) is shown once.
+ * Delete the losing branch once the name is agreed.
+ */
+export function refusalsOf(action: ResponseAction): { reported: boolean; attempts: VerificationAttempt[] } {
+  const sources: Array<[VerificationAttempt['field'], unknown]> = [
+    ['verification_mismatches', action.verification_mismatches],
+    ['verification_rejects', action.verification_rejects],
+  ];
+  const attempts: VerificationAttempt[] = [];
+  const seen = new Set<string>();
+  let reported = false;
+  for (const [field, list] of sources) {
+    if (!Array.isArray(list)) continue;
+    reported = true;
+    for (const entry of list as unknown[]) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const record = entry as Record<string, unknown>;
+      const reason = typeof record['reason'] === 'string' && record['reason'] ? record['reason'] : 'unspecified';
+      const eventId = typeof record['event_id'] === 'string' && record['event_id'] ? record['event_id'] : null;
+      const key = `${eventId ?? '-'}\u0000${reason}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      attempts.push({
+        event_id: eventId,
+        at: typeof record['received_at'] === 'string' ? record['received_at'] : null,
+        // Neither M2 nor M3 reports the tuple of a refused observation, and
+        // the browser does not reconstruct it: open the event to see it.
+        sensor_id: null,
+        src_ip: null,
+        capture_mode: null,
+        reason,
+        field,
+      });
+    }
+  }
+  return { reported, attempts };
+}
+
+/** Action status, split into the stages the review asks to show. */
 export function verificationFromV1(action: ResponseAction): ResponseVerification {
+  const refusals = refusalsOf(action);
   return {
     action_id: action.action_id,
     basis: 'contract_v1',
@@ -264,7 +313,9 @@ export function verificationFromV1(action: ResponseAction): ResponseVerification
         : action.status === 'revoked'
           ? { kind: 'revoked', at: null, by: null }
           : null,
-    rejected_attempts: [],
+    rejected_attempts: refusals.attempts,
+    refusals_reported: refusals.reported,
+    needs_reconciliation: action.status === 'reconciliation_required',
   };
 }
 

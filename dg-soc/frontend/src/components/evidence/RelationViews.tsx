@@ -19,7 +19,7 @@ import {
 import type { BaitChain, CandidateRelation, ParentInvestigation, SessionCase } from '../../evidence/model';
 import { number, timeUtcZ } from '../../lib/format';
 import { AttackerText } from '../primitives';
-import { BasisTag, EvidenceId } from './bits';
+import { AuthorityTag, BasisTag, EvidenceId } from './bits';
 import type { EvidenceHandlers } from './CaseViews';
 
 function caseName(caseId: string | null, cases: SessionCase[]): string {
@@ -225,7 +225,10 @@ export function ParentCard({
   return (
     <section className="evcard evcard--parent" aria-label="Approved cross-decoy parent">
       <header className="evcard__head">
-        <span className="evcard__kind">Approved cross-decoy parent</span>
+        <span className="evcard__kind">
+          {parent.authority === 'backend_case' ? 'Investigation' : 'Approved cross-decoy parent'}
+        </span>
+        <AuthorityTag authority={parent.authority} />
         <span className="mono evcard__sub">{parent.parent_id}</span>
         <span className="evcard__spacer" />
         {parent.score !== null && parent.severity !== null ? (

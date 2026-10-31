@@ -65,7 +65,11 @@ export function ResponseCenter() {
   }, [connectionEpoch, load]);
 
   const active = useMemo(
-    () => actions.filter((a) => a.status === 'applied' || a.status === 'verified'),
+    // reconciliation_required (M2) stays active: it needs an analyst, not history.
+    () =>
+      actions.filter(
+        (a) => a.status === 'applied' || a.status === 'verified' || a.status === 'reconciliation_required',
+      ),
     [actions],
   );
   const history = useMemo(

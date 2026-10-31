@@ -12,7 +12,7 @@ import { CASE_COPY, SENSOR_LABEL } from '../../copy';
 import { OUTCOMES, type SessionCase, type SourceProfile } from '../../evidence/model';
 import { number, timeUtcZ } from '../../lib/format';
 import { AttackerText } from '../primitives';
-import { BasisTag, EvidenceIds, ModeBadge, OutcomeBadge } from './bits';
+import { AuthorityTag, BasisTag, EvidenceIds, ModeBadge, OutcomeBadge } from './bits';
 
 export interface EvidenceHandlers {
   onOpenEvent?: (eventId: string) => void;
@@ -131,6 +131,7 @@ export function SessionCaseCard({
           {item.session_id ?? 'no session id'}
         </span>
         <ModeBadge mode={item.capture_mode} />
+        <AuthorityTag authority={item.authority} />
         <span className="casecard__spacer" />
         <ScoreChip score={item.score} severity={item.severity} />
       </header>

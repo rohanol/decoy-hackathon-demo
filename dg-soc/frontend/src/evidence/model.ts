@@ -73,9 +73,17 @@ export function facetOf(event: SocEvent): ObservationFacet {
 
 /* ---------- cases, sources, relations, parents (review section 4) ---------- */
 
+/**
+ * Who owns a grouping. backend_case: a case or investigation the backend
+ * created (M3's case model). display_grouping: built in the browser from
+ * v1.0 events for display only. Never present one as the other.
+ */
+export type Authority = 'backend_case' | 'display_grouping';
+
 export interface SessionCase {
   case_id: string;
   basis: Basis;
+  authority: Authority;
   sensor_id: SensorId;
   session_id: string | null;
   /**
@@ -181,6 +189,7 @@ export interface CandidateRelation {
 export interface ParentInvestigation {
   parent_id: string;
   basis: Basis;
+  authority: Authority;
   relation_ids: string[];
   case_ids: string[];
   approved_at: string | null;
@@ -242,7 +251,13 @@ export interface HealthView {
 
 /* ---------- response (review section 14) ---------- */
 
+/**
+ * Refusal reasons. Free strings in both M2's runtime and M3's contract; these
+ * are the ones seen so far, plus the proposed vocabulary the dev fixtures use.
+ */
 export type MismatchReason =
+  | 'verification_context_mismatch'
+  | 'active_action_missing_or_changed_in_policy_after_restart'
   | 'wrong_sensor'
   | 'wrong_source'
   | 'replay_mode'
@@ -250,16 +265,21 @@ export type MismatchReason =
   | 'outside_window'
   | 'stale_policy_revision'
   | 'duplicate'
-  | 'unknown_action';
+  | 'unknown_action'
+  | (string & {});
 
 export interface VerificationAttempt {
-  event_id: string;
-  at: string;
-  sensor_id: SensorId;
-  src_ip: string;
-  capture_mode: CaptureMode;
-  /** The backend refused this as verification, and why. */
+  event_id: string | null;
+  /** When the backend received it, if reported. */
+  at: string | null;
+  /** The tuple, when the source supplies it. M2 and M3 report event id and reason only. */
+  sensor_id: SensorId | null;
+  src_ip: string | null;
+  capture_mode: CaptureMode | null;
+  /** The backend refused this as verification, and why (verbatim). */
   reason: MismatchReason;
+  /** Which field carried it, while the name is not agreed. */
+  field: 'verification_mismatches' | 'verification_rejects' | 'proposed';
 }
 
 export interface ResponseVerification {
@@ -273,8 +293,12 @@ export interface ResponseVerification {
   /** A matching denied request, by the full tuple. The only proof. */
   verified: { event_id: string; at: string | null } | null;
   ended: { kind: 'expired' | 'revoked'; at: string | null; by: string | null } | null;
-  /** Observations the backend rejected as verification. Empty in v1.0, which does not report them. */
+  /** Observations the backend rejected as verification. */
   rejected_attempts: VerificationAttempt[];
+  /** The backend sends a refusal list for this action (possibly empty). False on v1.0. */
+  refusals_reported: boolean;
+  /** M2: after a restart the action no longer matches the enforced policy. */
+  needs_reconciliation: boolean;
 }
 
 export interface EligibilityReason {

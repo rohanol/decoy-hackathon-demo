@@ -89,4 +89,19 @@ render each of these from the fixtures.
 | `09-response-center.png` | Response Center with verification stages |
 | `10-chakra-2d.png`, `11-network-fallback.png` | 2D and network fallbacks |
 | `12-reconnect.png` | Feed after a forced socket drop and held snapshot |
+| `13-m2-mismatches-pending.png` | M2's runtime (PR #8 backend): two refused verifications shown verbatim, action still pending |
+| `14-m2-verified.png` | Same action verified by the matching request; refusals kept |
+| `15-filter-request-id.png` | Request filter on M3's v1.1 example web records (1.0 envelope) |
+| `16-filter-web-session.png` | Session filter on web records carrying a session id (synthetic until M4 pushes) |
 | `lab-*.png` | Proposed shapes in the dev evidence lab (fixtures) |
+
+## Coordination status (PR #10 follow-up)
+
+| Item | State in the UI | Waiting on |
+|---|---|---|
+| Verification refusals | Reads **both** `verification_mismatches` (M2 runtime, PR #8) and `verification_rejects` (M3 contract, PR #9); each row shows which field it came from; reasons shown verbatim. M2 sends one generic reason (`verification_context_mismatch`), so the UI says the backend did not name the failed check | M2 + M3 agree one name; ideally a specific reason per failed check |
+| `reconciliation_required` (M2) | Shown as its own stage and kept in active actions, never as verified | Agreement that it joins the contract |
+| Collector health | Still **not reported**. M2's heartbeat is a local file only | Backend `sensor_health` in `/api/health` (M3 v1.1) |
+| Cases and investigations | Every case and parent is tagged **display grouping**; backend-owned ones will be tagged **backend case** | M3's case model at runtime |
+| Web `session_id` / `request_id` | Filters work on M3's v1.1 example web records via the real backend. Web session ids are synthetic in the test | M4 pushing its generator; re-run `RECORDS=… node tests/e2e/filters.e2e.cjs` |
+| v1.1 event types, stages, `bait_served` provenance | Unknown types and stages render as raw text instead of breaking. No v1.1 meaning is wired | Contract v1.1 merge |

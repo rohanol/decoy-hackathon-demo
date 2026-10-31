@@ -66,6 +66,7 @@ export const ACTION_STATUS_LABEL: Record<ActionStatus, string> = {
   verified: 'VERIFIED',
   expired: 'EXPIRED',
   revoked: 'REVOKED',
+  reconciliation_required: 'RECONCILE',
 };
 
 export const ACTION_STATUS_MEANING: Record<ActionStatus, string> = {
@@ -73,6 +74,8 @@ export const ACTION_STATUS_MEANING: Record<ActionStatus, string> = {
   verified: 'A blocked request arrived carrying this action id.',
   expired: 'The time limit ran out and the block lifted itself.',
   revoked: 'An analyst undid this block.',
+  reconciliation_required:
+    'After a restart this action was missing from, or changed in, the enforced policy. Its state is not trusted until reconciled.',
 };
 
 export const COPY = {
@@ -246,11 +249,23 @@ export const VERIFICATION_COPY = {
   revoked: 'Revoked',
   rejectedTitle: 'Rejected as verification',
   rejectedHint: 'Observations the backend refused to count. They change nothing.',
+  noneReported: 'The backend reports refusals for this action; none so far.',
+  reconcile: 'Reconciliation required',
+  reconcileHint: 'After a restart this action no longer matches the enforced policy. Treat its state as unknown.',
   v1Tuple:
     'Backend v1.0 matches the action id only (review F5); the full tuple check arrives with the contract.',
 } as const;
 
-export const MISMATCH_REASON_LABEL: Record<MismatchReason, string> = {
+/**
+ * Labels for refusal reasons the backend sends. Reasons are free strings in
+ * both M2's runtime and M3's contract, so an unknown one is shown verbatim
+ * (mismatchReasonLabel). The browser never works out which check failed.
+ */
+export const MISMATCH_REASON_LABEL: Partial<Record<MismatchReason, string>> = {
+  verification_context_mismatch:
+    'Failed the verification tuple. The backend does not say which check (sensor, source, run, mode, time or revision)',
+  active_action_missing_or_changed_in_policy_after_restart:
+    'After a restart the action was missing from, or changed in, the enforced policy',
   wrong_sensor: 'Came from a sensor this action does not cover',
   wrong_source: 'Source address differs from the block target',
   replay_mode: 'A replayed record, not a live request',
@@ -266,3 +281,34 @@ export const ELIGIBILITY_COPY = {
   uiGuard: 'UI guard from reported capture modes.',
   backend: 'Backend eligibility.',
 } as const;
+
+export function mismatchReasonLabel(reason: string): string {
+  return MISMATCH_REASON_LABEL[reason] ?? reason;
+}
+
+export const AUTHORITY_LABEL = {
+  backend_case: 'backend case',
+  display_grouping: 'display grouping',
+} as const;
+
+export const AUTHORITY_MEANING = {
+  backend_case: 'A case or investigation the backend created and owns.',
+  display_grouping:
+    'Grouped in the browser from v1.0 events for display. Not a backend case: authoritative cases and investigations arrive with M3\u2019s case model.',
+} as const;
+
+/** Fallbacks so an event type or stage this build does not know never breaks a screen. */
+export function eventTypeLabel(type: string): string {
+  return (EVENT_TYPE_LABEL as Record<string, string>)[type] ?? type.replace(/_/g, ' ');
+}
+
+export function stageLabel(stage: string): string {
+  return (STAGE_LABEL as Record<string, string>)[stage] ?? stage.replace(/_/g, ' ');
+}
+
+export function eventTypeDescription(type: string): string {
+  return (
+    (EVENT_TYPE_DESCRIPTION as Record<string, string>)[type] ??
+    'An event type this dashboard build does not describe yet. Shown as received.'
+  );
+}

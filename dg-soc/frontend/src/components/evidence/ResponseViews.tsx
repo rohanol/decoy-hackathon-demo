@@ -16,7 +16,7 @@
 import type { ReactNode } from 'react';
 import {
   ELIGIBILITY_COPY,
-  MISMATCH_REASON_LABEL,
+  mismatchReasonLabel,
   SENSOR_LABEL,
   VERIFICATION_COPY,
 } from '../../copy';
@@ -103,6 +103,9 @@ export function VerificationTimeline({
             </div>
           ) : null}
         </Stage>
+        {v.needs_reconciliation ? (
+          <Stage kind="ended" state="current" title={VERIFICATION_COPY.reconcile} hint={VERIFICATION_COPY.reconcileHint} />
+        ) : null}
         {ended ? (
           <Stage
             kind="ended"
@@ -123,22 +126,35 @@ export function VerificationTimeline({
           <div className="vmismatch__title">{VERIFICATION_COPY.rejectedTitle}</div>
           <div className="vmismatch__hint">{VERIFICATION_COPY.rejectedHint}</div>
           <ul className="vmismatch__list">
-            {v.rejected_attempts.map((attempt) => (
-              <li key={attempt.event_id}>
-                <span className="vmismatch__reason">{MISMATCH_REASON_LABEL[attempt.reason]}</span>
+            {v.rejected_attempts.map((attempt, index) => (
+              <li key={`${attempt.event_id ?? 'none'}-${attempt.reason}-${index}`}>
+                <span className="vmismatch__reason">{mismatchReasonLabel(attempt.reason)}</span>
                 <span className="vmismatch__tuple">
-                  <EvidenceId
-                    eventId={attempt.event_id}
-                    onOpen={handlers.onOpenEvent}
-                    known={handlers.isKnown?.(attempt.event_id) ?? true}
-                  />{' '}
-                  {SENSOR_LABEL[attempt.sensor_id] ?? attempt.sensor_id} · <span className="mono">{attempt.src_ip}</span>{' '}
-                  <ModeBadge mode={attempt.capture_mode} /> <span className="mono">{timeUtcZ(attempt.at)}</span>
+                  {attempt.event_id ? (
+                    <EvidenceId
+                      eventId={attempt.event_id}
+                      onOpen={handlers.onOpenEvent}
+                      known={handlers.isKnown?.(attempt.event_id) ?? true}
+                    />
+                  ) : (
+                    <span className="mono">no event id</span>
+                  )}
+                  {attempt.sensor_id ? <> {SENSOR_LABEL[attempt.sensor_id] ?? attempt.sensor_id}</> : null}
+                  {attempt.src_ip ? <> · <span className="mono">{attempt.src_ip}</span></> : null}
+                  {attempt.capture_mode ? <> <ModeBadge mode={attempt.capture_mode} /></> : null}
+                  {attempt.at ? <> <span className="mono">{timeUtcZ(attempt.at)}</span></> : null}
+                  {attempt.field !== 'proposed' ? (
+                    <span className="vmismatch__field mono" title="Field name not yet agreed between M2 and M3">
+                      {attempt.field}
+                    </span>
+                  ) : null}
                 </span>
               </li>
             ))}
           </ul>
         </div>
+      ) : v.refusals_reported ? (
+        <p className="vtimeline__note">{VERIFICATION_COPY.noneReported}</p>
       ) : v.basis === 'contract_v1' && !ended ? (
         <p className="vtimeline__note">{VERIFICATION_COPY.v1Tuple}</p>
       ) : null}

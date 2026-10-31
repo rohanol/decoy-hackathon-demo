@@ -87,9 +87,9 @@ export function buildDevScenarios(now: number = Date.now()): DevScenario[] {
     event('w1', 'web-decoy-01', 'http_request', 300, { session: 'dev_wsA', attrs: { method: 'GET', path: '/', request_id: 'dev_req_1', user_agent: 'Mozilla/5.0 (X11; Linux x86_64)', observation_kind: 'network_input', outcome: 'attempted' } }),
   ];
   const t01Cases: SessionCase[] = [
-    { case_id: 'dev_case_sA', basis: 'proposed_fixture', sensor_id: 'ssh-decoy-01', session_id: 'dev_sA', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(600), last_at: at(590), event_ids: ['dev_evt_a1', 'dev_evt_a2', 'dev_evt_a3'], outcomes: { attempted: 2, emulated_success: 1 }, request_ids: [], accounts: ['dg_demo'], commands: 1, rule_ids: ['R02', 'R03'], score: 50, severity: 'high' },
-    { case_id: 'dev_case_sB', basis: 'proposed_fixture', sensor_id: 'ssh-decoy-01', session_id: 'dev_sB', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(560), last_at: at(557), event_ids: ['dev_evt_b1', 'dev_evt_b2', 'dev_evt_b3'], outcomes: { attempted: 1, denied: 2 }, request_ids: [], accounts: ['backup', 'admin'], commands: 0, rule_ids: [], score: 10, severity: 'low' },
-    { case_id: 'dev_case_wsA', basis: 'proposed_fixture', sensor_id: 'web-decoy-01', session_id: 'dev_wsA', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(300), last_at: at(300), event_ids: ['dev_evt_w1'], outcomes: { attempted: 1 }, request_ids: ['dev_req_1'], accounts: [], commands: 0, rule_ids: [], score: 0, severity: 'low' },
+    { case_id: 'dev_case_sA', basis: 'proposed_fixture', authority: 'backend_case', sensor_id: 'ssh-decoy-01', session_id: 'dev_sA', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(600), last_at: at(590), event_ids: ['dev_evt_a1', 'dev_evt_a2', 'dev_evt_a3'], outcomes: { attempted: 2, emulated_success: 1 }, request_ids: [], accounts: ['dg_demo'], commands: 1, rule_ids: ['R02', 'R03'], score: 50, severity: 'high' },
+    { case_id: 'dev_case_sB', basis: 'proposed_fixture', authority: 'backend_case', sensor_id: 'ssh-decoy-01', session_id: 'dev_sB', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(560), last_at: at(557), event_ids: ['dev_evt_b1', 'dev_evt_b2', 'dev_evt_b3'], outcomes: { attempted: 1, denied: 2 }, request_ids: [], accounts: ['backup', 'admin'], commands: 0, rule_ids: [], score: 10, severity: 'low' },
+    { case_id: 'dev_case_wsA', basis: 'proposed_fixture', authority: 'backend_case', sensor_id: 'web-decoy-01', session_id: 'dev_wsA', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(300), last_at: at(300), event_ids: ['dev_evt_w1'], outcomes: { attempted: 1 }, request_ids: ['dev_req_1'], accounts: [], commands: 0, rule_ids: [], score: 0, severity: 'low' },
   ];
   const t01Profile: SourceProfile = {
     profile_id: 'dev_profile_10', basis: 'proposed_fixture', src_ip: '192.168.77.10', lab_run_id: 'run-dev-01',
@@ -120,8 +120,8 @@ export function buildDevScenarios(now: number = Date.now()): DevScenario[] {
     event('d2', 'web-decoy-01', 'synthetic_file_access', 190, { session: 'dev_wsB', attrs: { asset_id: 'customer_data.csv', request_id: 'dev_req_9', observation_kind: 'emulated_result', outcome: 'emulated_success' } }),
   ];
   const t06Cases: SessionCase[] = [
-    { case_id: 'dev_case_sC', basis: 'proposed_fixture', sensor_id: 'ssh-decoy-01', session_id: 'dev_sC', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(240), last_at: at(240), event_ids: ['dev_evt_c1', 'dev_evt_c2'], outcomes: { attempted: 1, emulated_success: 1 }, request_ids: [], accounts: ['dg_demo'], commands: 1, rule_ids: ['R02'], score: 40, severity: 'medium' },
-    { case_id: 'dev_case_wsB', basis: 'proposed_fixture', sensor_id: 'web-decoy-01', session_id: 'dev_wsB', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(205), last_at: at(190), event_ids: ['dev_evt_d1', 'dev_evt_d2'], outcomes: { emulated_success: 2 }, request_ids: ['dev_req_7', 'dev_req_9'], accounts: ['svc_portal'], commands: 0, rule_ids: ['R09'], score: 30, severity: 'medium' },
+    { case_id: 'dev_case_sC', basis: 'proposed_fixture', authority: 'backend_case', sensor_id: 'ssh-decoy-01', session_id: 'dev_sC', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(240), last_at: at(240), event_ids: ['dev_evt_c1', 'dev_evt_c2'], outcomes: { attempted: 1, emulated_success: 1 }, request_ids: [], accounts: ['dg_demo'], commands: 1, rule_ids: ['R02'], score: 40, severity: 'medium' },
+    { case_id: 'dev_case_wsB', basis: 'proposed_fixture', authority: 'backend_case', sensor_id: 'web-decoy-01', session_id: 'dev_wsB', boundary: 'sensor_session', lab_run_id: 'run-dev-01', capture_mode: 'live', src_ip: '192.168.77.10', first_at: at(205), last_at: at(190), event_ids: ['dev_evt_d1', 'dev_evt_d2'], outcomes: { emulated_success: 2 }, request_ids: ['dev_req_7', 'dev_req_9'], accounts: ['svc_portal'], commands: 0, rule_ids: ['R09'], score: 30, severity: 'medium' },
   ];
   const t06Bait: BaitChain = {
     token_id: 'tok_portal_01', asset_id: 'staff_notes', issuance_id: 'dev_iss_7f2', fixture_version: 'bait-v2',
@@ -148,7 +148,7 @@ export function buildDevScenarios(now: number = Date.now()): DevScenario[] {
     rationale: 'Different client claim and no bait chain. Address alone is not enough.', actor_id: 'analyst@lab.local',
   };
   const t06Parent: ParentInvestigation = {
-    parent_id: 'dev_parent_1', basis: 'proposed_fixture', relation_ids: ['dev_rel_tok'],
+    parent_id: 'dev_parent_1', basis: 'proposed_fixture', authority: 'backend_case', relation_ids: ['dev_rel_tok'],
     case_ids: ['dev_case_sC', 'dev_case_wsB'], approved_at: at(150), approved_by: 'analyst@lab.local',
     rationale: t06Strong.rationale, score: 70, severity: 'high', incident_revision: 4, summary_stale: false,
   };
@@ -197,28 +197,30 @@ export function buildDevScenarios(now: number = Date.now()): DevScenario[] {
       action_id: 'dev_act_01', basis: 'proposed_fixture', target_ip: '192.168.77.10', reason: 'demo containment', until: at(-60),
       committed: { at: at(60), policy_revision: 7, by: 'analyst@lab.local' },
       verified: { event_id: 'dev_evt_g4', at: at(30) }, ended: null,
+      refusals_reported: true, needs_reconciliation: false,
       rejected_attempts: [
-        { event_id: 'dev_evt_g1', at: at(50), sensor_id: 'ssh-decoy-01', src_ip: '192.168.77.10', capture_mode: 'live', reason: 'wrong_sensor' },
-        { event_id: 'dev_evt_g2', at: at(45), sensor_id: 'web-decoy-01', src_ip: '192.168.77.11', capture_mode: 'live', reason: 'wrong_source' },
-        { event_id: 'dev_evt_g3', at: at(40), sensor_id: 'web-decoy-01', src_ip: '192.168.77.10', capture_mode: 'replay', reason: 'replay_mode' },
+        { event_id: 'dev_evt_g1', at: at(50), sensor_id: 'ssh-decoy-01', src_ip: '192.168.77.10', capture_mode: 'live', field: 'proposed', reason: 'wrong_sensor' },
+        { event_id: 'dev_evt_g2', at: at(45), sensor_id: 'web-decoy-01', src_ip: '192.168.77.11', capture_mode: 'live', field: 'proposed', reason: 'wrong_source' },
+        { event_id: 'dev_evt_g3', at: at(40), sensor_id: 'web-decoy-01', src_ip: '192.168.77.10', capture_mode: 'replay', field: 'proposed', reason: 'replay_mode' },
       ],
     },
     {
       action_id: 'dev_act_02', basis: 'proposed_fixture', target_ip: '192.168.77.10', reason: 'second attempt', until: at(-90),
       committed: { at: at(30), policy_revision: 8, by: 'analyst@lab.local' }, verified: null, ended: null,
+      refusals_reported: true, needs_reconciliation: false,
       rejected_attempts: [
-        { event_id: 'dev_evt_g5', at: at(25), sensor_id: 'web-decoy-01', src_ip: '192.168.77.10', capture_mode: 'live', reason: 'stale_policy_revision' },
+        { event_id: 'dev_evt_g5', at: at(25), sensor_id: 'web-decoy-01', src_ip: '192.168.77.10', capture_mode: 'live', field: 'proposed', reason: 'stale_policy_revision' },
       ],
     },
     {
       action_id: 'dev_act_03', basis: 'proposed_fixture', target_ip: '192.168.77.10', reason: 'earlier run', until: at(700),
       committed: { at: at(820), policy_revision: 5, by: 'analyst@lab.local' }, verified: { event_id: 'dev_evt_g0', at: at(800) },
-      ended: { kind: 'expired', at: at(700), by: null }, rejected_attempts: [],
+      ended: { kind: 'expired', at: at(700), by: null }, rejected_attempts: [], refusals_reported: true, needs_reconciliation: false,
     },
     {
       action_id: 'dev_act_04', basis: 'proposed_fixture', target_ip: '192.168.77.10', reason: 'undo test', until: at(400),
       committed: { at: at(500), policy_revision: 6, by: 'analyst@lab.local' }, verified: null,
-      ended: { kind: 'revoked', at: at(480), by: 'analyst@lab.local' }, rejected_attempts: [],
+      ended: { kind: 'revoked', at: at(480), by: 'analyst@lab.local' }, rejected_attempts: [], refusals_reported: true, needs_reconciliation: false,
     },
   ];
 

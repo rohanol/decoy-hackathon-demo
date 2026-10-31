@@ -41,7 +41,7 @@ import {
   sourceProfileFromV1,
   verificationFromV1,
 } from '../evidence/fromV1';
-import { RULE_NAME, STAGE_LABEL, linkPhrase } from '../copy';
+import { RULE_NAME, linkPhrase, stageLabel } from '../copy';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import {
@@ -494,7 +494,7 @@ export function IncidentDetail() {
           </h2>
           {stageFilter ? (
             <button type="button" className="btn btn--ghost" onClick={() => setStageFilter(null)}>
-              Clear {STAGE_LABEL[stageFilter]} filter
+              Clear {stageLabel(stageFilter)} filter
             </button>
           ) : null}
         </div>
@@ -532,6 +532,11 @@ export function IncidentDetail() {
         <p className="incsec__note">
           The source is an observed endpoint. Each decoy session is its own case. Only an
           analyst-approved relation joins cases across decoys.
+        </p>
+        <p className="incsec__note">
+          These cases and the parent are <strong>display groupings</strong> built in the browser
+          from v1.0 events. The backend&apos;s authoritative cases and investigations arrive with
+          M3&apos;s case model; until then the backend still scores this source as one incident.
         </p>
 
         <SourceProfileCard profile={evidence.profile} {...evidenceHandlers} />

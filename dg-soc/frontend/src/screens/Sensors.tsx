@@ -16,7 +16,7 @@ import { sensorActivity, sensorHealth } from '../components/Shell';
 import { HealthDimensions } from '../components/evidence/HealthDimensions';
 import { healthFromV1 } from '../evidence/fromV1';
 import { Dot } from '../components/primitives';
-import { EVENT_TYPE_LABEL } from '../copy';
+import { eventTypeLabel } from '../copy';
 import { number, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { SENSOR_IDS, type EventType } from '../types/api';
@@ -139,7 +139,7 @@ export function Sensors() {
                     <ul className="sensorcard__types">
                       {types.map(([type, count]) => (
                         <li key={type}>
-                          <span className="sensorcard__type">{EVENT_TYPE_LABEL[type]}</span>
+                          <span className="sensorcard__type">{eventTypeLabel(type)}</span>
                           <span className="sensorcard__bar">
                             <span style={{ width: `${(count / max) * 100}%` }} />
                           </span>
@@ -154,7 +154,7 @@ export function Sensors() {
                   <footer className="sensorcard__foot">
                     {stats?.last ? (
                       <span>
-                        Last: {EVENT_TYPE_LABEL[stats.last.event_type]} at{' '}
+                        Last: {eventTypeLabel(stats.last.event_type)} at{' '}
                         {timeUtc(stats.last.occurred_at)} UTC
                       </span>
                     ) : (

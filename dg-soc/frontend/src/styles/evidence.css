@@ -1058,3 +1058,25 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.vmismatch__field {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.authtag {
+  display: inline-flex;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  font-size: 10.5px;
+  white-space: nowrap;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-muted);
+}
+
+.authtag--backend_case {
+  border-style: solid;
+  border-color: var(--data);
+  color: var(--data);
+}
