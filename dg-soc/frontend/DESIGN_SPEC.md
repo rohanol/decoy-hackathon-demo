@@ -116,10 +116,15 @@ must never read as "this is severe".
 
 Two faces. One rule decides which: **anything the machine produced is mono.**
 
+**System stacks only — no webfonts.** Laptop B has no internet on the lab link
+(`AGENTS.md` §6), so a Google Fonts request would hang and then silently fall back
+mid-demo. JetBrains Mono is listed first in the mono stack so it gets used where it happens
+to be installed locally, but nothing depends on it.
+
 | Face | Stack | Use |
 |---|---|---|
-| UI | `Inter, system-ui, -apple-system, "Segoe UI", sans-serif` | Headings, labels, prose, buttons |
-| Mono | `"JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace` | IPs, all IDs, timestamps, commands, paths, query strings, hashes, rule codes, ATT&CK codes |
+| UI | `system-ui, -apple-system, "Segoe UI", Roboto, sans-serif` | Headings, labels, prose, buttons |
+| Mono | `"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace` | IPs, all IDs, timestamps, commands, paths, query strings, hashes, rule codes, ATT&CK codes |
 
 The mono rule matters for credibility: when every `evt_...` and every attacker command is
 visibly machine data, judges can see at a glance what came from the system versus what we
@@ -212,6 +217,8 @@ Left to right:
    screen** (PRD §8). If any event in view has `capture_mode: "replay"`, the chip reads
    `REPLAY`. If fixtures are on (`VITE_USE_FIXTURES=1`), the chip reads `FIXTURES` in
    `--warn` — so it is impossible to demo fixture data by accident.
+   With no events received at all there is no capture to describe, so the chip reads
+   `NO DATA` in neutral — never `LIVE`, which would be a claim we cannot back.
 3. **`lab_run_id`** — mono, `--text-secondary`. Proves which run is on screen.
 4. **Connection pill** — see 4.3.
 5. **UTC clock** — mono, ticking. All timestamps in this app are UTC; the clock makes that
