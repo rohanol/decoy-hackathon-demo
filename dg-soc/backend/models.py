@@ -17,7 +17,9 @@ EventType = Literal[
     "bait_served",
 ]
 Indicator = Literal[
-    "sql_quote", "sql_keyword", "sql_comment", "script_tag", "event_handler", "js_scheme",
+    "sql_quote", "sql_keyword", "sql_comment",
+    "sql_quote_breakout", "sql_union_select", "sql_tautology", "sql_stacked_query", "sql_time_function",
+    "script_tag", "event_handler", "js_scheme",
     "path_traversal", "sensitive_file_path", "php_wrapper", "remote_url_in_param",
     "shell_metachar_command", "command_substitution", "null_byte", "encoded_payload",
 ]

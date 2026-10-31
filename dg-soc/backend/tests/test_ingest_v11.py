@@ -183,7 +183,7 @@ def test_r07_classifies_body_indicators(client):
     post(client, ex("a-web-post-search"))
     findings = client.app.state.db.list_findings(events(client)[0]["incident_id"])
     r07 = [f for f in findings if f["rule_id"] == "R07"]
-    assert len(r07) == 1 and r07[0]["web_attack_class"] == ["sqli"] and r07[0]["rule_version"] == "R07@3"
+    assert len(r07) == 1 and r07[0]["web_attack_class"] == ["sqli"] and r07[0]["rule_version"] == "R07@4"
     assert "request body" in r07[0]["label"]
 
 
@@ -193,6 +193,43 @@ def test_r07_supporting_indicators_alone_do_not_fire(client, indicators):
     ev["attributes"]["input_features"]["indicators"] = indicators
     post(client, ev)
     assert all(f["rule_id"] != "R07" for f in client.app.state.db.list_findings(events(client)[0]["incident_id"]))
+
+
+VECTORS = json.loads((ROOT / "contracts/examples/input_indicator_vectors.json").read_text(encoding="utf-8"))["vectors"]
+
+
+def r07_for_indicators(client, indicators):
+    ev = ex("a-web-post-search")
+    ev["attributes"]["input_features"]["indicators"] = indicators
+    post(client, ev)
+    return [f for f in client.app.state.db.list_findings(events(client)[0]["incident_id"]) if f["rule_id"] == "R07"]
+
+
+@pytest.mark.parametrize("vec", VECTORS, ids=lambda v: v["value"][:32])
+def test_r07_api_matches_every_labelled_vector(client, vec):
+    """Positive and negative regressions through POST /api/ingest/events: the producer's
+    indicators for each labelled value give exactly the labelled classes, or no finding."""
+    r07 = r07_for_indicators(client, vec["indicators"])
+    if vec["classes"]:
+        assert len(r07) == 1 and r07[0]["web_attack_class"] == vec["classes"]
+    else:
+        assert r07 == []
+
+
+def test_r07_apostrophe_and_trailing_dashes_are_not_sqli(client):
+    """M4's case 1: 'John's quarterly report--' gives sql_quote + sql_comment, which used to be SQLi."""
+    assert r07_for_indicators(client, ["sql_quote", "sql_comment"]) == []
+
+
+def test_r07_union_select_without_quote_is_sqli(client):
+    """M4's case 2: 'UNION SELECT name FROM users' used to be missed because no quote was present."""
+    r07 = r07_for_indicators(client, ["sql_keyword", "sql_union_select"])
+    assert len(r07) == 1 and r07[0]["web_attack_class"] == ["sqli"] and "request body" in r07[0]["label"]
+
+
+def test_r07_old_lexical_only_producer_never_creates_body_sqli(client):
+    """A producer that predates the structural names sends only lexical ones: no false body class."""
+    assert r07_for_indicators(client, ["sql_quote", "sql_keyword", "sql_comment"]) == []
 
 
 def test_r07_ignores_unvalidated_features_on_v10_events(client):

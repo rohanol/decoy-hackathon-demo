@@ -13,18 +13,23 @@ def classify(text: str, cfg) -> list:
             if any(p.search(decoded) for p in cfg.classes.get(c, []))]
 
 
+# Structural indicators only (contracts/API.md, Indicator semantics). sql_quote, sql_keyword,
+# sql_comment, null_byte and encoded_payload are lexical: no combination of them makes a class,
+# so "John's quarterly report--" stays benign.
+INDICATOR_CLASS = {
+    "sql_quote_breakout": "sqli", "sql_union_select": "sqli", "sql_tautology": "sqli",
+    "sql_stacked_query": "sqli", "sql_time_function": "sqli",
+    "script_tag": "xss", "event_handler": "xss", "js_scheme": "xss",
+    "path_traversal": "lfi", "sensitive_file_path": "lfi", "php_wrapper": "lfi",
+    "remote_url_in_param": "rfi",
+    "shell_metachar_command": "cmd_injection", "command_substitution": "cmd_injection",
+}
+
+
 def classify_indicators(indicators) -> list:
-    """Classes implied by M4's fixed indicator vocabulary. null_byte and encoded_payload
-    only support other evidence, so they never create a class on their own."""
-    i = set(indicators)
-    classes = {
-        "sqli": "sql_quote" in i and bool(i & {"sql_keyword", "sql_comment"}),
-        "xss": bool(i & {"script_tag", "event_handler", "js_scheme"}),
-        "lfi": bool(i & {"path_traversal", "sensitive_file_path", "php_wrapper"}),
-        "rfi": "remote_url_in_param" in i,
-        "cmd_injection": bool(i & {"shell_metachar_command", "command_substitution"}),
-    }
-    return [c for c in CLASS_ORDER if classes[c]]
+    """Classes implied by M4's fixed indicator vocabulary."""
+    found = {INDICATOR_CLASS[i] for i in indicators if i in INDICATOR_CLASS}
+    return [c for c in CLASS_ORDER if c in found]
 
 
 def _body_indicators(e: dict) -> list:
@@ -57,6 +62,6 @@ def evaluate(events: list, cfg) -> list:
             techniques=techniques, stage="exploit_attempt",
             label=f"Web attack attempt ({', '.join(classes)}) in {where} to {a.get('path', '')[:128]}",
             limitation="Shows an attempt only; does not show successful exploitation.",
-            events=[e], web_attack_class=classes, version=3,
+            events=[e], web_attack_class=classes, version=4,
         ))
     return out

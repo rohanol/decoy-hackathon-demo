@@ -319,6 +319,6 @@ def test_r01_login_kept_in_evidence_when_capped():
 def test_changed_rules_carry_version_2():
     assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@2"
     assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@2"
-    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@3"  # PR 2: body indicators
+    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@4"  # PR 2: body indicators
     assert r02.evaluate([ev(etype="auth_success"), ev(etype="command_input", at=1, command="id")],
                         CFG)[0]["rule_version"] == "R02@1"
