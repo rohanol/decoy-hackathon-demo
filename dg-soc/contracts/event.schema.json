@@ -2,16 +2,22 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dg-soc/event.schema.json",
   "title": "Ingest event (adapter -> backend)",
-  "description": "One normalised sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at.",
+  "description": "One normalised sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at. Version 1.1 is additive: every valid 1.0 event is still valid. See contracts/API.md 'Evidence boundaries (v1.1)'.",
   "type": "object",
   "required": ["schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip", "lab_run_id", "capture_mode"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "const": "1.0" },
+    "schema_version": { "enum": ["1.0", "1.1"] },
     "source_record_id": {
       "type": "string",
+      "minLength": 1,
       "maxLength": 128,
-      "description": "Stable per sensor record. Cowrie: sha256 of the raw JSON line. Web: request uuid. Dedup key is (sensor_id, source_record_id)."
+      "description": "Stable per sensor record. Cowrie: sha256 of the raw JSON line. Web: request uuid. Dedup key is (ingest namespace, sensor_id, source_record_id); the namespace is 'live' for live events and 'replay:<lab_run_id>' for replay events."
+    },
+    "origin_record_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "v1.1. Replay only: source_record_id of the original captured record this replay copies. Null or absent for live events."
     },
     "sensor_id": { "enum": ["ssh-decoy-01", "web-decoy-01"] },
     "event_type": {
@@ -23,36 +29,103 @@
         "connection_close",
         "http_request",
         "synthetic_file_access",
-        "blocked_request"
-      ]
+        "blocked_request",
+        "bait_served"
+      ],
+      "description": "bait_served is v1.1: the sensor returned content containing one or more honeytokens."
     },
     "occurred_at": { "type": "string", "format": "date-time", "description": "UTC, from the sensor log" },
     "src_ip": { "type": "string", "format": "ipv4" },
-    "src_port": { "type": ["integer", "null"] },
-    "session_id": { "type": ["string", "null"], "description": "Cowrie session id. Null for web unless a cookie session exists." },
-    "lab_run_id": { "type": "string", "description": "Set once per run, e.g. run-2026-11-01-01" },
+    "src_port": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+    "session_id": {
+      "type": ["string", "null"],
+      "maxLength": 128,
+      "description": "Sensor session id. Cowrie: its session id. Web: the decoy's session cookie id once it issues one, else null (backend then groups by a documented 5-minute inactivity bucket)."
+    },
+    "lab_run_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Set once per run. A run has exactly one capture_mode: the first accepted event fixes it, and events with the other mode for that run are rejected. Use a 'replay-' prefix for replay runs by convention."
+    },
     "capture_mode": { "enum": ["live", "replay"] },
     "attributes": {
       "type": "object",
       "additionalProperties": true,
       "properties": {
         "username": { "type": "string", "maxLength": 128 },
-        "password_sha256": { "type": "string", "description": "Never the raw password" },
-        "client_version": { "type": "string", "maxLength": 256 },
+        "password_sha256": { "type": "string", "maxLength": 128, "description": "Never the raw password" },
+        "client_version": { "type": "string", "maxLength": 256, "description": "Client-claimed banner. A claim, not identity." },
         "command": { "type": "string", "maxLength": 4096 },
-        "method": { "type": "string" },
+        "method": { "type": "string", "maxLength": 16 },
         "path": { "type": "string", "maxLength": 4096 },
         "query_redacted": { "type": "string", "maxLength": 4096, "description": "Query string with any honeytoken or password values replaced by <redacted>" },
-        "user_agent": { "type": "string", "maxLength": 512 },
+        "user_agent": { "type": "string", "maxLength": 512, "description": "Client-claimed. A claim, not identity." },
         "status_code": { "type": "integer" },
         "response_class": { "enum": ["normal", "fake_error", "fake_data", "blocked"] },
-        "honeytoken_id": { "type": "string" },
-        "asset_id": { "type": "string" },
-        "size_bytes": { "type": "integer" },
-        "sha256": { "type": "string" },
-        "outcome": { "enum": ["served", "denied", "not_found"] },
-        "block_action_id": { "type": "string" }
+        "honeytoken_id": { "type": "string", "maxLength": 128, "description": "A honeytoken PRESENTED by the client (login, query). For served bait use honeytoken_ids." },
+        "asset_id": { "type": "string", "maxLength": 128, "description": "Synthetic object id. v1.1 bait assets: 'ssh:/home/dg_demo/notes.txt', 'web:/.env'." },
+        "size_bytes": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "maxLength": 64, "description": "Digest of the full served content (see digest_scope)." },
+        "outcome": {
+          "enum": ["served", "denied", "not_found", "attempted", "emulated_success", "failed", "unknown"],
+          "description": "1.0 values served/denied/not_found keep their meaning. v1.1 adds attempted, emulated_success, failed, unknown. 'served' equals emulated_success for a synthetic file."
+        },
+        "block_action_id": { "type": "string", "maxLength": 64 },
+
+        "observation_kind": {
+          "enum": ["network_input", "command_input", "emulated_result", "policy_result"],
+          "description": "v1.1. What the record observed: client input on the wire, a shell command, the decoy's emulated result, or a policy decision. If absent the backend derives it from event_type (API.md)."
+        },
+        "evidence_role": {
+          "enum": ["request", "result", "bait"],
+          "description": "v1.1. Shorthand used by findings and links: request = client input, result = the decoy's answer or policy outcome, bait = content carrying a honeytoken was served."
+        },
+        "request_id": { "type": "string", "maxLength": 64, "description": "v1.1, web. One id per HTTP request; every record about that request carries it." },
+        "honeytoken_ids": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 128 },
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "description": "v1.1, bait_served only. Tokens contained in the served content. Ids only, never values."
+        },
+        "issuance_id": { "type": "string", "maxLength": 64, "description": "v1.1, bait_served. Unique per serving (or per per-session token if the decoy mints them)." },
+        "issued_expires_at": { "type": ["string", "null"], "format": "date-time", "description": "v1.1, bait_served. Optional expiry; null = valid until the run ends." },
+        "evidence_basis": {
+          "enum": ["sensor_response", "derived_from_command"],
+          "description": "v1.1, bait_served. sensor_response = the decoy itself recorded sending the content. derived_from_command = the adapter inferred it from a read command on a known bait path in the emulated filesystem (weaker; shown as such)."
+        },
+        "derived_from_record_id": { "type": "string", "maxLength": 128, "description": "v1.1, required when evidence_basis = derived_from_command: source_record_id of the command record it was derived from." },
+        "fixture_version": { "type": "string", "maxLength": 32, "description": "v1.1. Version of the synthetic asset or bait file." },
+        "digest_scope": { "enum": ["full_sanitised_response", "full_asset", "partial"], "description": "v1.1. What sha256 covers." }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "event_type": { "const": "bait_served" } }, "required": ["event_type"] },
+      "then": {
+        "properties": {
+          "schema_version": { "const": "1.1" },
+          "attributes": {
+            "required": ["asset_id", "honeytoken_ids", "issuance_id", "evidence_basis"],
+            "properties": { "evidence_role": { "const": "bait" } }
+          }
+        },
+        "required": ["attributes"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "attributes": { "properties": { "evidence_basis": { "const": "derived_from_command" } }, "required": ["evidence_basis"] } },
+        "required": ["attributes"]
+      },
+      "then": { "properties": { "attributes": { "required": ["derived_from_record_id"] } } }
+    },
+    {
+      "if": { "properties": { "capture_mode": { "const": "live" } }, "required": ["capture_mode"] },
+      "then": { "properties": { "origin_record_id": { "type": "null" } } }
+    }
+  ]
 }
