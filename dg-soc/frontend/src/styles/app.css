@@ -1609,3 +1609,252 @@ button.killchain__seg:hover {
   align-items: center;
   gap: var(--s2);
 }
+
+/* ---------- attack graph ---------- */
+
+.graph {
+  position: relative;
+  padding: var(--s4);
+}
+
+.graph__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.graph__note {
+  margin: var(--s3) 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 760px;
+}
+
+/* nodes */
+
+.gnode rect {
+  fill: var(--bg-raised);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.gnode {
+  cursor: pointer;
+}
+
+.gnode:hover rect {
+  stroke: var(--accent);
+}
+
+.gnode:focus-visible rect {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.gnode--attacker rect {
+  stroke-width: 2;
+}
+
+.gnode--low rect {
+  stroke: var(--sev-low);
+}
+.gnode--medium rect {
+  stroke: var(--sev-medium);
+}
+.gnode--high rect {
+  stroke: var(--sev-high);
+}
+.gnode--critical rect {
+  stroke: var(--sev-critical);
+}
+
+.gnode__ip {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  fill: var(--text-primary);
+}
+
+.gnode__sensor {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  fill: var(--text-primary);
+}
+
+.gnode__score {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 600;
+  text-anchor: end;
+  fill: var(--text-primary);
+}
+
+.gnode--low .gnode__score,
+.gnode--low .gnode__sev {
+  fill: var(--sev-low-text);
+}
+.gnode--medium .gnode__score,
+.gnode--medium .gnode__sev {
+  fill: var(--sev-medium-text);
+}
+.gnode--high .gnode__score,
+.gnode--high .gnode__sev {
+  fill: var(--sev-high-text);
+}
+.gnode--critical .gnode__score,
+.gnode--critical .gnode__sev {
+  fill: var(--sev-critical-text);
+}
+
+.gnode__sev {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.gnode__sub {
+  font-size: 11px;
+  fill: var(--text-secondary);
+}
+
+.gdot--ok {
+  fill: var(--ok);
+}
+.gdot--warn {
+  fill: var(--warn);
+}
+.gdot--neutral {
+  fill: var(--neutral);
+}
+
+/* edges */
+
+.gedge {
+  fill: none;
+}
+
+.gedge--traffic {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+
+.glink {
+  cursor: pointer;
+}
+
+.glink__hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 20;
+}
+
+.glink__line {
+  fill: none;
+  stroke: var(--pending);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.glink--strong_candidate .glink__line {
+  stroke-width: 3;
+}
+
+/* The demo's visual climax: dashed turns solid on confirmation. */
+.glink--confirmed .glink__line {
+  stroke: var(--ok);
+  stroke-width: 3;
+  stroke-dasharray: none;
+  animation: link-confirm 400ms ease-out;
+}
+
+@keyframes link-confirm {
+  from {
+    stroke: var(--pending);
+    stroke-dasharray: 6 4;
+    filter: drop-shadow(0 0 6px var(--ok));
+  }
+  to {
+    stroke: var(--ok);
+    stroke-dasharray: none;
+    filter: none;
+  }
+}
+
+.glink--rejected .glink__line {
+  stroke: var(--neutral);
+  stroke-width: 1;
+  stroke-dasharray: none;
+  opacity: 0.4;
+}
+
+.glink:hover .glink__line {
+  stroke: var(--accent);
+}
+
+.glink__labelbg {
+  fill: var(--bg-surface);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.glink__label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-anchor: middle;
+  fill: var(--text-secondary);
+}
+
+.glink--confirmed .glink__label {
+  fill: var(--ok);
+}
+
+.glink--confirmed .glink__labelbg {
+  stroke: var(--ok);
+}
+
+/* legend */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--border);
+  margin-top: var(--s2);
+}
+
+.legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.legend__swatch {
+  width: 28px;
+  height: 0;
+  border-top-width: 2px;
+  border-top-style: solid;
+}
+
+.legend__swatch--traffic {
+  border-top-width: 1px;
+  border-top-color: var(--text-muted);
+}
+
+.legend__swatch--candidate {
+  border-top-style: dashed;
+  border-top-color: var(--pending);
+}
+
+.legend__swatch--strong {
+  border-top-width: 3px;
+  border-top-style: dashed;
+  border-top-color: var(--pending);
+}
+
+.legend__swatch--confirmed {
+  border-top-width: 3px;
+  border-top-color: var(--ok);
+}

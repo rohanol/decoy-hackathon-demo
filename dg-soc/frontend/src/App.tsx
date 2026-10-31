@@ -1,11 +1,11 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell';
+import { AttackGraph } from './screens/AttackGraph';
 import { IncidentDetail } from './screens/IncidentDetail';
 import { IncidentList } from './screens/IncidentList';
 import { LiveFeed } from './screens/LiveFeed';
 import { TranscriptReplay } from './screens/TranscriptReplay';
 import {
-  AttackGraph,
   NotFound,
   Overview,
   ResponseCenter,
