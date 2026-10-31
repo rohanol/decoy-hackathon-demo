@@ -33,6 +33,24 @@ npm run typecheck   # tsc --noEmit, strict
 npm run build       # typecheck + production build
 ```
 
+## Against the real backend
+
+Verified end to end against M3's FastAPI (see DESIGN_SPEC.md §16b). In one terminal:
+
+```bash
+cd dg-soc
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m backend.main
+```
+
+```bash
+python -m backend.tools.load_fixtures
+```
+
+Then `npm run dev` with no fixture flag. The backend already allows
+`127.0.0.1:5173` via CORS.
+
 ## Fixture mode
 
 `VITE_USE_FIXTURES=1` runs the whole UI off
@@ -115,6 +133,18 @@ around it in the UI.
   API rather than an optimistic restyle
 - Incident list: severity-bordered cards sorted by newest activity, each with
   the compact kill-chain strip, updating live from `type: "incident"` messages
+- Response Center and the block flow: preview, approve with a written reason
+  and an acknowledged scope, then a polled wait for verification, with undo.
+  Verified end to end against M2's real router (DESIGN_SPEC.md §13.5), and it
+  held at `APPLIED` for 6s with no blocked request before flipping to
+  `VERIFIED` in 500ms once one arrived
+- Overview: the noise-reduction counter, time to first alert, findings by
+  rule with every rule visible at zero, and active incidents with their
+  kill-chain silhouettes
+- Attack graph: inline SVG with no graph library, fixed deterministic layout,
+  traffic edges drawn only where the API confirms that source on that sensor,
+  and the cross-decoy link turning from dashed candidate to solid
+  analyst-confirmed in place
 - Transcript replay: terminal-styled, mandatory non-dismissible banner, a dim
   prompt prefix separating our chrome from attacker text, per-line timestamps
   and clickable event ids, and a stepper with play/pause, speed and full
@@ -122,10 +152,21 @@ around it in the UI.
 
 ## Known gaps
 
-- Screens 1, 6 and 7 are stubs that name their spec section and build order
+- The block flow cannot run against the repository as it stands. M2's
+  `response/router.py` is written and tested but lives in
+  `m2/m2-upload/dg-soc/`, not `dg-soc/`, so `backend/integrations.py` does not
+  find it and `/api/response/*` returns 503. It was verified by copying the
+  router into place locally; no frontend change is expected once that merge
+  lands
+
+- Screen 7 (Response Center) is a stub that name their spec section and build order
 - The incident list has no rule chips or "awaiting decision" flag:
   `IncidentSummary` carries no findings and `Link` has no `incident_id`, so
   neither has an honest source at that endpoint (open question 2)
+- The attack graph cannot attribute a cross-decoy link to a particular source
+  when more than one source IP has links, for the same reason
+- Overview's rule bars are not clickable: the incident list cannot filter by
+  rule, for the same reason again
 - The incident Block button is disabled until M2's response router exists
 - Export needs the live backend, so it is disabled in fixture mode
 - The drawer closes on `Esc` and autofocuses, but does not fully trap focus yet

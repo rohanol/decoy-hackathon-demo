@@ -253,10 +253,31 @@ instantly whether the problem is the decoy, the backend or your UI.
 
 Reconnect uses exponential backoff with jitter: 500ms, 1s, 2s, 4s, 8s, then every 8s.
 
-**On reconnect, reload the REST snapshot and discard the in-memory list** (`API.md`, and
-PRD AC11). Do not try to patch the gap from buffered messages. Apply WebSocket messages
-only where `seq` is greater than the highest `seq` seen; drop or ignore anything lower.
-Clicking the pill when offline forces a retry immediately.
+**On reconnect, reload the whole REST snapshot and discard the in-memory list** (`API.md`,
+and PRD AC11). That means `GET /api/events` for the feed **plus** `GET /api/incidents` and
+`GET /api/links` — every screen holding its own data resyncs, not just the feed. Do not try
+to patch the gap from buffered messages. Clicking the pill when offline forces a retry
+immediately.
+
+**The `seq` gate applies to `event` messages only** (`API.md`, WebSocket section, contract
+update `cc12ddd`). A `finding`, `link` or `incident` message carries the *newest event's*
+seq at send time, so it usually repeats the seq before it — and an analyst decision emits
+messages with no new event at all. Dropping those three types by seq would silently discard
+exactly the updates the confirm button exists to produce. Apply them always, replacing the
+item with the matching ID. `next_seq` from the snapshot is your last event seq; use it
+rather than deriving a max from the page.
+
+| `type` | Apply when | How |
+|---|---|---|
+| `event` | `seq` > last event seq | append to the feed |
+| `finding` | always | replace by `finding_id` |
+| `link` | always | replace by `link_id` |
+| `incident` | always | replace by `incident_id`; if that incident's page is open, re-fetch it |
+| `action` | reserved, not sent yet | poll `GET /api/response/actions` |
+
+On the incident page, re-fetch rather than patching items in place: a rejected link removes
+its R05 finding and no delete message is sent, so a patched page would keep showing a
+finding the backend no longer has.
 
 ---
 
@@ -315,13 +336,22 @@ and purely decorative reinforcement; the numbers are the truth. `low_priority_in
 means incidents scoring below `low_priority_below` (25). Tooltip on "low priority":
 *"Scored below the noise threshold set in scoring.yaml."*
 
-**Time to first alert** — `first_alert_seconds`, one decimal, "s" in `--text-secondary`.
-If `null`, show `—` with "no findings yet". Do not show `0.0`.
+**Time to first alert** — `first_alert_seconds`, "s" in `--text-secondary`. If `null`, show
+`—` with "no findings yet".
+
+Precision follows magnitude: 2 decimals below 1s, 1 decimal to 10s, 0 above. A bulk fixture
+load really does report `0.013`, and a flat one-decimal rule would render that as `0.0 s`,
+which reads as "nothing was measured" rather than "measured, and very fast".
 
 **Findings by rule** — horizontal bars from `findings_by_rule`. Rule code in mono, count at
 the end. Fixed order R01, R02, R03, R04, R05, R07, R08, R09. **There is no R06** — do not
-render a slot for it. Rules with zero count render a dim empty track, so the set of possible
-rules is always visible. Clicking a bar goes to `/incidents` filtered by that rule.
+render a slot for it. Rules with zero count render a dim dashed track, so the set of
+possible rules stays visible even before anything fires.
+
+**Bars are not clickable.** They were meant to open `/incidents` filtered by that rule, but
+`IncidentSummary` carries no findings (open question 2), so the destination cannot honour
+the filter. A link that quietly ignores what you clicked is worse than no link. If
+`findings_by_rule` lands on `IncidentSummary`, wire both at once.
 
 **Active incidents** — compact rows: IP (mono), severity badge, score, and the compact
 kill-chain strip. Whole row navigates to the incident.
@@ -705,12 +735,30 @@ Attack Graph                                    [ All incidents ▾ ]   1 open l
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Library: **React Flow**, pinned. Nothing heavier (`AGENTS.md` §9 — no new heavy deps).
+**No graph library — inline SVG.** The layout here is fixed and deterministic by design, so
+React Flow's layout engine, pan/zoom and edge routing would all go unused: roughly 50KB
+gzipped for a static diagram. `prompts/M1_frontend.md` says "keep libraries minimal", and
+zero libraries serves that better than one. Hand-rolled SVG also gives exact control over
+the confirm animation, which is the demo's visual climax. Revisit only if the graph ever
+needs real layout — with at most a handful of lab source IPs, it will not.
 
-Layout is **fixed, not force-directed**: attacker node left-centre, `ssh-decoy-01` upper
-right, `web-decoy-01` lower right. Three nodes, deterministic positions. A physics
-simulation that jiggles under a projector helps nobody, and it must look identical in every
-rehearsal. Pan and zoom on, with a Reset view button.
+Layout is **fixed, not force-directed**: attacker nodes down the left, `ssh-decoy-01` upper
+right, `web-decoy-01` lower right. Deterministic positions. A physics simulation that
+jiggles under a projector helps nobody, and it must look identical in every rehearsal.
+
+**No pan or zoom.** The SVG is responsive and always fits its container, growing downward as
+sources are added, so there is nothing to pan to. Dropping it removes a control nobody would
+touch and a way to get lost mid-demo.
+
+**Edges are evidence, not inference.** A traffic edge is drawn only when the API confirms
+that source was seen on that sensor, asked precisely as
+`GET /api/events?incident_id=&sensor_id=&limit=1` per pair rather than inferred from a
+capped page. Topology is a claim like any other.
+
+Known limitation: `Link` has no `incident_id` (open question 2), so with two or more source
+IPs each holding links, the decoy-to-decoy edges cannot be attributed to a particular
+source. With the single source of the P3 demo it is unambiguous. Adding `incident_id` to
+`Link` would fix it.
 
 ### 11.1 Nodes
 
@@ -906,9 +954,12 @@ Autofocus the reason field. During the demo this is typed under pressure.
 On success the modal becomes a result panel: `action_id`, `APPLIED` pill, `until`, and the
 line **"Applied. Waiting for a blocked request to verify."**
 
-It stays open and watches for the WebSocket `type: "action"` message. When status becomes
-`verified`, the pill flips to `VERIFIED` with the `verified_by_event_id` chip and a 400ms
-`--ok` glow. That moment is demo step 8 — it deserves to be visible without navigating.
+It stays open and **polls `GET /api/response/actions` every 2s**. `API.md` (contract update
+`cc12ddd`) marks `type: "action"` as reserved and not sent, so there is no push for this —
+polling is the contract's own answer, not a workaround. When status becomes `verified`, the
+pill flips to `VERIFIED` with the `verified_by_event_id` chip and a 400ms `--ok` glow. That
+moment is demo step 8 — it deserves to be visible without navigating. Stop polling when the
+panel closes or the action reaches a terminal status.
 
 Then: **Undo block** (`POST /api/response/{action_id}/revoke`) and **Done**.
 
@@ -978,9 +1029,9 @@ Ask these in the group chat early — all are small, and each one blocks a panel
    `IncidentSummary` carry `findings_by_rule` (same shape as the one in `/api/stats/overview`)
    and `open_link_count`? Alternatively, adding `incident_id` to `Link` would solve the
    second half on its own.
-3. Does `/ws/events` emit `type: "action"` for response status changes, including the
-   `applied → verified` transition? §13.3 depends on it. If not, the result panel polls
-   `GET /api/response/actions` every 2s while open.
+3. ~~Does `/ws/events` emit `type: "action"` for response status changes?~~ **Answered**
+   by contract update `cc12ddd`: `action` is reserved and not sent. Poll
+   `GET /api/response/actions` for block status. §13.3 updated to match.
 4. The attack graph wants per-sensor event counts per incident. Deriving them from
    `GET /api/events?incident_id=` is fine; just confirming there is no cheaper field.
 5. Is `score_breakdown` guaranteed to list every rule that fired, including uncounted ones
@@ -990,11 +1041,96 @@ Ask these in the group chat early — all are small, and each one blocks a panel
 7. Can the incident carry `score_cap` (the `cap` from `config/scoring.yaml`)? Without it the
    header shows a bare score rather than `100 / 100`, because hardcoding the denominator
    means the UI lies if the cap ever changes.
-8. For a rule awaiting confirmation, does its `score_breakdown` row report `points: 0`, or
-   the points it *would* contribute? If the latter, the link decision modal can tell the
-   analyst the exact delta before they decide, which is strictly better.
+8. ~~For a rule awaiting confirmation, does its `score_breakdown` row report `points: 0`?~~
+   **Answered by running the backend**: yes, `points: 0`. The modal therefore names which
+   rules confirming makes count, without a delta. Leave as built.
 
 None of these block the H4 gate. Build screen 2 on fixtures now.
+
+---
+
+## 16b. Verified against the real backend
+
+Run on 2026-10-31 against M3's FastAPI with `backend.tools.load_fixtures`. All five built
+screens render with zero console errors. What the run taught us, beyond what any amount of
+fixture work would have:
+
+**`GET /api/events` is ascending with a forward cursor.** `next_seq` is the last seq of the
+page returned, not the global maximum, and a bare `limit=200` returns the *oldest* 200. The
+feed used to make a single call and sort descending, which is correct only while a run fits
+in one page; beyond that it would have shown the oldest events and then appended live ones
+on top, leaving a silent hole. It now pages forward to the end. The fixture was returning
+newest-first, which is precisely why this hid — fixtures now mirror the real ordering.
+
+**The backend caps inside `score_breakdown`.** After confirmation the rows read R09 `5` and
+R05 `0`, summing exactly to 100, each with a reason like
+`first R09 (weight 15, capped at 100)`. So the raw-versus-capped footer in §9.3 stays
+dormant against this backend, and the cap story is told by the backend's own reason text.
+Keep the footer: it is correct either way and costs nothing.
+
+**R05 has no finding until the link is confirmed.** Six findings before, seven after. The
+page is re-fetched rather than patched, so this needs no special handling.
+
+**Two links, not one.** The backend emits both a `strong_candidate` (honeytoken) and a
+`candidate` (same src_ip within 5 min) for the same pair of decoys. This exposed a real bug
+in the graph: both link labels were drawn at the same y, so the second label covered the
+first link's line and made it unclickable. Lines now fan out horizontally and labels stack
+vertically.
+
+**The WebSocket sequence on a confirm is `link, finding, finding, incident`** — every one of
+them carrying a repeated seq, with no new event. Confirms why the seq gate must apply to
+`event` only: gating all types would have silently dropped the entire confirm flow.
+
+**`score_breakdown` rows also carry `finding_id`**, which is not in the contract's example.
+Unused so far, but it would let a breakdown row link directly to its finding card.
+
+Not a frontend issue, worth raising with M3: the rule summary embeds
+`[evidence: evt_..., evt_...]` inline in its prose, which is both hard to read and redundant
+with the clickable cited-ID chips rendered beneath it.
+
+---
+
+## 13.5 Verified against M2's router
+
+**Built against a mock, then verified against the real thing.**
+
+M2's `response/router.py` exists and is tested, but it lives in `m2/m2-upload/dg-soc/` and
+has not been merged into `dg-soc/`, which is where `backend/integrations.py` looks for it.
+So against the repository as it stands the backend still answers every `/api/response/*`
+call with `503 response_unavailable`, and this screen still has to handle that.
+
+The flow was therefore built against a fixture mock that throws the same `ApiError` type the
+real client does, so failure paths are exercised rather than assumed. `ApiError` moved to
+`src/api/error.ts` to make that possible without a circular import: a mock that fails
+differently from the real thing is a mock that hides bugs. That lesson was already paid for
+once — see §16b on event ordering.
+
+**Run on 2026-10-31** with M2's router copied into place locally (copies deleted afterwards;
+they are his files, not ours to commit). The whole chain worked with no change on either
+side — frontend → M3's backend → M2's router → blocklist → ingest → verification:
+
+| Step | Result |
+|---|---|
+| Preview | `prv_5f8a386afc44`, target `192.168.77.10`, scope `web-decoy-01 only`, 120 s |
+| Apply | `act_dfd13a8f`, pill `APPLIED` |
+| Held 6 s with no blocked request | **stayed `APPLIED`** |
+| Injected a `blocked_request` carrying that `action_id` | `accepted: 1` |
+| UI poll | flipped to `VERIFIED` in 500 ms, citing the real `evt_9055adc2da1d` |
+
+The third row is the one that matters. The UI refused to claim verification until a blocked
+request actually arrived — the honesty guard holding against real infrastructure rather than
+against a mock written to make it pass.
+
+Until the merge lands, the Response Center treats the 503 as a dependency that has not
+arrived, not as an error: it names the file, its owner and the mount point, and says the
+flow is ready to wire. That is more useful to the team than a red error card, and more
+honest than hiding the screen.
+
+One bug this found: the verification poll was being torn down and restarted by the modal's
+own 1s clock tick, so it never survived long enough to fire. Verification took 12.5s against
+a mock that verifies at 4s. The callback and current action now go through refs, and the
+effect keys only on the action id and whether it is still awaiting verification — 3.5s after
+the fix. Worth remembering for any other interval living next to a ticking clock.
 
 ---
 
