@@ -261,7 +261,6 @@ def test_quoted_command_not_discovery(client):
     assert all(f["rule_id"] != "R03" for f in client.app.state.db.list_findings("inc_01"))
 
 
-@pytest.mark.xfail(strict=True, reason="gap F11/T10: ordinary trailing dashes flagged as SQLi (fixed in PR 4)")
 def test_gap_benign_trailing_dashes_not_sqli(client):
     post(client, v10(by_id("a-web-req-4")))
     assert all(f["rule_id"] != "R07" for f in client.app.state.db.list_findings("inc_01"))

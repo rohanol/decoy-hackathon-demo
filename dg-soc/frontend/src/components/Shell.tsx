@@ -45,6 +45,9 @@ function CaptureChip() {
       </span>
     );
   }
+  if (captureMode === 'mixed') {
+    return <span className="pill pill--warn" title="Loaded observations include separate live and replay runs.">LIVE + REPLAY</span>;
+  }
   if (captureMode === 'replay') {
     return (
       <span className="pill pill--pending" title="Replayed capture, not live sensor traffic">
@@ -103,8 +106,15 @@ export function sensorActivity(
  * collector heartbeat, so with the backend up this is honestly "not reported"
  * (neutral), never green because traffic happened to arrive.
  */
-export function sensorHealth(health: Health | null): { tone: SensorTone; text: string } {
+export function sensorHealth(health: Health | null, sensorId?: string): { tone: SensorTone; text: string } {
   if (health === null) return { tone: 'danger', text: 'backend unreachable' };
+    const row = sensorId ? health.sensor_health?.[sensorId as keyof NonNullable<Health['sensor_health']>] : undefined;
+    if (row) {
+      if (!row.heartbeat_at || row.collection === 'never') return { tone: 'neutral', text: 'no collector heartbeat' };
+      if (Date.now() - Date.parse(row.heartbeat_at) >= 30000 || row.collection === 'stale') return { tone: 'warn', text: 'collector heartbeat stale' };
+      if (row.process_state === 'stopped') return { tone: 'danger', text: 'collector stopped' };
+      return row.process_state === 'running' ? { tone: 'ok', text: 'collector running' } : { tone: 'neutral', text: 'collector state unknown' };
+    }
   return { tone: 'neutral', text: 'collection health not reported (v1.0)' };
 }
 
@@ -124,7 +134,7 @@ function SensorDots() {
   return (
     <span className="navitem__dots">
       {SENSOR_IDS.map((sensorId) => {
-        const state = sensorHealth(health);
+          const state = sensorHealth(health, sensorId);
         const activity = sensorActivity(health, sensorId, now);
         return (
           <span

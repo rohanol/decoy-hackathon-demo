@@ -179,6 +179,12 @@ export function RelationCard({
       </p>
 
       {relation.bait ? <BaitProvenance bait={relation.bait} {...handlers} /> : null}
+      {relation.attribution === 'ambiguous' ? (
+        <p className="relcard__caveat">Ambiguous attribution: the shared credential was served more than once.
+          Candidate issuances: {(relation.candidate_issuance_ids ?? []).join(', ')}.</p>
+      ) : relation.attribution === 'request_only' ? (
+        <p className="relcard__caveat">Bait read requested; output was not recorded. This is weaker candidate evidence.</p>
+      ) : null}
 
       <p className="relcard__caveat">{caveat}</p>
 

@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "test": "node tests/run-unit.mjs",
-    "test:e2e": "node tests/e2e/reconnect.e2e.cjs && node tests/e2e/evidence.e2e.cjs && node tests/e2e/offline-entry.e2e.cjs"
+    "test:e2e": "node tests/e2e/prototype.e2e.cjs && node tests/e2e/reconnect.e2e.cjs && node tests/e2e/offline-entry.e2e.cjs"
   },
   "dependencies": {
     "@fontsource-variable/inter": "5.3.0",

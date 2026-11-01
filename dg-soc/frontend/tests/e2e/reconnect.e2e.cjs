@@ -63,7 +63,7 @@ async function backendIds() {
 }
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.DG_BROWSER_CHANNEL ? { channel: process.env.DG_BROWSER_CHANNEL } : {});
   const page = await browser.newPage({ viewport: { width: 1500, height: 1000 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

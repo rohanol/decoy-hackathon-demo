@@ -113,9 +113,9 @@
   },
   "heartbeat_request": {
     "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40.120000+00:00",
-    "sensor_process": "up", "last_read_at": "2026-11-01T04:31:40.120000+00:00",
-    "last_ingest_ok_at": "2026-11-01T04:31:38.900000+00:00", "backlog_lines": 0, "oldest_backlog_age_s": 0,
-    "errors_total": 0, "rejected_total": 1, "quarantined_total": 1
+    "process_state": "running", "last_read_at": "2026-11-01T04:31:40.120000+00:00",
+    "last_ingest_at": "2026-11-01T04:31:38.900000+00:00", "backlog_records": 0, "oldest_backlog_age_s": 0,
+    "error_count": 0, "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 }
   },
   "health": {
     "ok": true,

@@ -1,11 +1,11 @@
 # API contract v1.1 (v1.0 compatible)
 
-v1.1 is in review (branch `m3/evidence-boundaries`). The new rules are in **Evidence boundaries (v1.1)** at the end, and the backend implements them in the later PRs listed under Migration.
+The integrated prototype implements v1.1. The rules are in **Evidence boundaries (v1.1)** below; the Migration section records the staged implementation history.
 
 Compatibility, precisely:
 - `schema_version` selects the validation rules. A `"1.0"` event is checked exactly as before; the frozen copy is `contracts/history/event.schema.v1.0.json`, and `backend/tests/test_contracts.py` runs edge cases through both. Every new or stricter rule applies only to `"1.1"` events.
 - One semantic difference applies to 1.0 too: a run can no longer mix live and replay events.
-- Producers switch to `"1.1"` only after the backend accepts it (PR 2). Until then M4 keeps its v1.1 producer mode disabled.
+- The integrated adapter and backend accept `"1.1"`, including all structural input indicators. Compose selects web producer 1.1; the app's standalone default remains 1.0 for compatibility.
 
 Backend: `http://127.0.0.1:8000`. All JSON snake_case, timestamps RFC 3339 UTC. Errors: `{"error": {"code": "not_found", "message": "..."}}`. No auth (SOC is loopback only).
 
@@ -325,63 +325,45 @@ Verification tuple (M2's `on_event`, review T04). An action becomes `verified` o
 
 M2 (PR #8) implements this. The backend calls `on_event(event, trusted_context)` after commit, with `trusted_context = { "source": "backend_ingest", "persisted_event_id", "received_at" }` built by the backend, never from sensor fields.
 
-A mismatch leaves the action unchanged and is appended to the action's `verification_rejects` (M2's runtime name, at most 20 per action), which `GET /api/response/actions` returns and the M1 UI shows as rejected attempts. Each entry is `{ "event_id", "reason" }`.
+A mismatch leaves the action unchanged and is appended to `verification_mismatches`, capped at 20 per action. Each item carries `event_id`, `received_at`, `sensor_id`, `src_ip`, `capture_mode` and a reason. Current reasons identify the first failed check: `wrong_sensor`, `wrong_source`, `replay_mode`, `wrong_run`, `outside_window`, `stale_policy_revision`, `duplicate` or `unknown_action`. Historical generic reasons remain verbatim; migration never infers a specific failed check. The old `verification_rejects` spelling is read during state migration only.
 
-Agreed `reason` codes, as M2's runtime emits them today:
-
-| Code | Where | Means |
-|---|---|---|
-| `verification_context_mismatch` | `verification_rejects` | the denied request failed at least one check of the tuple above |
-| `active_action_missing_or_changed_in_policy_after_restart` | `verification_rejects`, with status `reconciliation_required` | after a restart the action no longer matches the enforced policy |
-| `unknown_action_id` | M2's verification audit file only | a `blocked_request` named an action that does not exist |
-| `legacy_verification_mismatch` | `verification_rejects` | migrated from an older `verification_mismatches` entry |
-
-M1 also has labels for finer codes (`wrong_sensor`, `wrong_source`, `replay_mode`, `wrong_run`, `outside_window`, `stale_policy_revision`). They are optional: M2 may later report the first failing check with one of them, and nothing else changes. The old name `verification_mismatches` is retired.
+Apply, revoke and the action list return the complete action record: action identity, target, status, reason, creation/expiry, verified event ID, incident/run/mode, policy revision and mismatch list. Clients can display the immediate response without inventing absent target or timing fields.
 
 ### Health
 
-Collectors (the adapter, M2) post one heartbeat per sensor every 10 s to `POST /api/ingest/heartbeat`. The wire body is exactly what M2's adapter sends today (PR #8, `_heartbeat_payloads`); the backend translates it into M1's `CollectorHealth` names on `GET /api/health`, so neither side renames anything:
+Collectors post one heartbeat per sensor every 10 seconds to `POST /api/ingest/heartbeat`. The canonical wire body matches the current adapter:
 
 ```json
-{ "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40.120000+00:00",
-  "sensor_process": "up", "last_read_at": "2026-11-01T04:31:40.120000+00:00",
-  "last_ingest_ok_at": "2026-11-01T04:31:38.900000+00:00", "backlog_lines": 0, "oldest_backlog_age_s": 0,
-  "errors_total": 0, "rejected_total": 1, "quarantined_total": 1 }
+{ "collector_id": "adapter-laptop-b", "sensor_id": "ssh-decoy-01", "sent_at": "2026-11-01T04:31:40Z",
+  "process_state": "running", "last_read_at": "2026-11-01T04:31:39Z", "last_ingest_at": "2026-11-01T04:31:38Z",
+  "backlog_records": 0, "oldest_backlog_age_s": 0, "error_count": 0,
+  "ingest": { "accepted": 412, "duplicate": 3, "rejected": 1, "quarantined": 1, "retry": 1 } }
 ```
 
-| Wire (M2 sends) | Read (`sensor_health`, M1's `CollectorHealth`) |
+`process_state` describes the reporting collector (`running`, `stopped`, `unknown`); it is not an independent measurement of the Cowrie or web container process. Counters are cumulative per sensor since collector start. `last_ingest_at` is the adapter's latest successful batch time. A readable file or recent attacker event is not a container-health probe.
+
+For backward compatibility, the earlier `sensor_process`/`last_ingest_ok_at`/`backlog_lines`/`errors_total`/`rejected_total`/`quarantined_total` form is accepted and normalized. A request cannot mix the two formats. Unknown keys, invalid counts, incomplete canonical counters and timestamps without offsets are rejected with HTTP 400. Canonical requests require all five counters; legacy records may have an unknown retry count.
+
+The response is `{"ok":true}`. Heartbeats are stored apart from events and never enter rules, scores or the event feed. Only the newest heartbeat per collector and sensor is retained.
+
+`GET /api/health` preserves `ok` and legacy `sensors`, and adds `sensor_health.<sensor_id>`:
+
+| Field | Meaning |
 |---|---|
-| `sensor_process` `up`, `down`, `unknown` | `process_state` `running`, `stopped`, `unknown` |
-| (backend receive time) | `heartbeat_at` |
-| `last_read_at` | `last_read_at` |
-| `last_ingest_ok_at` | `last_ingest_at` (the collector's last successful batch) |
-| `backlog_lines` | `backlog_records` |
-| `oldest_backlog_age_s` | `oldest_backlog_age_s` |
-| `errors_total` | `error_count` |
-| `rejected_total`, `quarantined_total` | `ingest.rejected`, `ingest.quarantined` |
-| (backend's own counts for that sensor) | `ingest.accepted` (events stored), `ingest.duplicate` (duplicates refused since PR 5) |
-| not sent | `ingest.retry` is null |
-| `sent_at` | `clock_skew_s` = `sent_at` minus backend receive time |
+| `service` | Reported collector state: up/down/unknown; unknown after a stale heartbeat |
+| `collection` | ok for heartbeat age under 30 seconds, stale afterward, never if none |
+| `activity` | recent for backend-received event age under five minutes; quiet or none otherwise |
+| `collector_id`, `heartbeat_at`, `process_state`, `last_read_at`, `last_ingest_at`, `backlog_records`, `oldest_backlog_age_s`, `error_count`, `ingest` | Canonical collector values; null when not reported |
+| `clock_skew_s` | Sensor sent time minus backend receive time |
+| `last_event_at` | Latest sensor occurred_at, separate from activity freshness |
 
-The response is `{ "ok": true }`; a body that fails validation is 400 with the standard error body. Unknown keys are rejected, counts are 0 to 10^9, ids are 1 to 64 characters, and `sensor_id` must be a registered sensor. The backend keeps only the latest heartbeat per `(collector_id, sensor_id)`. Heartbeats are stored apart from events and never reach rules, scores or the feed.
-
-`GET /api/health` keeps `ok` and `sensors` (v1.0) and adds `sensor_health.<sensor_id>`:
-
-| Field | Values | Rule |
-|---|---|---|
-| `service` | `up`, `down` or `unknown` | taken from the latest heartbeat's `process_state` (`running` = `up`, `stopped` = `down`); `unknown` if there is none or it is older than 30 s |
-| `collection` | `ok`, `stale` or `never` | `ok` = heartbeat younger than 30 s; `never` = no heartbeat yet |
-| `activity` | `recent`, `quiet` or `none` | `recent` = the backend received an event from the sensor in the last 5 min (backend clock); `quiet` = older; `none` = no events. A quiet sensor is not a broken one |
-| `collector_id`, `heartbeat_at`, `process_state`, `last_read_at`, `last_ingest_at`, `backlog_records`, `oldest_backlog_age_s`, `error_count`, `ingest`, `clock_skew_s` | | translated from the latest heartbeat as in the table above; all null if there is none |
-| `last_event_at` | | the newest `occurred_at` stored for the sensor; null if none |
-
-`clock_skew_s` is the heartbeat's `sent_at` minus the backend's receive time. An event time in the future never makes a sensor look healthy. `ok` means only that the backend is up.
+`ok` means the backend is answering. A future event cannot make collection healthy. Canonical ingest counters come from the collector. For older flat-counter heartbeats only, accepted/duplicate totals fall back to persisted backend counts and retry remains unknown.
 
 ### Compatibility notes
 
 | Consumer | What changes for it |
 |---|---|
-| Adapter, M2 | Nothing breaks; heartbeat, `verification_rejects` and the eligibility call already match PR #8. To adopt: accept `schema_version` 1.1 in the adapter's pre-check (today it quarantines anything that is not 1.0, so M4's 1.1 events would never reach the backend); `requested_asset_id` on bait-read commands; `bait_served` only from the session output log |
+| Adapter, M2 | Nothing breaks; canonical heartbeat, `verification_mismatches` and the eligibility call match the integrated runtime. The adapter accepts schema 1.0 and 1.1 with all 19 indicator names. Future work: `requested_asset_id` on bait-read commands; `bait_served` only from the session output log |
 | Web decoy, M4 | Nothing breaks while it sends 1.0. Aligned for 1.1: `request_id`; a `bait_served` with `sensor_response` when `/.env` is returned; a derived (non-cookie) `session_id`; `input_features` and `processing`; string `fixture_version`; `bait_assets` in `honeytokens.yaml`. Keep the 1.1 producer mode off until PR 2 is merged |
 | Frontend, M1 | All v1.0 fields stay. New fields can be ignored at first. Behaviour that changes: the incident list holds more, smaller cases; per-case scores are lower until the analyst confirms a link (the 25→100 demo climb happens on the investigation); R04 shows stage `lure_access`; R07 shows fewer technique ids; R09 can be `orphan` with no link |
 | Backend tests | Several v1.0 tests encode the old grouping (one incident per IP). They change on purpose in the implementation PRs, each with a note |

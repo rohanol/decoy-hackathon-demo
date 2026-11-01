@@ -22,7 +22,8 @@ export type EventType =
   | 'connection_close'
   | 'http_request'
   | 'synthetic_file_access'
-  | 'blocked_request';
+  | 'blocked_request'
+  | 'bait_served';
 
 export const EVENT_TYPES: readonly EventType[] = [
   'connection_open',
@@ -33,6 +34,7 @@ export const EVENT_TYPES: readonly EventType[] = [
   'http_request',
   'synthetic_file_access',
   'blocked_request',
+  'bait_served',
 ];
 
 export type CaptureMode = 'live' | 'replay';
@@ -63,7 +65,8 @@ export interface EventAttributes {
 
 /** Exactly what the adapter POSTs to /api/ingest/events. */
 export interface IngestEvent {
-  schema_version: '1.0';
+  schema_version: '1.0' | '1.1';
+  origin_record_id?: string | null;
   source_record_id: string;
   sensor_id: SensorId;
   event_type: EventType;
@@ -100,6 +103,7 @@ export type Stage =
   | 'exploit_attempt'
   | 'post_access'
   | 'data_access'
+  | 'lure_access'
   | 'none';
 
 /** The five kill-chain segments, in fixed order. 'none' is not a segment. */
@@ -109,6 +113,7 @@ export const KILL_CHAIN_STAGES: readonly Exclude<Stage, 'none'>[] = [
   'exploit_attempt',
   'post_access',
   'data_access',
+  'lure_access',
 ];
 
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
@@ -130,6 +135,10 @@ export interface Finding {
   pending_confirmation?: boolean;
   web_attack_class?: WebAttackClass[];
   created_at: string;
+  mapping_version?: string;
+  mapping?: Array<{ technique_id: string | null; status: string; rationale: string }>;
+  token_relation?: 'orphan' | 'linked' | 'request_only';
+  attribution?: 'unique' | 'ambiguous' | 'request_only';
 }
 
 export interface IncidentSummary {
@@ -142,6 +151,15 @@ export interface IncidentSummary {
   first_seen: string;
   last_seen: string;
   event_count: number;
+  case_kind?: string;
+  grouping_basis?: string;
+  sensor_id?: SensorId | null;
+  session_id?: string | null;
+  capture_mode?: CaptureMode;
+  parent_id?: string | null;
+  children?: string[];
+  basis_link_ids?: string[];
+  status?: 'open' | 'dissolved' | 'superseded';
 }
 
 export interface ScoreBreakdownRow {
@@ -187,6 +205,8 @@ export interface Link {
   status: LinkStatus;
   decided_at: string | null;
   rationale: string | null;
+  attribution?: 'unique' | 'ambiguous' | 'request_only' | null;
+  candidate_issuance_ids?: string[];
 }
 
 export type TranscriptLineKind = 'login_failed' | 'login_ok' | 'command' | 'close';
@@ -215,6 +235,47 @@ export interface Health {
   ok: boolean;
   /** Last event time per sensor, or null if that sensor has produced nothing. */
   sensors: Record<string, string | null>;
+  sensor_health?: Partial<Record<SensorId, SensorHealth>>;
+}
+
+export interface SensorHealth {
+  service: 'up' | 'down' | 'unknown';
+  collection: 'ok' | 'stale' | 'never';
+  activity: 'recent' | 'quiet' | 'none';
+  collector_id: string | null;
+  process_state: 'running' | 'stopped' | 'unknown' | null;
+  heartbeat_at: string | null;
+  last_read_at: string | null;
+  last_ingest_at: string | null;
+  backlog_records: number | null;
+  oldest_backlog_age_s: number | null;
+  error_count: number | null;
+  clock_skew_s: number | null;
+  last_event_at: string | null;
+  ingest: { accepted: number; duplicate: number; rejected: number; quarantined: number; retry: number | null } | null;
+}
+
+export interface BackendProfile {
+  src_ip: string;
+  lab_run_id: string;
+  capture_mode: CaptureMode;
+  first_seen: string;
+  last_seen: string;
+  sensors: Partial<Record<SensorId, { cases: number; events: number }>>;
+  attempted_usernames: string[];
+  client_claims: Array<{ sensor_id: SensorId; client_version?: string; user_agent?: string }>;
+  case_ids: string[];
+  note: string;
+}
+
+export interface BackendEligibility {
+  eligible: boolean;
+  reasons: Array<{ code: string; message: string }>;
+  capture_mode: CaptureMode;
+  lab_run_id: string;
+  target_ip: string;
+  checked_at: string;
+  last_web_observation_at: string | null;
 }
 
 /**
@@ -230,6 +291,9 @@ export interface VerificationRefusal {
   reason: string;
   /** M2 only. */
   received_at?: string | null;
+  sensor_id?: SensorId | null;
+  src_ip?: string | null;
+  capture_mode?: CaptureMode | null;
 }
 
 export interface ResponseAction {
@@ -240,6 +304,10 @@ export interface ResponseAction {
   created_at: string;
   until: string;
   verified_by_event_id: string | null;
+  incident_id?: string | null;
+  lab_run_id?: string | null;
+  capture_mode?: CaptureMode | null;
+  policy_revision?: number | null;
   /**
    * NOT YET AGREED. M2's router (PR #8, runtime) returns
    * `verification_mismatches`; M3's contract v1.1 (PR #9) names it

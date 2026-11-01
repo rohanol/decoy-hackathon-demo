@@ -87,7 +87,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         yield
         db.close()
 
-    app = FastAPI(title="DeceptionGraph SOC", version="1.0", lifespan=lifespan)
+    app = FastAPI(title="DeceptionGraph SOC", version="1.1", lifespan=lifespan)
     app.state.db = db
     app.state.hooks = hooks
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],

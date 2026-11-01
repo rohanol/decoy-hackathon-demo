@@ -25,6 +25,8 @@ import type {
   ResponseAction,
   StatsOverview,
   Transcript,
+  BackendProfile,
+  BackendEligibility,
 } from '../types/api';
 
 // Defined in ./error so the fixture backend can throw the same type without a
@@ -91,6 +93,8 @@ export interface EventsQuery {
   sensor_id?: string;
   since_seq?: number;
   limit?: number;
+  lab_run_id?: string;
+  capture_mode?: 'live' | 'replay';
 }
 
 export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
@@ -98,6 +102,8 @@ export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
   const params = new URLSearchParams();
   if (query.incident_id) params.set('incident_id', query.incident_id);
   if (query.sensor_id) params.set('sensor_id', query.sensor_id);
+  if (query.lab_run_id) params.set('lab_run_id', query.lab_run_id);
+  if (query.capture_mode) params.set('capture_mode', query.capture_mode);
   if (query.since_seq !== undefined) params.set('since_seq', String(query.since_seq));
   params.set('limit', String(query.limit ?? EVENTS_PAGE_LIMIT));
   return get<EventsPage>(`/api/events?${params.toString()}`);
@@ -134,6 +140,14 @@ export function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
 export function fetchIncident(incidentId: string): Promise<Incident> {
   if (MOCK) return fixtures().then((mock) => mock.fetchIncident(incidentId));
   return get<Incident>(`/api/incidents/${encodeURIComponent(incidentId)}`);
+}
+
+export function fetchProfile(srcIp: string, runId: string): Promise<BackendProfile> {
+  return get<BackendProfile>(`/api/profiles/${encodeURIComponent(srcIp)}?lab_run_id=${encodeURIComponent(runId)}`);
+}
+
+export function fetchEligibility(incidentId: string): Promise<BackendEligibility> {
+  return get<BackendEligibility>(`/api/incidents/${encodeURIComponent(incidentId)}/response-eligibility`);
 }
 
 /**

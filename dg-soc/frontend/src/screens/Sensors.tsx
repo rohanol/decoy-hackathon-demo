@@ -45,14 +45,6 @@ const SENSORS: SensorDef[] = [
     port: '8080',
     what: 'Staff portal, hidden paths, a fake .env and a synthetic customer export.',
   },
-  {
-    id: 'api-decoy-01',
-    name: 'API decoy',
-    decoy: 'D3 · optional',
-    port: '8081',
-    what: 'Planned. Only deployed if the team keeps D3.',
-    planned: true,
-  },
 ];
 
 export function Sensors() {
@@ -95,7 +87,7 @@ export function Sensors() {
         {SENSORS.map((sensor) => {
           const state = sensor.planned
             ? { tone: 'neutral' as const, text: 'not deployed' }
-            : sensorHealth(health);
+            : sensorHealth(health, sensor.id);
           const activity = sensor.planned ? null : sensorActivity(health, sensor.id, now);
           const stats = bySensor.get(sensor.id);
           const types = stats ? [...stats.types.entries()].sort((a, b) => b[1] - a[1]) : [];

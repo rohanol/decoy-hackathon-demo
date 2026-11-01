@@ -274,7 +274,7 @@ def test_restart_migrates_verification_rejects_to_shared_mismatch_shape(env):
     restored = json.loads(state_path.read_text())["actions"][result["action_id"]]
     assert "verification_rejects" not in restored
     assert restored["verification_mismatches"] == [{"event_id": "evt_old", "received_at": None,
-        "sensor_id": None, "src_ip": None, "capture_mode": None, "reason": "outside_window"}]
+        "sensor_id": None, "src_ip": None, "capture_mode": None, "reason": "verification_context_mismatch"}]
 
 
 class EligibilityBackend:

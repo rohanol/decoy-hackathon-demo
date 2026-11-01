@@ -20,7 +20,7 @@
 
 import type { CaptureMode, RuleId, SensorId, Severity, SocEvent } from '../types/api';
 
-export type Basis = 'contract_v1' | 'proposed_fixture';
+export type Basis = 'contract_v1' | 'contract_v11' | 'proposed_fixture';
 
 /* ---------- observations (review section 5, "better evidence fields") ---------- */
 
@@ -98,6 +98,8 @@ export interface SessionCase {
   first_at: string;
   last_at: string;
   event_ids: string[];
+  event_count?: number;
+  grouping_basis?: string | null;
   /** Proposed outcome counts; empty when the contract carries none. */
   outcomes: Partial<Record<Outcome, number>>;
   request_ids: string[];
@@ -184,6 +186,8 @@ export interface CandidateRelation {
   decided_at: string | null;
   rationale: string | null;
   actor_id: string | null;
+  attribution?: 'unique' | 'ambiguous' | 'request_only' | null;
+  candidate_issuance_ids?: string[];
 }
 
 export interface ParentInvestigation {
@@ -236,7 +240,7 @@ export interface CollectorHealth {
   /** Sensor clock minus backend clock. A future event cannot make a collector healthy. */
   clock_skew_s: number | null;
   /** accepted / duplicate / rejected / quarantined / retry counts. */
-  ingest: { accepted: number; duplicate: number; rejected: number; quarantined: number; retry: number } | null;
+  ingest: { accepted: number; duplicate: number; rejected: number; quarantined: number; retry: number | null } | null;
 }
 
 export interface HealthView {

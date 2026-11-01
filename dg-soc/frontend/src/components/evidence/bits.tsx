@@ -85,15 +85,15 @@ export function EventFacets({ event }: { event: SocEvent }) {
   }
   if (!facet.outcome && facet.v1_outcome) {
     parts.push(
-      <span key="v" className="facet facet--v1" title="contract v1.0 attributes.outcome">
-        v1.0 {facet.v1_outcome}
+      <span key="v" className="facet facet--v1" title="attributes.outcome">
+        {event.schema_version === '1.0' ? 'v1.0 ' : ''}{facet.v1_outcome}
       </span>,
     );
   }
   if (!facet.outcome && facet.v1_response_class && facet.v1_response_class !== 'normal') {
     parts.push(
-      <span key="r" className="facet facet--v1" title="contract v1.0 attributes.response_class">
-        v1.0 {facet.v1_response_class.replace('_', ' ')}
+      <span key="r" className="facet facet--v1" title="attributes.response_class">
+        {event.schema_version === '1.0' ? 'v1.0 ' : ''}{facet.v1_response_class.replace('_', ' ')}
       </span>,
     );
   }

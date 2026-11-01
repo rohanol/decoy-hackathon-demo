@@ -115,7 +115,7 @@ export function HealthDimensions({
                         <dd>
                           {number(collector.ingest.accepted)} accepted · {number(collector.ingest.duplicate)} dup ·{' '}
                           {number(collector.ingest.rejected)} rejected · {number(collector.ingest.quarantined)}{' '}
-                          quarantined · {number(collector.ingest.retry)} retry
+                          quarantined · {collector.ingest.retry === null ? '—' : number(collector.ingest.retry)} retry
                         </dd>
                       </div>
                     ) : null}

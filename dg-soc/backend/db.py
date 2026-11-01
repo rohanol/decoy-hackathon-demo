@@ -1076,20 +1076,24 @@ class Database:
                        "backlog_records": None, "oldest_backlog_age_s": None, "error_count": None, "ingest": None,
                        "clock_skew_s": None, "last_event_at": last["occ"]}
                 if hb:
+                    # Stored rows may predate the canonical heartbeat wire form.
+                    from .models import Heartbeat
                     b = json.loads(hb["body"])
+                    if "sensor_process" in b:
+                        b = Heartbeat.model_validate(b).model_dump(mode="json")
                     received = _ts(hb["received_at"])
                     fresh = (now - received).total_seconds() < HEARTBEAT_FRESH_SECONDS
-                    state = {"up": "running", "down": "stopped"}.get(b["sensor_process"], "unknown")
+                    state = b["process_state"]
                     row.update({
                         "service": {"running": "up", "stopped": "down"}.get(state, "unknown") if fresh else "unknown",
                         "collection": "ok" if fresh else "stale",
                         "collector_id": hb["collector_id"], "heartbeat_at": hb["received_at"],
                         "process_state": state, "last_read_at": b["last_read_at"],
-                        "last_ingest_at": b["last_ingest_ok_at"], "backlog_records": b["backlog_lines"],
-                        "oldest_backlog_age_s": b["oldest_backlog_age_s"], "error_count": b["errors_total"],
-                        "ingest": {"accepted": counts, "duplicate": dup["duplicate"] if dup else 0,
-                                   "rejected": b["rejected_total"], "quarantined": b["quarantined_total"],
-                                   "retry": None},
+                        "last_ingest_at": b["last_ingest_at"], "backlog_records": b["backlog_records"],
+                        "oldest_backlog_age_s": b["oldest_backlog_age_s"], "error_count": b["error_count"],
+                        "ingest": {**b["ingest"],
+                                   "accepted": b["ingest"]["accepted"] if b["ingest"]["accepted"] is not None else counts,
+                                   "duplicate": b["ingest"]["duplicate"] if b["ingest"]["duplicate"] is not None else dup["duplicate"] if dup else 0},
                         "clock_skew_s": round((_ts(b["sent_at"]) - received).total_seconds(), 3),
                     })
                 out[sensor] = row

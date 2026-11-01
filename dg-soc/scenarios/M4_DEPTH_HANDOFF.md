@@ -1,5 +1,11 @@
 # M4 web-depth implementation handoff
 
+Integrated-release note: the adapter/heartbeat mismatches described in this
+historical member handoff are resolved in the prototype release. Use
+`deployment/PROTOTYPE_RUNBOOK.md` for current startup instructions and
+`deployment/PROTOTYPE_RELEASE.md` for integrated verification. Compose now selects
+web schema 1.1 after both producer/adapter/backend checks passed.
+
 Date: 1 November 2026. Branch: `m4/stateful-web-evidence`.
 Base: `d1adbaab41b73295ed05768fe6b1456498d52f96` (integrated main,
 including the frontend redesign). Published for owner review in draft PR #12.

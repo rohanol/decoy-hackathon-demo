@@ -27,6 +27,7 @@ export const EVENT_STYLE: Record<EventType, EventStyle> = {
   http_request: { glyph: '◆', tone: 'accent' },
   synthetic_file_access: { glyph: '◆', tone: 'danger' },
   blocked_request: { glyph: '⊘', tone: 'ok' },
+  bait_served: { glyph: '◇', tone: 'warn' },
 };
 
 const UNKNOWN_STYLE: EventStyle = { glyph: '·', tone: 'muted' };

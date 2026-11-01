@@ -285,9 +285,9 @@ export function refusalsOf(action: ResponseAction): { reported: boolean; attempt
         at: typeof record['received_at'] === 'string' ? record['received_at'] : null,
         // Neither M2 nor M3 reports the tuple of a refused observation, and
         // the browser does not reconstruct it: open the event to see it.
-        sensor_id: null,
-        src_ip: null,
-        capture_mode: null,
+        sensor_id: record['sensor_id'] === 'ssh-decoy-01' || record['sensor_id'] === 'web-decoy-01' ? record['sensor_id'] : null,
+        src_ip: typeof record['src_ip'] === 'string' ? record['src_ip'] : null,
+        capture_mode: record['capture_mode'] === 'live' || record['capture_mode'] === 'replay' ? record['capture_mode'] : null,
         reason,
         field,
       });
@@ -305,7 +305,7 @@ export function verificationFromV1(action: ResponseAction): ResponseVerification
     target_ip: action.target_ip,
     reason: action.reason,
     until: action.until,
-    committed: { at: action.created_at, policy_revision: null, by: null },
+    committed: { at: action.created_at, policy_revision: action.policy_revision ?? null, by: null },
     verified: action.verified_by_event_id ? { event_id: action.verified_by_event_id, at: null } : null,
     ended:
       action.status === 'expired'
@@ -345,10 +345,16 @@ export function eligibilityFromV1(events: SocEvent[]): ResponseEligibility {
 
 export function healthFromV1(health: Health | null, checkedAt: string | null, sensorIds: readonly SensorId[]): HealthView {
   return {
-    basis: 'contract_v1',
+    basis: health?.sensor_health ? 'contract_v11' : 'contract_v1',
     service: { backend: health === null ? 'down' : health.ok ? 'up' : 'unknown', checked_at: checkedAt },
     // v1.0 /api/health has no collector heartbeat: do not invent one.
-    collectors: null,
+    collectors: health?.sensor_health ? sensorIds.map(sensor_id => {
+      const row = health.sensor_health?.[sensor_id];
+      return { sensor_id, process_state: row?.process_state ?? 'unknown', heartbeat_at: row?.heartbeat_at ?? null,
+        last_read_at: row?.last_read_at ?? null, last_ingest_at: row?.last_ingest_at ?? null,
+        backlog_records: row?.backlog_records ?? null, oldest_backlog_age_s: row?.oldest_backlog_age_s ?? null,
+        error_count: row?.error_count ?? null, clock_skew_s: row?.clock_skew_s ?? null, ingest: row?.ingest ?? null };
+    }) : null,
     activity: sensorIds.map((sensor_id) => ({ sensor_id, last_event_at: health?.sensors[sensor_id] ?? null })),
   };
 }

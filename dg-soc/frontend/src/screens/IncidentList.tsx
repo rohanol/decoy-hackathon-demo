@@ -59,6 +59,7 @@ function IncidentCard({
       <KillChainStrip stagesObserved={incident.stages_observed} severity={incident.severity} />
 
       <div className="inccard__meta mono">
+        {incident.case_kind ? `${incident.case_kind.replace(/_/g, ' ')} · ${incident.capture_mode} · ${incident.status} · ` : ''}
         {incident.incident_id} · {incident.lab_run_id} · first {fullUtc(incident.first_seen)} ·
         last {timeUtcZ(incident.last_seen)} · {duration(incident.first_seen, incident.last_seen)}
       </div>

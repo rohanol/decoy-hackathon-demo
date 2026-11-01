@@ -10,7 +10,7 @@ const { chromium } = require('playwright');
 const UI = process.env.UI_BASE || 'http://127.0.0.1:5173';
 
 (async () => {
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.DG_BROWSER_CHANNEL ? { channel: process.env.DG_BROWSER_CHANNEL } : {});
   const page = await browser.newPage();
   const external = [];
   await page.route('**/*', (route) => {

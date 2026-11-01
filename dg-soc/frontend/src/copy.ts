@@ -22,6 +22,7 @@ export const EVENT_TYPE_LABEL: Record<EventType, string> = {
   http_request: 'http request',
   synthetic_file_access: 'synthetic file access',
   blocked_request: 'blocked request',
+  bait_served: 'bait served',
 };
 
 /** Longer form, used in the raw event drawer and tooltips. */
@@ -34,6 +35,7 @@ export const EVENT_TYPE_DESCRIPTION: Record<EventType, string> = {
   http_request: 'An HTTP request reached the web decoy.',
   synthetic_file_access: 'A synthetic file was served. No real data exists in this lab.',
   blocked_request: 'A request was rejected by an analyst-applied block.',
+  bait_served: 'The decoy recorded returning a synthetic credential lure. Client receipt is not proven.',
 };
 
 export const SENSOR_LABEL: Record<string, string> = {
@@ -47,6 +49,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   exploit_attempt: 'exploit attempt',
   post_access: 'post-access',
   data_access: 'data access',
+  lure_access: 'lure access',
   none: 'no stage',
 };
 
@@ -150,11 +153,13 @@ export const LANDING_PUNCHLINE = 0;
 
 export const BASIS_LABEL = {
   contract_v1: 'contract v1.0',
+  contract_v11: 'backend evidence',
   proposed_fixture: 'PROPOSED · dev fixture',
 } as const;
 
 export const BASIS_MEANING = {
   contract_v1: 'Reshaped from the live v1.0 API. Nothing here is scored or inferred by the browser.',
+  contract_v11: 'Authoritative cases, scores and evidence reported by the backend.',
   proposed_fixture:
     'A development fixture in the proposed shape, pending the agreed contract. Not captured data.',
 } as const;

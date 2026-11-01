@@ -64,7 +64,7 @@ async function ingest(event) {
   check('v1.1-only event types are refused by the v1.0 backend, not silently dropped by the UI',
     refused.every((r) => r.event.event_type === 'bait_served'));
 
-  const browser = await chromium.launch();
+  const browser = await chromium.launch(process.env.DG_BROWSER_CHANNEL ? { channel: process.env.DG_BROWSER_CHANNEL } : {});
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

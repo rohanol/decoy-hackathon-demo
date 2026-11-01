@@ -42,7 +42,7 @@ interface LiveStoreValue {
   /** When GET /api/health last answered or failed. Service liveness, not activity. */
   healthCheckedAt: string | null;
   /** 'replay' if anything in view came from a replayed capture. */
-  captureMode: CaptureMode | null;
+  captureMode: CaptureMode | 'mixed' | null;
   labRunId: string | null;
   /** When data last arrived, for the offline pill and stale banners. */
   lastDataAt: Date | null;
@@ -262,9 +262,10 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const captureMode = useMemo<CaptureMode | null>(() => {
+  const captureMode = useMemo<CaptureMode | 'mixed' | null>(() => {
     if (events.length === 0) return null;
-    return events.some((event) => event.capture_mode === 'replay') ? 'replay' : 'live';
+    const modes = new Set(events.map(event => event.capture_mode));
+    return modes.size > 1 ? 'mixed' : events[0]?.capture_mode ?? null;
   }, [events]);
 
   const labRunId = events[0]?.lab_run_id ?? null;

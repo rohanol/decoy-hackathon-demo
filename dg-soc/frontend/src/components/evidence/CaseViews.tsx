@@ -136,7 +136,9 @@ export function SessionCaseCard({
         <ScoreChip score={item.score} severity={item.severity} />
       </header>
       <p className="casecard__boundary">
-        {item.boundary === 'sensor_session' ? CASE_COPY.sensorSession : CASE_COPY.boundedFallback}
+        {item.authority === 'backend_case' && item.grouping_basis
+          ? `Backend grouping: ${item.grouping_basis.replace(/_/g, ' ')}`
+          : item.boundary === 'sensor_session' ? CASE_COPY.sensorSession : CASE_COPY.boundedFallback}
       </p>
       <div className="casecard__row">
         <span className="mono casecard__time">
@@ -144,7 +146,7 @@ export function SessionCaseCard({
           {item.last_at !== item.first_at ? ` → ${timeUtcZ(item.last_at)}` : ''}
         </span>
         <span>
-          {item.event_ids.length} event{item.event_ids.length === 1 ? '' : 's'}
+          {item.event_count ?? item.event_ids.length} event{(item.event_count ?? item.event_ids.length) === 1 ? '' : 's'}
         </span>
         {item.commands > 0 ? <span>{item.commands} cmd{item.commands === 1 ? '' : 's'}</span> : null}
         {item.accounts.length > 0 ? (

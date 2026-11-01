@@ -291,7 +291,7 @@ class ResponseService:
                 "capture_mode": "live", "policy_revision": policy_revision,
             }
             self._write_state()
-            return {"action_id": action_id, "status": "applied", "until": _iso(until)}
+            return self._public_action(self._actions[action_id])
 
     def revoke(self, action_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -303,14 +303,19 @@ class ResponseService:
                 raise ApiError(409, "not_active", f"action is already {a['status']}")
             a["status"] = "revoked"
             self._write_state()
-            return {"action_id": action_id, "status": "revoked"}
+            return self._public_action(a)
+
+    @staticmethod
+    def _public_action(a):
+        return {k: a.get(k) for k in ("action_id", "target_ip", "status", "reason", "created_at", "until",
+            "verified_by_event_id", "incident_id", "lab_run_id", "capture_mode", "policy_revision")} | {
+                "verification_mismatches": a.get("verification_mismatches", [])}
 
     def list_actions(self) -> Dict[str, Any]:
         with self._lock:
             self.expire()
             items = [
-                {k: a[k] for k in ("action_id", "target_ip", "status", "reason", "created_at", "until", "verified_by_event_id")}
-                | {"verification_mismatches": a.get("verification_mismatches", [])}
+                self._public_action(a)
                 for a in sorted(self._actions.values(), key=lambda x: x["created_at"], reverse=True)
             ]
             return {"items": items}
@@ -391,15 +396,18 @@ class ResponseService:
     @classmethod
     def _normalize_mismatch(cls, item: Any) -> Dict[str, Any]:
         if not isinstance(item, dict):
-            return cls._mismatch_record(None, None, None, None, None, "outside_window")
+            return cls._mismatch_record(None, None, None, None, None, "legacy_verification_mismatch")
         reason = item.get("reason")
         if reason in ("unknown_action_id",):
             reason = "unknown_action"
         elif reason in (None, "verification_context_mismatch", "active_action_missing_or_changed_in_policy_after_restart"):
-            reason = "stale_policy_revision" if reason == "active_action_missing_or_changed_in_policy_after_restart" else "outside_window"
+            reason = "stale_policy_revision" if reason == "active_action_missing_or_changed_in_policy_after_restart" else "verification_context_mismatch"
         elif reason not in {"wrong_sensor", "wrong_source", "replay_mode", "wrong_run", "outside_window",
-                            "stale_policy_revision", "duplicate", "unknown_action"}:
-            reason = "outside_window"
+                            "stale_policy_revision", "duplicate", "unknown_action",
+                            "legacy_verification_mismatch"}:
+            # Unknown historical reasons stay verbatim: migration cannot infer
+            # which check failed from an older generic record.
+            reason = reason if isinstance(reason, str) and reason else "legacy_verification_mismatch"
         return cls._mismatch_record(item.get("event_id"), item.get("received_at"), item.get("sensor_id"),
                                     item.get("src_ip"), item.get("capture_mode"), reason)
 

@@ -221,24 +221,56 @@ def evidence_role(event_type: str, attributes: dict) -> str:
 MAX_COUNT = 10 ** 9
 
 
+class HeartbeatCounters(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    accepted: Optional[int] = Field(None, ge=0, le=MAX_COUNT, strict=True)
+    duplicate: Optional[int] = Field(None, ge=0, le=MAX_COUNT, strict=True)
+    rejected: int = Field(0, ge=0, le=MAX_COUNT, strict=True)
+    quarantined: int = Field(0, ge=0, le=MAX_COUNT, strict=True)
+    retry: Optional[int] = Field(None, ge=0, le=MAX_COUNT, strict=True)
+
+
 class Heartbeat(BaseModel):
-    """POST /api/ingest/heartbeat: exactly the per-sensor payload M2's adapter sends
-    (sensors/adapter.py `_heartbeat_payloads`, PR #8). Translated to M1's CollectorHealth on read."""
+    """Canonical M2 heartbeat; the earlier flat-counter form remains readable."""
     model_config = ConfigDict(extra="forbid")
 
     collector_id: str = Field(min_length=1, max_length=64)
     sensor_id: SensorId
     sent_at: datetime
-    sensor_process: Literal["up", "down", "unknown"]
+    process_state: Literal["running", "stopped", "unknown"]
     last_read_at: Optional[datetime] = None
-    last_ingest_ok_at: Optional[datetime] = None
-    backlog_lines: Optional[int] = Field(None, ge=0, le=MAX_COUNT)
+    last_ingest_at: Optional[datetime] = None
+    backlog_records: Optional[int] = Field(None, ge=0, le=MAX_COUNT, strict=True)
     oldest_backlog_age_s: Optional[float] = Field(None, ge=0, le=MAX_COUNT)
-    errors_total: int = Field(0, ge=0, le=MAX_COUNT)
-    rejected_total: int = Field(0, ge=0, le=MAX_COUNT)
-    quarantined_total: int = Field(0, ge=0, le=MAX_COUNT)
+    error_count: int = Field(0, ge=0, le=MAX_COUNT, strict=True)
+    ingest: HeartbeatCounters
 
-    @field_validator("sent_at", "last_read_at", "last_ingest_ok_at")
+    @model_validator(mode="before")
+    @classmethod
+    def _wire_compatibility(cls, value):
+        if not isinstance(value, dict):
+            return value
+        data = dict(value)
+        if "sensor_process" in data:
+            if any(k in data for k in ("process_state", "last_ingest_at", "backlog_records", "error_count", "ingest")):
+                raise ValueError("heartbeat must use one wire format")
+            state = data.pop("sensor_process")
+            if state not in ("up", "down", "unknown"):
+                raise ValueError("invalid sensor_process")
+            data["process_state"] = {"up": "running", "down": "stopped", "unknown": "unknown"}[state]
+            data["last_ingest_at"] = data.pop("last_ingest_ok_at", None)
+            data["backlog_records"] = data.pop("backlog_lines", None)
+            data["error_count"] = data.pop("errors_total", 0)
+            data["ingest"] = {"accepted": None, "duplicate": None, "retry": None,
+                "rejected": data.pop("rejected_total", 0), "quarantined": data.pop("quarantined_total", 0)}
+        else:
+            counts = data.get("ingest")
+            required = {"accepted", "duplicate", "rejected", "quarantined", "retry"}
+            if not isinstance(counts, dict) or not required <= counts.keys() or any(counts[k] is None for k in required):
+                raise ValueError("heartbeat ingest needs all five counters")
+        return data
+
+    @field_validator("sent_at", "last_read_at", "last_ingest_at")
     @classmethod
     def _aware(cls, v):
         if v is not None and v.tzinfo is None:

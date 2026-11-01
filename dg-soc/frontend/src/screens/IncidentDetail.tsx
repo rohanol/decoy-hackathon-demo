@@ -13,7 +13,7 @@
 import { ArrowLeft, Download, ShieldBan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
-import { ApiError, fetchActions, fetchAllEvents, fetchIncident, incidentExportUrl } from '../api/client';
+import { ApiError, fetchActions, fetchAllEvents, fetchIncident, fetchIncidents, fetchProfile, fetchEligibility, incidentExportUrl } from '../api/client';
 import { USE_FIXTURES } from '../api/config';
 import { FindingCard } from '../components/FindingCard';
 import { KillChainBar } from '../components/KillChainBar';
@@ -42,6 +42,7 @@ import {
   verificationFromV1,
 } from '../evidence/fromV1';
 import { RULE_NAME, linkPhrase, stageLabel } from '../copy';
+import { evidenceFromBackend, type BackendContext } from '../evidence/fromBackend';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import {
@@ -130,6 +131,7 @@ export function IncidentDetail() {
   const [incident, setIncident] = useState<Incident | null>(null);
   const [events, setEvents] = useState<SocEvent[]>([]);
   const [eventsById, setEventsById] = useState<Map<string, SocEvent>>(new Map());
+  const [backendContext, setBackendContext] = useState<BackendContext | null>(null);
   /** Response actions targeting this source. [] when the router is not installed. */
   const [sourceActions, setSourceActions] = useState<ResponseAction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -151,9 +153,20 @@ export function IncidentDetail() {
         fetchIncident(incidentId),
         fetchAllEvents({ incident_id: incidentId }),
       ]);
+      let context: BackendContext | null = null;
+      if (loadedIncident.case_kind) {
+        const [page, profile, eligibility, relatedEvents] = await Promise.all([
+          fetchIncidents(), fetchProfile(loadedIncident.src_ip, loadedIncident.lab_run_id),
+          fetchEligibility(loadedIncident.incident_id),
+          fetchAllEvents({ lab_run_id: loadedIncident.lab_run_id, capture_mode: loadedIncident.capture_mode }),
+        ]);
+        context = { cases: page.items.filter(item => item.lab_run_id === loadedIncident.lab_run_id
+          && item.capture_mode === loadedIncident.capture_mode), profile, eligibility, events: relatedEvents };
+      }
       setIncident(loadedIncident);
       setEvents(loadedEvents);
-      setEventsById(new Map(loadedEvents.map((event) => [event.event_id, event])));
+      setBackendContext(context);
+      setEventsById(new Map((context?.events ?? loadedEvents).map((event) => [event.event_id, event])));
       setError(null);
     } catch (cause) {
       setError(
@@ -175,13 +188,14 @@ export function IncidentDetail() {
     if (!srcIp) return;
     try {
       const page = await fetchActions();
-      setSourceActions(page.items.filter((action) => action.target_ip === srcIp));
+      setSourceActions(page.items.filter((action) => action.target_ip === srcIp
+        && (!action.lab_run_id || action.lab_run_id === incident?.lab_run_id)));
     } catch {
       // 503 response_unavailable or a network blip: the Response Center says
       // which. Here, no actions is the honest display.
       setSourceActions([]);
     }
-  }, [srcIp]);
+  }, [srcIp, incident?.lab_run_id]);
 
   useEffect(() => {
     void loadActions();
@@ -244,6 +258,7 @@ export function IncidentDetail() {
    */
   const evidence = useMemo(() => {
     if (!incident) return null;
+    if (incident.case_kind && backendContext) return evidenceFromBackend(incident, backendContext);
     const cases = sessionCasesFromV1(events, incident.findings);
     const relations = relationsFromV1(incident.links, events);
     return {
@@ -254,7 +269,7 @@ export function IncidentDetail() {
       mappings: mappingsFromV1(incident.findings),
       eligibility: eligibilityFromV1(events),
     };
-  }, [incident, events]);
+  }, [incident, events, backendContext]);
 
   const evidenceHandlers = useMemo(
     () => ({
@@ -367,9 +382,9 @@ export function IncidentDetail() {
         <div className="inchero__score">
           <span
             className="inchero__score-label"
-            title="Contract v1.0 scores the source address in this run, pooling every session case behind it."
+            title={incident.case_kind ? 'Score supplied by the backend for this case or investigation.' : 'Legacy score for the source address in this run.'}
           >
-            Source score · v1.0
+            {incident.case_kind ? incident.case_kind === 'investigation' ? 'Investigation score' : 'Case score' : 'Source score · v1.0'}
           </span>
           <span className={`inchero__score-value inchero__score-value--${incident.severity}`}>
             {number(incident.score)}
@@ -447,9 +462,8 @@ export function IncidentDetail() {
                 <ActionCard action={incident.active_block} onExpired={() => void load()} />
               ) : null}
               {sourceActions.length > 0 ? (
-                <p className="decide__none" title="GET /api/response/actions carries no run or incident id">
-                  Actions targeting {incident.src_ip}. Contract v1.0 does not say which run or incident
-                  an action came from, so one may belong to another run of this address.
+                <p className="decide__none">
+                  Actions targeting {incident.src_ip} in this run. Older actions without run metadata are also shown.
                 </p>
               ) : null}
               {sourceActions.map((action) => (
@@ -524,7 +538,7 @@ export function IncidentDetail() {
         <p className="incsec__note">
           Each technique id with its reason and limitation. No technique is a valid answer.
         </p>
-        <MappingList mappings={evidence.mappings} basis="contract_v1" {...evidenceHandlers} />
+        <MappingList mappings={evidence.mappings} basis={incident.case_kind ? 'contract_v11' : 'contract_v1'} {...evidenceHandlers} />
       </section>
 
       <section className="incsec evsection" aria-label="Evidence structure">
@@ -534,9 +548,8 @@ export function IncidentDetail() {
           analyst-approved relation joins cases across decoys.
         </p>
         <p className="incsec__note">
-          These cases and the parent are <strong>display groupings</strong> built in the browser
-          from v1.0 events. The backend&apos;s authoritative cases and investigations arrive with
-          M3&apos;s case model; until then the backend still scores this source as one incident.
+          {incident.case_kind ? 'Cases, investigations and their scores come from the backend. The source profile contains observations and has no combined score.'
+            : <>These cases and the parent are <strong>display groupings</strong> built from legacy events.</>}
         </p>
 
         <SourceProfileCard profile={evidence.profile} {...evidenceHandlers} />
@@ -551,7 +564,7 @@ export function IncidentDetail() {
         ))}
 
         <div className="evsection__label">
-          Session cases <span className="incsec__count">{evidence.cases.length}</span>
+          Cases <span className="incsec__count">{evidence.cases.length}</span>
         </div>
         {evidence.cases.length === 0 ? (
           <EmptyState title="No session cases." hint="Cases appear as the decoys record sessions." />
@@ -563,7 +576,7 @@ export function IncidentDetail() {
                 item={item}
                 transcriptHref={
                   item.sensor_id === 'ssh-decoy-01' && item.session_id && item.commands > 0
-                    ? `/incidents/${incident.incident_id}/transcript/${item.session_id}`
+                    ? `/incidents/${item.authority === 'backend_case' ? item.case_id : incident.incident_id}/transcript/${item.session_id}`
                     : null
                 }
                 {...evidenceHandlers}
