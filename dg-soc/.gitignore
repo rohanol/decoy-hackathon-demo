@@ -26,6 +26,5 @@ deployment/state/collector-health.json
 captures/
 logs/
 .pytest_cache/
-dg-acceptance-*/
 *.pyc
 decoys/ssh/fs.pickle
