@@ -6,6 +6,7 @@
 
 import { API_BASE, EVENTS_PAGE_LIMIT, MAX_SNAPSHOT_PAGES } from './config';
 import { ApiError } from './error';
+import type { GatewayRequestDetail, IncidentRouting, SourcesRegistry } from '../v12/types';
 
 /**
  * The mock backend is loaded only in a fixture build. The flag is read from
@@ -148,6 +149,32 @@ export function fetchProfile(srcIp: string, runId: string): Promise<BackendProfi
 
 export function fetchEligibility(incidentId: string): Promise<BackendEligibility> {
   return get<BackendEligibility>(`/api/incidents/${encodeURIComponent(incidentId)}/response-eligibility`);
+}
+
+/* ---------- contract v1.2 reads (PR #19). A v1.1 backend answers 404. ---------- */
+
+/** True when the backend does not serve a v1.2 route yet (404/405, or fixture mode). */
+export function isNotServed(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 404 || error.status === 405 || error.code === 'not_served');
+}
+
+function v12Get<T>(path: string): Promise<T> {
+  // The fixture backend has no v1.2 routes; provisional v1.2 data is shown on
+  // the dev Evidence lab instead, labelled as such.
+  if (MOCK) return Promise.reject(new ApiError('not_served', `${path} is not in the fixture backend.`, 404));
+  return get<T>(path);
+}
+
+export function fetchSources(): Promise<SourcesRegistry> {
+  return v12Get<SourcesRegistry>('/api/sources');
+}
+
+export function fetchIncidentRouting(incidentId: string): Promise<IncidentRouting> {
+  return v12Get<IncidentRouting>(`/api/incidents/${encodeURIComponent(incidentId)}/routing`);
+}
+
+export function fetchGatewayRequest(gatewayRequestId: string): Promise<GatewayRequestDetail> {
+  return v12Get<GatewayRequestDetail>(`/api/gateway/requests/${encodeURIComponent(gatewayRequestId)}`);
 }
 
 /**

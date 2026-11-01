@@ -105,3 +105,30 @@ render each of these from the fixtures.
 | Cases and investigations | Every case and parent is tagged **display grouping**; backend-owned ones will be tagged **backend case** | M3's case model at runtime |
 | Web `session_id` / `request_id` | Filters work on M3's v1.1 example web records via the real backend. Web session ids are synthetic in the test | M4 pushing its generator; re-run `RECORDS=… node tests/e2e/filters.e2e.cjs` |
 | v1.1 event types, stages, `bait_served` provenance | Unknown types and stages render as raw text instead of breaking. No v1.1 meaning is wired | Contract v1.1 merge |
+
+## Contract v1.2 in the SOC (m1/next-portal-ui)
+
+The UI reads the v1.2 shapes from M3's PR #19 (`m3/next-telemetry-contract` @
+`eb2a94e`, **not merged**). On today's v1.1 backend every v1.2 view says it is not served
+and shows nothing in its place.
+
+| View | v1.2 source | On a v1.1 backend |
+|---|---|---|
+| Sensors · Honeypots (4) and Telemetry sources (gateway-01, demo-app-01) | `GET /api/sources`, `sensor_health`, `telemetry_health` | "Source registry not served"; MySQL and SMB cards say **not on this backend**; no health is made up |
+| Topbar dots | `health.sensors` | Only the sensors the backend reports (2 today) |
+| Feed rows: DB and SMB facts | `attributes.db`, `.file`, `.credential` | Not present, so not shown |
+| Incident · Gateway routing | `GET /api/incidents/{id}/routing`, `GET /api/gateway/requests/{id}` | "The backend does not serve routing views yet" |
+| Incident · Archive bait | `bait_served` + `attributes.archive` / `.transfer`, token links | Shown only when an archive serving exists |
+| Incident · Response scope | `response_scope`, reason `response_unsupported_sensor` | "Web block on web-decoy-01 only; does not block SSH, MySQL or SMB" |
+
+What these views never do:
+- infer a diversion, a gateway session or an identity from a shared IP;
+- count a telemetry source as a honeypot;
+- claim a client finished a download, opened or extracted an archive, or that a DB
+  statement ran.
+
+They also never offer the web block for DB or SMB activity.
+
+The provisional fixture (M3's example records, verbatim) renders only on
+**Evidence lab · dev** in a fixture build, under the **PROVISIONAL** tag. The release
+bundle contains none of it.

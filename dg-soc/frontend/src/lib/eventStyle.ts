@@ -28,6 +28,8 @@ export const EVENT_STYLE: Record<EventType, EventStyle> = {
   synthetic_file_access: { glyph: '◆', tone: 'danger' },
   blocked_request: { glyph: '⊘', tone: 'ok' },
   bait_served: { glyph: '◇', tone: 'warn' },
+  db_request: { glyph: '▹', tone: 'accent' },
+  file_operation: { glyph: '▤', tone: 'accent' },
 };
 
 const UNKNOWN_STYLE: EventStyle = { glyph: '·', tone: 'muted' };
