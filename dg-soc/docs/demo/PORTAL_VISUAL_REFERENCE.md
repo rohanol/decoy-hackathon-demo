@@ -13,28 +13,31 @@ file, taken from the running app at 1280×800 (and 390 px wide for mobile).
 ## Brand
 
 - Name: **DeceptionGraph Research Portal**. Wordmark: "DeceptionGraph" bold +
-  "Research Portal" regular, light blue-grey.
+  "Research Portal" regular, neutral grey.
 - Mark: `demo-app/portal/static/mark.svg`, 28 px: a navy rounded square with
-  three nodes (two teal, one amber) and two teal edges. Original artwork.
+  three nodes (two green, one white) and two green edges. Original artwork.
 - Fictional organisation. Do not add any real institute's name, logo, domain or
   people. The footer always says: "Demonstration portal. All people, projects
   and data are fictional."
 
 ## Colours
 
+User correction (1 November 2026): preserve the existing SOC's black, white and
+neon-green appearance. This supersedes the earlier light institutional palette.
+The application structure, synthetic accounts, routing and telemetry stay intact.
+
 | Token | Hex | Use |
 |---|---|---|
-| `--navy` | `#0f2a44` | Top bar, stat numbers, mark background |
-| `--navy-2` | `#173a5c` | Active / hover nav item |
-| `--teal` | `#1f7a8c` | Links, primary buttons, eyebrow text, tags |
-| `--teal-weak` | `#e3f2f5` | Tag background, input focus ring |
-| `--amber` | `#f4b740` | Mark accent only |
-| `--ink` | `#1d2733` | Body text |
-| `--muted` | `#5d6b7a` | Secondary text, dates |
-| `--line` | `#dde3ea` | Card borders, table rules |
-| `--bg` | `#f5f7fa` | Page background |
-| `--card` | `#ffffff` | Cards, footer |
-| `--danger` | `#b42318` on `#fdecea` | Login error alert |
+| `--navy` | `#050505` | Top bar |
+| `--navy-2` | `#151515` | Active / hover nav item and input surfaces |
+| `--teal` | `#39ff88` | Links, primary buttons, eyebrow text, tags |
+| `--teal-weak` | `rgba(57,255,136,.1)` | Tag background, input focus ring |
+| `--ink` | `#f4f4f2` | Body text and stat numbers |
+| `--muted` | `#a6a6a3` | Secondary text, dates |
+| `--line` | `#1f1f1f` | Card borders, table rules |
+| `--bg` | `#050505` | Page background |
+| `--card` | `#0c0c0c` | Cards, footer |
+| `--danger` | `#ff7aa2` on translucent pink | Login error alert |
 
 Typography: system UI stack (`system-ui, -apple-system, "Segoe UI", Roboto,
 …`); no web fonts, since the lab has no internet. H1 32 px on Home and 28 px
@@ -42,13 +45,13 @@ elsewhere; card titles 17 px; body 16 px; line height 1.5.
 
 ## Layout
 
-- **Top bar:** 64 px, full-width navy. Inside a 1120 px container: mark +
+- **Top bar:** 64 px, full-width black. Inside a 1120 px container: mark +
   wordmark, then the nav links, then the account area on the right ("Sign in"
-  teal button; when signed in, the name plus a "Sign out" outline button).
-- **Main:** 1120 px container, 32 px top padding. Cards: white, 1 px
-  `--line` border, 10 px radius, 20–22 px padding. Two-column grids at 20 px
+  green button; when signed in, the name plus a "Sign out" outline button).
+- **Main:** 1120 px container, 32 px top padding. Cards: near-black, 1 px
+  `--line` border, 14 px radius, 20–22 px padding. Two-column grids at 20 px
   gap, collapsing to one column under 800 px.
-- **Footer:** 64 px, white, top border, copyright left and the fictional notice right.
+- **Footer:** 64 px, near-black, top border, copyright left and the fictional notice right.
 
 ## Navigation
 
