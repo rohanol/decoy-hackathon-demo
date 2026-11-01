@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Search · {{ org }}{% endblock %}
+{% block content %}
+<div class="pagehead"><h1>Search</h1></div>
+<form class="searchbar" action="/search" method="get" role="search">
+  <input type="search" name="q" value="{{ query }}" placeholder="Search reports and datasets" aria-label="Search reports and datasets">
+  <button class="btn" type="submit">Search</button>
+</form>
+{% if query %}
+  <p class="muted">{{ results|length }} result{{ '' if results|length == 1 else 's' }} for “{{ query }}”</p>
+  <ul class="results">
+    {% for hit in results %}
+    <li class="card result"><span class="tag">{{ hit.kind }}</span><a href="{{ hit.href }}"><strong>{{ hit.title }}</strong></a><p>{{ hit.text }}</p></li>
+    {% else %}
+    <li class="muted">No reports or datasets match. Try a group name such as “Facilities”.</li>
+    {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

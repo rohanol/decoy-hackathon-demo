@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title }} · {{ org }}{% endblock %}
+{% block content %}
+<p class="crumbs"><a href="/reports">Reports</a> / {{ report.group }}</p>
+<article class="card report">
+  <p class="eyebrow">{{ report.group }} · {{ report.date }}</p>
+  <h1>{{ report.title }}</h1>
+  <p class="muted">{{ report.authors }}</p>
+  <h2>Abstract</h2>
+  <p>{{ report.abstract }}</p>
+  <h2>Contents</h2>
+  <ol>{% for section in report.sections %}<li>{{ section }}</li>{% endfor %}</ol>
+  <p class="muted small">Full text is available to group members on request.</p>
+</article>
+{% endblock %}

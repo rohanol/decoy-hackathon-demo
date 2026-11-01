@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Reports · {{ org }}{% endblock %}
+{% block content %}
+<div class="pagehead"><h1>Reports</h1><p class="muted">Published by research groups.</p></div>
+<div class="grid grid--2">
+  {% for report in reports %}
+  <article class="card">
+    <p class="eyebrow">{{ report.group }}</p>
+    <h2><a href="/reports/{{ report.slug }}">{{ report.title }}</a></h2>
+    <p>{{ report.abstract }}</p>
+    <p class="muted small">{{ report.authors }} · {{ report.date }}</p>
+  </article>
+  {% endfor %}
+</div>
+{% endblock %}

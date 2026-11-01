@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · {{ org }}{% endblock %}
+{% block content %}
+<div class="pagehead">
+  <h1>Welcome back, {{ user.name }}</h1>
+  <p class="muted">{{ user.role }} · {{ user.email }}</p>
+</div>
+<section class="stats">
+  <div class="stat"><span class="stat__n">{{ reports|length }}</span><span>reports</span></div>
+  <div class="stat"><span class="stat__n">{{ datasets|length }}</span><span>datasets</span></div>
+  <div class="stat"><span class="stat__n">{{ tasks|length }}</span><span>open tasks</span></div>
+</section>
+<section class="grid grid--2">
+  <div class="card">
+    <h2>My tasks</h2>
+    <table class="table">
+      <thead><tr><th>Task</th><th>Due</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for task in tasks %}<tr><td>{{ task.title }}</td><td>{{ task.due }}</td><td><span class="tag">{{ task.status }}</span></td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card">
+    <h2>Recently updated</h2>
+    <ul class="list">
+      {% for report in reports[:3] %}<li><a href="/reports/{{ report.slug }}"><strong>{{ report.title }}</strong></a><span class="muted">{{ report.date }}</span></li>{% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}

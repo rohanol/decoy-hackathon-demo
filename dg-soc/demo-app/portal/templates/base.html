@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ org }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='portal.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='mark.svg') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar__inner">
+      <a class="brand" href="/">
+        <img src="{{ url_for('static', filename='mark.svg') }}" alt="" width="28" height="28">
+        <span class="brand__name">DeceptionGraph <span class="brand__sub">Research Portal</span></span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a href="/" class="{{ 'is-active' if request.path == '/' }}">Home</a>
+        <a href="/reports" class="{{ 'is-active' if request.path.startswith('/reports') }}">Reports</a>
+        <a href="/resources" class="{{ 'is-active' if request.path == '/resources' }}">Resources</a>
+        <a href="/search" class="{{ 'is-active' if request.path == '/search' }}">Search</a>
+        {% if user %}
+        <a href="/dashboard" class="{{ 'is-active' if request.path == '/dashboard' }}">Dashboard</a>
+        {% endif %}
+      </nav>
+      <div class="account">
+        {% if user %}
+          <span class="account__name">{{ user.name }}</span>
+          <form method="post" action="/logout"><button class="btn btn--ghost" type="submit">Sign out</button></form>
+        {% else %}
+          <a class="btn" href="/login">Sign in</a>
+        {% endif %}
+      </div>
+    </div>
+  </header>
+  <main class="wrap main">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <span>&copy; 2026 DeceptionGraph Research Portal</span>
+      <span>Demonstration portal. All people, projects and data are fictional.</span>
+    </div>
+  </footer>
+</body>
+</html>

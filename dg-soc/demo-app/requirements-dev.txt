@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest==9.2.0
+jsonschema[format]==4.25.1

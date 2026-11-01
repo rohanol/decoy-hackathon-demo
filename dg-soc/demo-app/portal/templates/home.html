@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Internal research workspace</p>
+    <h1>Find reports, datasets and group updates in one place.</h1>
+    <p class="lead">The portal brings together project reports, shared datasets and announcements from every research group.</p>
+    <form class="searchbar" action="/search" method="get" role="search">
+      <input type="search" name="q" placeholder="Search reports and datasets" aria-label="Search reports and datasets">
+      <button class="btn" type="submit">Search</button>
+    </form>
+  </div>
+  <div class="hero__card">
+    <h2>Quick links</h2>
+    <ul class="links">
+      <li><a href="/reports">Latest reports</a></li>
+      <li><a href="/resources">Dataset catalogue</a></li>
+      <li><a href="/dashboard">My dashboard</a></li>
+    </ul>
+  </div>
+</section>
+<section class="grid grid--2">
+  <div class="card">
+    <h2>Announcements</h2>
+    <ul class="list">
+      {% for item in announcements %}
+      <li><span class="muted">{{ item.date }}</span><strong>{{ item.title }}</strong><span>{{ item.text }}</span></li>
+      {% endfor %}
+    </ul>
+  </div>
+  <div class="card">
+    <h2>Recent reports</h2>
+    <ul class="list">
+      {% for report in reports %}
+      <li><span class="muted">{{ report.group }} · {{ report.date }}</span><a href="/reports/{{ report.slug }}"><strong>{{ report.title }}</strong></a></li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endblock %}
