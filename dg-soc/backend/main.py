@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .db import Database
 from .integrations import Integrations
-from .models import IngestEvent, reason_for
+from .models import Heartbeat, IngestEvent, reason_for
 
 HOST = "127.0.0.1"  # never bind anything else (AGENTS.md section 6)
 PORT = 8000
@@ -174,6 +174,22 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return {"accepted": len(accepted), "duplicates": duplicates,
                 "rejected": sorted(rejected, key=lambda r: r["index"])}
 
+    @app.post("/api/ingest/heartbeat")
+    async def heartbeat(request: Request):
+        """One collector heartbeat per sensor (M2's adapter, every 10 s). Stored apart from events."""
+        if not request.headers.get("content-type", "").lower().startswith("application/json"):
+            raise HTTPException(415, "Content-Type must be application/json")
+        try:
+            body = json.loads(await _read_capped(request))
+        except ValueError:
+            raise HTTPException(400, "body is not valid JSON")
+        try:
+            hb = Heartbeat.model_validate(body)
+        except ValidationError as e:
+            raise HTTPException(400, reason_for(e))
+        await run_in_threadpool(db.record_heartbeat, hb)
+        return {"ok": True}
+
     # ---- reads ----
     @app.get("/api/events")
     def events(incident_id: Optional[str] = Query(None, max_length=64),
@@ -195,6 +211,13 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def incident(incident_id: str):
         require_incident(incident_id)
         return full_incident(incident_id)
+
+    @app.get("/api/incidents/{incident_id}/response-eligibility")
+    def response_eligibility(incident_id: str):
+        out = db.response_eligibility(incident_id)
+        if out is None:
+            raise HTTPException(404, f"incident {incident_id} not found")
+        return out
 
     @app.get("/api/incidents/{incident_id}/transcript")
     def transcript(incident_id: str, session_id: Optional[str] = Query(None, max_length=128)):
@@ -245,7 +268,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "sensors": db.sensor_last_seen()}
+        return {"ok": True, "sensors": db.sensor_last_seen(), "sensor_health": db.sensor_health()}
 
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket):

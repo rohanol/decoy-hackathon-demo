@@ -218,6 +218,34 @@ def evidence_role(event_type: str, attributes: dict) -> str:
     return EVIDENCE_ROLE[observation_kind(event_type, attributes)]
 
 
+MAX_COUNT = 10 ** 9
+
+
+class Heartbeat(BaseModel):
+    """POST /api/ingest/heartbeat: exactly the per-sensor payload M2's adapter sends
+    (sensors/adapter.py `_heartbeat_payloads`, PR #8). Translated to M1's CollectorHealth on read."""
+    model_config = ConfigDict(extra="forbid")
+
+    collector_id: str = Field(min_length=1, max_length=64)
+    sensor_id: SensorId
+    sent_at: datetime
+    sensor_process: Literal["up", "down", "unknown"]
+    last_read_at: Optional[datetime] = None
+    last_ingest_ok_at: Optional[datetime] = None
+    backlog_lines: Optional[int] = Field(None, ge=0, le=MAX_COUNT)
+    oldest_backlog_age_s: Optional[float] = Field(None, ge=0, le=MAX_COUNT)
+    errors_total: int = Field(0, ge=0, le=MAX_COUNT)
+    rejected_total: int = Field(0, ge=0, le=MAX_COUNT)
+    quarantined_total: int = Field(0, ge=0, le=MAX_COUNT)
+
+    @field_validator("sent_at", "last_read_at", "last_ingest_ok_at")
+    @classmethod
+    def _aware(cls, v):
+        if v is not None and v.tzinfo is None:
+            raise ValueError("timestamp needs a UTC offset")
+        return v
+
+
 def to_rfc3339(dt: datetime) -> str:
     return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 

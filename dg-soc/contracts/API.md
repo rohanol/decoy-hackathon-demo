@@ -270,7 +270,7 @@ Every finding carries `mapping`, `mapping_version` and `evidence_roles`; `techni
 
 `GET /api/incidents/{incident_id}/response-eligibility` (backend, new). Example in `examples/api_v1_1.json`.
 
-The route returns `{ "eligible", "target_ip", "lab_run_id", "capture_mode", "reasons": [ { "code", "message" } ], "last_web_observation_at", "checked_at" }`.
+The route returns `{ "incident_id", "eligible", "target_ip", "lab_run_id", "capture_mode", "reasons": [ { "code", "message" } ], "last_web_observation_at", "checked_at" }`. `target_ip` is the case's `src_ip`. `last_web_observation_at` is the newest `web-decoy-01` event from that address in the case's run and mode (by `seq`), its `occurred_at` capped at the backend's receive time, so a sensor clock running ahead cannot make old traffic look fresh.
 
 `eligible` is true only if all of these hold:
 
@@ -287,6 +287,7 @@ Otherwise `reasons` lists every failed check as `{ "code", "message" }`. The cod
 | `no_live_run` | its run is not the active live run |
 | `stale_observation` | no fresh web observation |
 | `case_dissolved` | the case was dissolved |
+| `case_superseded` | a pre-migration row; the session case that replaced it is the one to act on |
 | `sensor_not_registered` | reserved for the enforcing-sensor check |
 
 The allowed-IP check stays in `response/` (M2). Preview and apply both call this route, and M2's runtime (PR #8) already does. It fails closed on 404, a missing key, an unparsable time, `checked_at` older than 30 s, or `last_web_observation_at` 10 minutes old or more, and refuses with 409 `not_eligible` or 503 `eligibility_unavailable`. Every key above is always present: `target_ip`, `lab_run_id` and `last_web_observation_at` are null when unknown, never omitted. `checked_at` is the backend clock at the time of the answer. An unknown incident is 404 with the standard error body.
@@ -338,7 +339,7 @@ Collectors (the adapter, M2) post one heartbeat per sensor every 10 s to `POST /
 | `oldest_backlog_age_s` | `oldest_backlog_age_s` |
 | `errors_total` | `error_count` |
 | `rejected_total`, `quarantined_total` | `ingest.rejected`, `ingest.quarantined` |
-| (backend's own counts for that sensor) | `ingest.accepted`, `ingest.duplicate` |
+| (backend's own counts for that sensor) | `ingest.accepted` (events stored), `ingest.duplicate` (duplicates refused since PR 5) |
 | not sent | `ingest.retry` is null |
 | `sent_at` | `clock_skew_s` = `sent_at` minus backend receive time |
 
@@ -350,7 +351,7 @@ The response is `{ "ok": true }`; a body that fails validation is 400 with the s
 |---|---|---|
 | `service` | `up`, `down` or `unknown` | taken from the latest heartbeat's `process_state` (`running` = `up`, `stopped` = `down`); `unknown` if there is none or it is older than 30 s |
 | `collection` | `ok`, `stale` or `never` | `ok` = heartbeat younger than 30 s; `never` = no heartbeat yet |
-| `activity` | `recent`, `quiet` or `none` | `recent` = an event in the last 5 min; `quiet` = older; `none` = no events. A quiet sensor is not a broken one |
+| `activity` | `recent`, `quiet` or `none` | `recent` = the backend received an event from the sensor in the last 5 min (backend clock); `quiet` = older; `none` = no events. A quiet sensor is not a broken one |
 | `collector_id`, `heartbeat_at`, `process_state`, `last_read_at`, `last_ingest_at`, `backlog_records`, `oldest_backlog_age_s`, `error_count`, `ingest`, `clock_skew_s` | | translated from the latest heartbeat as in the table above; all null if there is none |
 | `last_event_at` | | the newest `occurred_at` stored for the sensor; null if none |
 
@@ -373,7 +374,7 @@ The order follows review section 12. Each step is its own PR with real test outp
 2. Ingest accepts 1.1 (version-gated validation, `input_features` and `processing` bounded, R07 consuming the indicators), derives `observation_kind`, enforces one mode per run, and adds the dedup namespace and `/api/runs`. DB migration 1 adds columns and a `runs` table. It rebuilds the `events` table once, copying every row unchanged including `seq`, because SQLite cannot drop the old unique key in place. The file is backed up first.
 3. Case model: cases, credential window, profiles, investigations and dissolve. DB migration 2 rebuilds the `incidents` table once (SQLite cannot drop the old `UNIQUE(src_ip, lab_run_id)` in place) with the case columns. Old rows are kept unchanged as `legacy_ip_run` cases with status `superseded`, findings included, and stay readable by id. Each event is then assigned to its derived case in `seq` order: only `events.incident_id` changes; every observed field stays as stored. Link endpoints are re-pointed from their events, credential cases are derived, and every confirmed link rebuilds its investigation.
 4. Causal token matching, orphan R09, corrected mappings and rule versions. DB migration 3 adds `links.attribution` and `links.candidate_issuance_ids` (`ALTER TABLE ... ADD COLUMN`; the file is backed up first).
-5. Eligibility route, health and heartbeat. M2 then wires preview, apply and verification. M4 and M2 emit `bait_served`.
+5. Eligibility route, health and heartbeat. New tables `collector_heartbeats` (latest per collector and sensor) and `ingest_counters`, created on start (`CREATE TABLE IF NOT EXISTS`; no data is rewritten, so no version bump). M2's preview, apply and heartbeat already match. M4 and M2 emit `bait_served`.
 
 The database records its schema in `PRAGMA user_version`: 0 = v1.0, then 1, 2 and so on. An observation's fields are never edited: migration 1 copies rows unchanged, and migration 2 changes only the derived `incident_id`.
 

@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS links (
     attribution      TEXT,
     candidate_issuance_ids TEXT NOT NULL DEFAULT '[]'
 );
+-- Collector health (PR 5): the latest heartbeat per collector and sensor, never an event.
+CREATE TABLE IF NOT EXISTS collector_heartbeats (
+    collector_id TEXT NOT NULL,
+    sensor_id    TEXT NOT NULL,
+    received_at  TEXT NOT NULL,
+    body         TEXT NOT NULL,
+    PRIMARY KEY (collector_id, sensor_id)
+);
+CREATE TABLE IF NOT EXISTS ingest_counters (
+    sensor_id TEXT PRIMARY KEY,
+    duplicate INTEGER NOT NULL DEFAULT 0
+);
 """
 
 # PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (PR 2),
@@ -112,6 +124,9 @@ CREATE TABLE IF NOT EXISTS links (
 DB_VERSION = 3
 LINK_COLUMNS_V3 = (("attribution", "TEXT"), ("candidate_issuance_ids", "TEXT NOT NULL DEFAULT '[]'"))
 ACTIVE_RUN_MINUTES = 15
+ELIGIBLE_MINUTES = 10           # M2 refuses a block on older web evidence (response/router.py)
+HEARTBEAT_FRESH_SECONDS = 30    # adapter sends every 10 s
+ACTIVITY_MINUTES = 5
 
 # v0 -> v1. SQLite cannot drop the old UNIQUE(sensor_id, source_record_id) in place, so the
 # events table is rebuilt once: every row is copied unchanged, seq included. Runs that already
@@ -401,6 +416,8 @@ class Database:
             (namespace, ev.sensor_id, ev.source_record_id),
         ).fetchone()
         if dup:
+            c.execute("INSERT INTO ingest_counters (sensor_id, duplicate) VALUES (?, 1) "
+                      "ON CONFLICT(sensor_id) DO UPDATE SET duplicate=duplicate+1", (ev.sensor_id,))
             return ("duplicate", None)
         occurred = to_rfc3339(ev.occurred_at)
         ingested = _now()
@@ -991,6 +1008,91 @@ class Database:
         out = {s: None for s in SENSORS}
         for r in self.conn.execute("SELECT sensor_id, MAX(occurred_at) AS t FROM events GROUP BY sensor_id"):
             out[r["sensor_id"]] = r["t"]
+        return out
+
+    # ---- response eligibility (PR 5; M2's preview and apply call this) ----
+    def response_eligibility(self, incident_id: str) -> Optional[dict]:
+        """Authoritative answer for a live block on this case's address. Every key is always
+        present; `reasons` lists every failed check. M2 refuses on anything but eligible + []."""
+        with self.snapshot():
+            r = self.conn.execute("SELECT * FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
+            if r is None:
+                return None
+            run, mode, target = r["lab_run_id"], r["capture_mode"], r["src_ip"]
+            reasons = []
+            if mode != "live":
+                reasons.append({"code": "replay_data", "message": "case is replay evidence"})
+            active = next((x for x in self.list_runs() if x["active"]), None)
+            if active is None or active["lab_run_id"] != run:
+                reasons.append({"code": "no_live_run", "message": f"run {run} is not the active live run"})
+            if r["status"] == "dissolved":
+                reasons.append({"code": "case_dissolved", "message": "the investigation was dissolved"})
+            elif r["status"] == "superseded":
+                reasons.append({"code": "case_superseded",
+                                "message": "pre-migration case; use the session case that replaced it"})
+            # The observation time is the sensor's clock, capped at when the backend received it,
+            # so a sensor clock running ahead can never make old traffic look fresh.
+            web = self.conn.execute(
+                "SELECT occurred_at, ingested_at FROM events WHERE sensor_id='web-decoy-01' AND src_ip=? "
+                "AND lab_run_id=? AND capture_mode=? ORDER BY seq DESC LIMIT 1", (target, run, mode)).fetchone()
+            observed = None
+            if web:
+                observed = to_rfc3339(min(_ts(web["occurred_at"]), _ts(web["ingested_at"])))
+            if observed is None or datetime.now(timezone.utc) - _ts(observed) >= timedelta(minutes=ELIGIBLE_MINUTES):
+                reasons.append({"code": "stale_observation",
+                                "message": f"no web-decoy-01 event from this address in the last {ELIGIBLE_MINUTES} minutes"})
+            return {"incident_id": incident_id, "eligible": not reasons, "target_ip": target, "lab_run_id": run,
+                    "capture_mode": mode, "reasons": reasons, "last_web_observation_at": observed,
+                    "checked_at": _now()}
+
+    # ---- collector health (PR 5) ----
+    def record_heartbeat(self, hb) -> None:
+        body = hb.model_dump(mode="json")
+        self._write(lambda c: c.execute(
+            "INSERT INTO collector_heartbeats (collector_id, sensor_id, received_at, body) VALUES (?,?,?,?) "
+            "ON CONFLICT(collector_id, sensor_id) DO UPDATE SET received_at=excluded.received_at, body=excluded.body",
+            (hb.collector_id, hb.sensor_id, _now(), json.dumps(body))))
+
+    def sensor_health(self) -> dict:
+        """Per sensor: service, collection and activity, plus the latest heartbeat translated to
+        M1's CollectorHealth names (contracts/API.md, Health). Activity is never health."""
+        now = datetime.now(timezone.utc)
+        out = {}
+        with self.snapshot():
+            for sensor in SENSORS:
+                hb = self.conn.execute("SELECT * FROM collector_heartbeats WHERE sensor_id=? "
+                                       "ORDER BY received_at DESC LIMIT 1", (sensor,)).fetchone()
+                last = self.conn.execute("SELECT MAX(occurred_at) AS occ, MAX(ingested_at) AS ing FROM events "
+                                         "WHERE sensor_id=?", (sensor,)).fetchone()
+                counts = self.conn.execute("SELECT COUNT(*) FROM events WHERE sensor_id=?", (sensor,)).fetchone()[0]
+                dup = self.conn.execute("SELECT duplicate FROM ingest_counters WHERE sensor_id=?", (sensor,)).fetchone()
+                if last["ing"] is None:
+                    activity = "none"
+                else:
+                    recent = now - _ts(last["ing"]) < timedelta(minutes=ACTIVITY_MINUTES)
+                    activity = "recent" if recent else "quiet"
+                row = {"service": "unknown", "collection": "never", "activity": activity, "collector_id": None,
+                       "heartbeat_at": None, "process_state": None, "last_read_at": None, "last_ingest_at": None,
+                       "backlog_records": None, "oldest_backlog_age_s": None, "error_count": None, "ingest": None,
+                       "clock_skew_s": None, "last_event_at": last["occ"]}
+                if hb:
+                    b = json.loads(hb["body"])
+                    received = _ts(hb["received_at"])
+                    fresh = (now - received).total_seconds() < HEARTBEAT_FRESH_SECONDS
+                    state = {"up": "running", "down": "stopped"}.get(b["sensor_process"], "unknown")
+                    row.update({
+                        "service": {"running": "up", "stopped": "down"}.get(state, "unknown") if fresh else "unknown",
+                        "collection": "ok" if fresh else "stale",
+                        "collector_id": hb["collector_id"], "heartbeat_at": hb["received_at"],
+                        "process_state": state, "last_read_at": b["last_read_at"],
+                        "last_ingest_at": b["last_ingest_ok_at"], "backlog_records": b["backlog_lines"],
+                        "oldest_backlog_age_s": b["oldest_backlog_age_s"], "error_count": b["errors_total"],
+                        "ingest": {"accepted": counts, "duplicate": dup["duplicate"] if dup else 0,
+                                   "rejected": b["rejected_total"], "quarantined": b["quarantined_total"],
+                                   "retry": None},
+                        "clock_skew_s": round((_ts(b["sent_at"]) - received).total_seconds(), 3),
+                    })
+                out[sensor] = row
         return out
 
     # ---- source profiles (a view; never scored) ----
