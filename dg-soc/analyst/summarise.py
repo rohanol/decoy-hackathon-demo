@@ -9,6 +9,8 @@ LABELS = {
     "R07": "A web attack attempt was observed; successful exploitation is not established",
     "R08": "Repeated web path probing was observed",
     "R09": "A planted honeytoken was presented on another sensor; this does not identify a person",
+    "R11": "Repeated challenge-response login attempts were observed; distinct passwords are not observable",
+    "R12": "A file was written to an emulated share and stored inert; this is not a malware verdict",
 }
 
 
