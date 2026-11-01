@@ -16,14 +16,16 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link as RouterLink } from 'react-router-dom';
 import { ApiError, fetchActions, postBlockRevoke } from '../api/client';
 import { ActionCard, ActionStatusPill } from '../components/ActionCard';
+import { VerificationTimeline } from '../components/evidence/ResponseViews';
+import { verificationFromV1 } from '../evidence/fromV1';
 import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
 
 /** The block flow, in the order the analyst walks it. Mirrors BlockFlowModal. */
 const STEPS = [
-  { title: 'Preview', text: 'See exactly what would be blocked, and for how long.' },
+  { title: 'Preview', text: 'Live sources only: see exactly what would be blocked, and for how long.' },
   { title: 'Approve', text: 'Write a reason and acknowledge the scope.' },
-  { title: 'Applied', text: 'The web decoy starts refusing this source.' },
-  { title: 'Verified', text: 'A refused request proves the block is working.' },
+  { title: 'Policy committed', text: 'The blocklist entry is written. That alone proves nothing.' },
+  { title: 'Verified denial', text: 'A refused request matching the action proves it works.' },
 ];
 import { timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
@@ -63,7 +65,11 @@ export function ResponseCenter() {
   }, [connectionEpoch, load]);
 
   const active = useMemo(
-    () => actions.filter((a) => a.status === 'applied' || a.status === 'verified'),
+    // reconciliation_required (M2) stays active: it needs an analyst, not history.
+    () =>
+      actions.filter(
+        (a) => a.status === 'applied' || a.status === 'verified' || a.status === 'reconciliation_required',
+      ),
     [actions],
   );
   const history = useMemo(
@@ -163,13 +169,15 @@ export function ResponseCenter() {
               ) : (
                 <div className="actionlist">
                   {active.map((action) => (
-                    <ActionCard
-                      key={action.action_id}
-                      action={action}
-                      onRevoke={(target) => void revoke(target)}
-                      onExpired={() => void load()}
-                      revoking={revokingId === action.action_id}
-                    />
+                    <div key={action.action_id} className="actionpair">
+                      <ActionCard
+                        action={action}
+                        onRevoke={(target) => void revoke(target)}
+                        onExpired={() => void load()}
+                        revoking={revokingId === action.action_id}
+                      />
+                      <VerificationTimeline verification={verificationFromV1(action)} />
+                    </div>
                   ))}
                 </div>
               )}
@@ -196,6 +204,7 @@ export function ResponseCenter() {
                         <th scope="col">Reason</th>
                         <th scope="col">Applied</th>
                         <th scope="col">Until</th>
+                        <th scope="col">Verified by</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -208,6 +217,13 @@ export function ResponseCenter() {
                           <td className="breakdown__reason">“{action.reason}”</td>
                           <td className="mono">{timeUtcZ(action.created_at)}</td>
                           <td className="mono">{timeUtcZ(action.until)}</td>
+                          <td className="mono">
+                            {action.verified_by_event_id ?? (
+                              <span title="No matching denied request arrived before it ended.">
+                                never verified
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

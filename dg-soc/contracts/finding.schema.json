@@ -2,22 +2,57 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dg-soc/finding.schema.json",
   "title": "Finding (backend -> frontend)",
+  "description": "v1.1 adds mapping, mapping_version, evidence_roles, token_relation and stage 'lure_access'. technique_ids stays and always equals the non-null technique_id values in mapping.",
   "type": "object",
   "required": ["finding_id", "rule_id", "rule_version", "incident_id", "src_ip", "technique_ids", "stage", "label", "limitation", "evidence_event_ids", "created_at"],
   "additionalProperties": false,
   "properties": {
     "finding_id": { "type": "string" },
     "rule_id": { "enum": ["R01", "R02", "R03", "R04", "R05", "R07", "R08", "R09"] },
-    "rule_version": { "type": "string", "description": "e.g. R01@1" },
-    "incident_id": { "type": "string" },
+    "rule_version": { "type": "string", "description": "e.g. R01@1. Bumped whenever matching or mapping changes; old findings keep the version that produced them." },
+    "incident_id": { "type": "string", "description": "The case (or investigation) this finding belongs to. Name kept for v1.0 compatibility." },
     "src_ip": { "type": "string", "format": "ipv4" },
     "technique_ids": { "type": "array", "items": { "type": "string", "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$" } },
-    "stage": { "enum": ["recon", "credential_attack", "exploit_attempt", "post_access", "data_access", "none"] },
+    "mapping": {
+      "type": "array",
+      "description": "v1.1. One entry per ATT&CK interpretation, with why. technique_id may be null when a behaviour is worth showing but no technique fits honestly.",
+      "items": {
+        "type": "object",
+        "required": ["technique_id", "status", "rationale"],
+        "additionalProperties": false,
+        "properties": {
+          "technique_id": { "type": ["string", "null"], "pattern": "^T[0-9]{4}(\\.[0-9]{3})?$" },
+          "status": {
+            "enum": ["attempted", "emulated", "observed"],
+            "description": "attempted = input aimed at the behaviour; emulated = the decoy played along (fake result); observed = an independent result record shows it happened in the lab."
+          },
+          "rationale": { "type": "string", "maxLength": 300 }
+        }
+      }
+    },
+    "mapping_version": { "type": "string", "description": "v1.1. Version of the technique catalogue used, e.g. 'map@2'." },
+    "stage": {
+      "enum": ["recon", "credential_attack", "exploit_attempt", "post_access", "lure_access", "data_access", "none"],
+      "description": "Observed stage in the local progression model, not a claim of a complete kill chain. v1.1 adds lure_access (a synthetic lure was fetched over the web)."
+    },
     "label": { "type": "string", "description": "Plain words, e.g. 'Repeated SSH password guessing (5 failures in 60 s)'" },
     "limitation": { "type": "string", "description": "What this does not prove, e.g. 'Does not show the account was compromised'" },
     "evidence_event_ids": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+    "evidence_roles": {
+      "type": "object",
+      "description": "v1.1. event_id -> request | result | bait | presentation. Lets the UI show which record is the input and which is the decoy's answer.",
+      "additionalProperties": { "enum": ["request", "result", "bait", "presentation"] }
+    },
     "points": { "type": "integer", "description": "Points this finding contributes now. 0 if its rule already counted or it waits for confirmation." },
     "pending_confirmation": { "type": "boolean", "description": "True for R09 until the analyst confirms the link" },
+    "token_relation": {
+      "enum": ["linked", "request_only", "orphan"],
+      "description": "v1.1, R09 only. linked = a bait_served result record for this token exists in the same run and a strong_candidate link cites it. request_only = only a bait-read command (requested_asset_id) was seen; a weaker candidate link cites it. orphan = no serving or request was found; visible, never scored, no link invented."
+    },
+    "attribution": {
+      "enum": ["unique", "ambiguous", "request_only"],
+      "description": "v1.1, R09 only. ambiguous = several issuances of the same static credential were eligible, so the backend does not claim which one was reused."
+    },
     "web_attack_class": {
       "type": "array",
       "items": { "enum": ["sqli", "xss", "lfi", "rfi", "cmd_injection"] },

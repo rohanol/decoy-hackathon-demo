@@ -2,6 +2,7 @@
 
 - each rule counts once per incident, at its configured weight
 - R05/R09 (needs_confirmation) count only after the analyst confirms the link
+- an orphan R09 (no serving or request found) is shown but never scored
 - total capped at cfg.cap; every finding gets a breakdown row saying why
 """
 def severity_for(score: int, cfg) -> str:
@@ -16,9 +17,10 @@ def _confirmed(f: dict, links: list) -> bool:
     if f["rule_id"] == "R05":
         return True  # R05 only exists for a confirmed link
     if f["rule_id"] == "R09":
+        # Only a causal token link counts: strong (bait served) or request_only (bait read requested).
         cited = set(f["evidence_event_ids"])
-        return any(l["status"] == "confirmed" and l["kind"] == "strong_candidate"
-                   and l["to_event_id"] in cited for l in links)
+        return any(l["status"] == "confirmed" and l.get("attribution") and l["to_event_id"] in cited
+                   for l in links)
     return False
 
 
@@ -29,9 +31,12 @@ def score_incident(findings: list, links: list, cfg) -> dict:
     total, counted_rules, rows, points = 0, set(), [], {}
     for f in findings:
         rule, weight = f["rule_id"], cfg.weights.get(f["rule_id"], 0)
-        pending = rule in cfg.needs_confirmation and not _confirmed(f, links)
+        orphan = rule == "R09" and f.get("token_relation") == "orphan"
+        pending = not orphan and rule in cfg.needs_confirmation and not _confirmed(f, links)
         counted = False
-        if pending:
+        if orphan:
+            give, reason = 0, "R09 orphan: no record of the token being served; shown, never scored"
+        elif pending:
             give, reason = 0, f"{rule} waits for the analyst to confirm the link"
         elif rule in counted_rules:
             give, reason = 0, f"{rule} already counted for this incident"

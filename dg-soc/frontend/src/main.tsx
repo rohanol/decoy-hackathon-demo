@@ -10,6 +10,7 @@ import './styles/live.css';
 import './styles/incidents.css';
 import './styles/response.css';
 import './styles/chakra3d.css';
+import './styles/evidence.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root is missing from index.html');

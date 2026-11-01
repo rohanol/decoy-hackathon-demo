@@ -4,7 +4,7 @@
  * (DESIGN_SPEC.md law 1).
  */
 
-import { API_BASE, EVENTS_PAGE_LIMIT } from './config';
+import { API_BASE, EVENTS_PAGE_LIMIT, MAX_SNAPSHOT_PAGES } from './config';
 import { ApiError } from './error';
 
 /**
@@ -12,7 +12,7 @@ import { ApiError } from './error';
  * import.meta.env right here so the bundler can see it is false in a normal
  * build and drop the mock and its demo events from the release bundle.
  */
-const MOCK = import.meta.env['VITE_USE_FIXTURES'] === '1';
+const MOCK = import.meta.env.VITE_USE_FIXTURES === '1';
 const fixtures = () => import('./fixtures');
 import type {
   ApiErrorBody,
@@ -25,6 +25,8 @@ import type {
   ResponseAction,
   StatsOverview,
   Transcript,
+  BackendProfile,
+  BackendEligibility,
 } from '../types/api';
 
 // Defined in ./error so the fixture backend can throw the same type without a
@@ -91,6 +93,8 @@ export interface EventsQuery {
   sensor_id?: string;
   since_seq?: number;
   limit?: number;
+  lab_run_id?: string;
+  capture_mode?: 'live' | 'replay';
 }
 
 export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
@@ -98,9 +102,29 @@ export function fetchEvents(query: EventsQuery = {}): Promise<EventsPage> {
   const params = new URLSearchParams();
   if (query.incident_id) params.set('incident_id', query.incident_id);
   if (query.sensor_id) params.set('sensor_id', query.sensor_id);
+  if (query.lab_run_id) params.set('lab_run_id', query.lab_run_id);
+  if (query.capture_mode) params.set('capture_mode', query.capture_mode);
   if (query.since_seq !== undefined) params.set('since_seq', String(query.since_seq));
   params.set('limit', String(query.limit ?? EVENTS_PAGE_LIMIT));
   return get<EventsPage>(`/api/events?${params.toString()}`);
+}
+
+/**
+ * Every event matching a query, paging forward with since_seq. GET /api/events
+ * returns ascending pages and next_seq is a forward cursor, so one call only
+ * returns the oldest page. Bounded by MAX_SNAPSHOT_PAGES.
+ */
+export async function fetchAllEvents(query: Omit<EventsQuery, 'since_seq' | 'limit'> = {}) {
+  const collected: EventsPage['items'] = [];
+  let cursor = 0;
+  for (let guard = 0; guard < MAX_SNAPSHOT_PAGES; guard += 1) {
+    const page = await fetchEvents({ ...query, since_seq: cursor, limit: EVENTS_PAGE_LIMIT });
+    collected.push(...page.items);
+    if (page.items.length < EVENTS_PAGE_LIMIT) break;
+    if (page.next_seq === undefined || page.next_seq <= cursor) break;
+    cursor = page.next_seq;
+  }
+  return collected;
 }
 
 export function fetchHealth(): Promise<Health> {
@@ -116,6 +140,14 @@ export function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
 export function fetchIncident(incidentId: string): Promise<Incident> {
   if (MOCK) return fixtures().then((mock) => mock.fetchIncident(incidentId));
   return get<Incident>(`/api/incidents/${encodeURIComponent(incidentId)}`);
+}
+
+export function fetchProfile(srcIp: string, runId: string): Promise<BackendProfile> {
+  return get<BackendProfile>(`/api/profiles/${encodeURIComponent(srcIp)}?lab_run_id=${encodeURIComponent(runId)}`);
+}
+
+export function fetchEligibility(incidentId: string): Promise<BackendEligibility> {
+  return get<BackendEligibility>(`/api/incidents/${encodeURIComponent(incidentId)}/response-eligibility`);
 }
 
 /**

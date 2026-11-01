@@ -70,7 +70,7 @@ def test_canned_routes(portal, path, status, body):
     assert response.status_code == status
     assert body in response.data
     events = read_events(log)
-    assert len(events) == 1
+    assert len(events) == (2 if path == "/.env" else 1)
     assert events[0]["attributes"]["status_code"] == status
     assert events[0]["capture_mode"] == "live"
     assert events[0]["lab_run_id"] == "test-m4"
@@ -86,7 +86,10 @@ def test_login_hashes_and_token_link_evidence(portal, username, password, expect
     _, client, log, _ = portal
     response = client.post("/login", data={"username": username, "password": password})
     assert response.status_code == expected
-    event, = read_events(log)
+    http, event = read_events(log)
+    assert http["event_type"] == "http_request"
+    assert http["attributes"]["request_id"] == event["attributes"]["request_id"]
+    assert http["source_record_id"] != event["source_record_id"]
     assert event["event_type"] == ("auth_success" if expected == 200 else "auth_failure")
     assert event["attributes"]["password_sha256"] == hashlib.sha256(password.encode()).hexdigest()
     if password == "DGLAB-Portal-4471":
@@ -96,6 +99,8 @@ def test_login_hashes_and_token_link_evidence(portal, username, password, expect
 
 def test_download_exact_asset_hash_and_no_traversal(portal):
     _, client, log, _ = portal
+    assert client.get("/download?file=customer_data.csv").status_code == 401
+    client.post("/login", data={"username": "svc_portal", "password": "DGLAB-Portal-4471"})
     response = client.get("/download?file=customer_data.csv")
     assert response.data == ASSET.read_bytes()
     event = read_events(log)[-1]
@@ -262,9 +267,9 @@ def test_summary_pending_empty_and_unknown():
     assert summarise({})["cited_event_ids"] == []
 
 
-@pytest.mark.parametrize("script", ["attack_p1.sh", "attack_p2.sh", "attack_p3.sh"])
+@pytest.mark.parametrize("script", ["attack_p1.sh", "attack_p2.sh", "attack_p3.sh", "web_depth.sh"])
 @pytest.mark.parametrize("args", [[], ["127.0.0.1"], ["example.com"], ["192.168.77.20", "extra"]])
 def test_scenarios_reject_non_lab_or_extra_arguments(script, args):
-    result = subprocess.run(["bash", str(ROOT / "scenarios" / script), *args], capture_output=True, text=True, timeout=3)
+    result = subprocess.run([os.environ.get("DG_TEST_BASH", "bash"), str(ROOT / "scenarios" / script), *args], capture_output=True, text=True, timeout=3)
     assert result.returncode == 1
     assert "Refusing" in result.stderr

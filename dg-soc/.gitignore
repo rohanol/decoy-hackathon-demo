@@ -13,9 +13,14 @@ dist/
 deployment/state/cowrie-log/*
 deployment/state/web-log/*
 deployment/state/blocklist.json
-deployment/state/response-actions.json
-deployment/state/.tmp-*
 deployment/state/adapter-checkpoint.json
+deployment/state/response-actions.json
+deployment/state/response-verification-audit.jsonl
+deployment/state/rejected-events.jsonl
+deployment/state/collector-health.json
 !deployment/state/**/.gitkeep
 captures/
 logs/
+.pytest_cache/
+*.pyc
+decoys/ssh/fs.pickle

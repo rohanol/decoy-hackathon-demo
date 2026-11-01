@@ -40,7 +40,7 @@ import {
 import { EVENTS_PAGE_LIMIT, MAX_SNAPSHOT_PAGES } from '../api/config';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { AttackerText, ErrorCard } from '../components/primitives';
-import { ACTION_STATUS_LABEL, EVENT_TYPE_LABEL, SENSOR_LABEL, linkPhrase } from '../copy';
+import { ACTION_STATUS_LABEL, SENSOR_LABEL, eventTypeLabel, linkPhrase } from '../copy';
 import { buildWheel, type ChordView, type LureView, type WheelModel } from '../chakra/model';
 import {
   LURES,
@@ -244,7 +244,7 @@ function eventGist(event: SocEvent): string {
   }
   if (typeof attributes.asset_id === 'string') return attributes.asset_id;
   if (typeof attributes.username === 'string') return `username=${attributes.username}`;
-  return EVENT_TYPE_LABEL[event.event_type];
+  return eventTypeLabel(event.event_type);
 }
 
 type Selection = { kind: 'lure'; id: LureId } | { kind: 'chord'; linkId: string } | null;
@@ -625,7 +625,7 @@ function EventList({ events }: { events: SocEvent[] }) {
       {shown.map((event) => (
         <li key={event.event_id} className="cpanel__event">
           <span className="mono cpanel__time">{timeUtcZ(event.occurred_at)}</span>
-          <span className="cpanel__etype">{EVENT_TYPE_LABEL[event.event_type]}</span>
+          <span className="cpanel__etype">{eventTypeLabel(event.event_type)}</span>
           <span className="cpanel__gist">
             <AttackerText value={eventGist(event)} />
           </span>
@@ -935,10 +935,14 @@ function ChordPanel({
       </ol>
 
       {chord.provenance === 'bait_read' ? (
-        <p className="cverdict cverdict--strong">
-          The planted-side event is a read of the very file that holds this token. The credential
-          presented on the {SENSOR_LABEL[link.to_sensor] ?? link.to_sensor} existed only inside
-          that file.
+        // Amber, not green: v1.0 records the read command being submitted, not
+        // the file being served (review F3 and section 11). The token itself
+        // exists only in that file, which is why this is still the strongest
+        // v1.0 link, but it is not proof of a read.
+        <p className="cverdict cverdict--weak">
+          The planted-side event is a command submitted to read the file that holds this token,
+          and that token exists nowhere else in the lab. Contract v1.0 does not record the file
+          being served, so this is consistent with the planted trail, not proof of a read.
         </p>
       ) : chord.provenance === 'bait_not_read' ? (
         <p className="cverdict cverdict--weak">

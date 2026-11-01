@@ -23,11 +23,11 @@ import {
   type ReactNode,
 } from 'react';
 
-const SUPABASE_URL: string = import.meta.env['VITE_SUPABASE_URL'] ?? '';
-const SUPABASE_ANON_KEY: string = import.meta.env['VITE_SUPABASE_ANON_KEY'] ?? '';
+const SUPABASE_URL: string = import.meta.env.VITE_SUPABASE_URL ?? '';
+const SUPABASE_ANON_KEY: string = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
 
 export const AUTH_CONFIGURED = SUPABASE_URL !== '' && SUPABASE_ANON_KEY !== '';
-export const AUTH_DEV_BYPASS = !AUTH_CONFIGURED && import.meta.env['VITE_AUTH_DEV_BYPASS'] === '1';
+export const AUTH_DEV_BYPASS = !AUTH_CONFIGURED && import.meta.env.VITE_AUTH_DEV_BYPASS === '1';
 
 const DEV_KEY = 'dg.devSession';
 

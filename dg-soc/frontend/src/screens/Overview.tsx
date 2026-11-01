@@ -21,8 +21,8 @@ import { ApiError, fetchIncidents, fetchOverview } from '../api/client';
 import { CountUp } from '../components/CountUp';
 import { KillChainStrip } from '../components/KillChainBar';
 import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
-import { COPY, EVENT_TYPE_LABEL, RULE_NAME } from '../copy';
-import { EVENT_STYLE } from '../lib/eventStyle';
+import { COPY, RULE_NAME, eventTypeLabel } from '../copy';
+import { styleOf } from '../lib/eventStyle';
 import { number, relativeFromNow, seconds, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { RULE_IDS, type IncidentSummary, type StatsOverview } from '../types/api';
@@ -138,7 +138,7 @@ function LatestActivity() {
     <ol className="activity">
       <AnimatePresence initial={false}>
         {latest.map((event) => {
-          const style = EVENT_STYLE[event.event_type];
+          const style = styleOf(event.event_type);
           return (
             <motion.li
               key={event.event_id}
@@ -150,7 +150,7 @@ function LatestActivity() {
               className={event.seq > snapshotMaxSeq ? 'activity__row activity__row--new' : 'activity__row'}
             >
               <span className={`activity__glyph evtype--${style.tone}`}>{style.glyph}</span>
-              <span className="activity__what">{EVENT_TYPE_LABEL[event.event_type]}</span>
+              <span className="activity__what">{eventTypeLabel(event.event_type)}</span>
               <span className="activity__ip">{event.src_ip}</span>
               <span className="activity__time">{timeUtc(event.occurred_at)}</span>
             </motion.li>
@@ -289,14 +289,20 @@ export function Overview() {
           label="Time to first alert"
           value={stats?.first_alert_seconds ?? null}
           format={(value) => seconds(value)}
-          hint={stats?.first_alert_seconds == null ? 'no findings yet' : 'first event → first finding'}
+          hint={
+            stats?.first_alert_seconds == null
+              ? 'no findings yet'
+              : 'backend arrival → first finding, one incident; not end-to-end latency'
+          }
         />
       </div>
 
       <div className="ovgrid2">
         <section className="panel">
           <header className="panel__head">
-            <h2 className="panel__title">Noise reduction</h2>
+            <h2 className="panel__title" title="Grouping compression, not detection accuracy">
+              Event grouping
+            </h2>
           </header>
           {stats ? <NoiseFunnel stats={stats} /> : null}
         </section>

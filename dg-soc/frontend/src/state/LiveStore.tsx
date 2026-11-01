@@ -24,6 +24,7 @@ import { ApiError, fetchEvents, fetchHealth } from '../api/client';
 import { createEventStream, type ConnectionStatus, type EventStream } from '../api/socket';
 import { EVENTS_PAGE_LIMIT, FEED_MAX_ROWS, MAX_SNAPSHOT_PAGES } from '../api/config';
 import type { CaptureMode, Health, SocEvent, WsMessage } from '../types/api';
+import { FeedReconciler, mergeById } from './reconcile';
 
 interface LiveStoreValue {
   /** Newest first, capped at FEED_MAX_ROWS. */
@@ -38,8 +39,10 @@ interface LiveStoreValue {
   loading: boolean;
   error: ApiError | null;
   health: Health | null;
+  /** When GET /api/health last answered or failed. Service liveness, not activity. */
+  healthCheckedAt: string | null;
   /** 'replay' if anything in view came from a replayed capture. */
-  captureMode: CaptureMode | null;
+  captureMode: CaptureMode | 'mixed' | null;
   labRunId: string | null;
   /** When data last arrived, for the offline pill and stale banners. */
   lastDataAt: Date | null;
@@ -72,11 +75,18 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
+  const [healthCheckedAt, setHealthCheckedAt] = useState<string | null>(null);
   const [lastDataAt, setLastDataAt] = useState<Date | null>(null);
   const [connectionEpoch, setConnectionEpoch] = useState(0);
 
-  /** Highest seq applied. The gate for every incoming message. */
-  const lastSeqRef = useRef(0);
+  /**
+   * Snapshot/live reconciliation (./reconcile.ts): the seq gate, dedupe by
+   * event_id, and the buffer that keeps live events arriving during a
+   * snapshot load from being lost when the snapshot lands.
+   */
+  const reconcilerRef = useRef<FeedReconciler>(new FeedReconciler(FEED_MAX_ROWS));
+  /** What is on screen, readable from callbacks without a stale closure. */
+  const eventsRef = useRef<SocEvent[]>([]);
   const pausedRef = useRef(false);
   const bufferRef = useRef<SocEvent[]>([]);
   const streamRef = useRef<EventStream | null>(null);
@@ -94,12 +104,18 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const showEvents = useCallback((next: SocEvent[]) => {
+    eventsRef.current = next;
+    setEvents(next);
+  }, []);
+
   const appendEvents = useCallback((incoming: SocEvent[]) => {
     if (incoming.length === 0) return;
     setEvents((current) => {
-      const merged = [...incoming, ...current];
-      merged.sort((a, b) => b.seq - a.seq);
-      return merged.slice(0, FEED_MAX_ROWS);
+      // By event_id, never by concatenation: an id can only ever appear once.
+      const merged = mergeById([current, incoming], FEED_MAX_ROWS);
+      eventsRef.current = merged;
+      return merged;
     });
     setReceivedCount((count) => count + incoming.length);
     setLastDataAt(new Date());
@@ -107,6 +123,10 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
 
   const loadSnapshot = useCallback(async () => {
     const token = ++loadTokenRef.current;
+    const reconciler = reconcilerRef.current;
+    // From here until this load settles, live events are buffered for the merge.
+    reconciler.beginSnapshot();
+    let settled = false;
     setLoading(true);
     try {
       // GET /api/events returns events ASCENDING from since_seq, and next_seq is
@@ -116,34 +136,39 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       // on top, leaving a silent hole in the middle. Page forward to the end.
       const collected: SocEvent[] = [];
       let cursor = 0;
-      let lastSeq = 0;
       for (let guard = 0; guard < MAX_SNAPSHOT_PAGES; guard += 1) {
         const page = await fetchEvents({ since_seq: cursor, limit: EVENTS_PAGE_LIMIT });
-        if (token !== loadTokenRef.current) return;
+        if (token !== loadTokenRef.current) {
+          // A newer load superseded this one; it owns the merge now.
+          reconciler.abandonSnapshot();
+          settled = true;
+          return;
+        }
         collected.push(...page.items);
-        lastSeq = Math.max(lastSeq, page.next_seq ?? 0);
         // Stop at a short page, or if the cursor stops advancing.
         if (page.items.length < EVENTS_PAGE_LIMIT) break;
         if (page.next_seq === undefined || page.next_seq <= cursor) break;
         cursor = page.next_seq;
       }
 
-      const ordered = collected.sort((a, b) => b.seq - a.seq);
-      const maxSeq = Math.max(
-        lastSeq,
-        ordered.reduce((max, event) => Math.max(max, event.seq), 0),
-      );
-
-      // Reconnect discards the list rather than patching the gap (API.md).
-      lastSeqRef.current = maxSeq;
+      // Merge, never replace: the snapshot plus every live event that arrived
+      // while it loaded, by event_id (review T14).
+      const result = reconciler.completeSnapshot(collected);
+      settled = true;
       bufferRef.current = [];
       setBufferedCount(0);
-      setEvents(ordered.slice(0, FEED_MAX_ROWS));
-      setReceivedCount(ordered.length);
-      setSnapshotMaxSeq(maxSeq);
+      showEvents(result.events);
+      setReceivedCount(result.total);
+      // Rows above the snapshot's own maximum arrived live, so they flash.
+      setSnapshotMaxSeq(collected.reduce((max, event) => Math.max(max, event.seq), 0));
       setError(null);
       setLastDataAt(new Date());
     } catch (cause) {
+      if (!settled) {
+        if (token !== loadTokenRef.current) reconciler.abandonSnapshot();
+        else showEvents(reconciler.failSnapshot(eventsRef.current));
+        settled = true;
+      }
       if (token !== loadTokenRef.current) return;
       setError(
         cause instanceof ApiError
@@ -153,7 +178,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     } finally {
       if (token === loadTokenRef.current) setLoading(false);
     }
-  }, []);
+  }, [showEvents]);
 
   const setPaused = useCallback(
     (next: boolean) => {
@@ -192,14 +217,14 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
         // types must never be dropped by seq.
         for (const handler of subscribersRef.current) handler(message);
 
-        // The seq gate applies to events only.
+        // The seq gate applies to events only, and lives in the reconciler,
+        // which also buffers for an in-flight snapshot and dedupes by id.
         if (message.type !== 'event') return;
-        if (message.seq <= lastSeqRef.current) return;
-        lastSeqRef.current = message.seq;
-
         const event = message.data as SocEvent;
+        if (reconcilerRef.current.acceptLive(event) === 'duplicate') return;
+
         if (pausedRef.current) {
-          bufferRef.current = [event, ...bufferRef.current].slice(0, FEED_MAX_ROWS);
+          bufferRef.current = mergeById([bufferRef.current, [event]], FEED_MAX_ROWS);
           setBufferedCount(bufferRef.current.length);
           return;
         }
@@ -218,9 +243,15 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     const poll = async () => {
       try {
         const next = await fetchHealth();
-        if (!cancelled) setHealth(next);
+        if (!cancelled) {
+          setHealth(next);
+          setHealthCheckedAt(new Date().toISOString());
+        }
       } catch {
-        if (!cancelled) setHealth(null);
+        if (!cancelled) {
+          setHealth(null);
+          setHealthCheckedAt(new Date().toISOString());
+        }
       }
     };
     void poll();
@@ -231,9 +262,10 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const captureMode = useMemo<CaptureMode | null>(() => {
+  const captureMode = useMemo<CaptureMode | 'mixed' | null>(() => {
     if (events.length === 0) return null;
-    return events.some((event) => event.capture_mode === 'replay') ? 'replay' : 'live';
+    const modes = new Set(events.map(event => event.capture_mode));
+    return modes.size > 1 ? 'mixed' : events[0]?.capture_mode ?? null;
   }, [events]);
 
   const labRunId = events[0]?.lab_run_id ?? null;
@@ -249,6 +281,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       health,
+      healthCheckedAt,
       captureMode,
       labRunId,
       lastDataAt,
@@ -268,6 +301,7 @@ export function LiveStoreProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       health,
+      healthCheckedAt,
       captureMode,
       labRunId,
       lastDataAt,

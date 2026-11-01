@@ -1,7 +1,7 @@
 """Hooks into teammates' modules, each optional so the backend runs before they land.
 
 - Prajwal (M4): analyst/summarise.py   summarise(incident) -> {"source", "text", "cited_event_ids"}
-- Vedant (M2):  response/router.py     router (APIRouter), on_event(event), optional active_block(src_ip)
+- Vedant (M2):  response/router.py     router (APIRouter), on_event(event, trusted_context), optional active_block(src_ip)
 """
 import importlib
 import inspect
@@ -68,14 +68,19 @@ class Integrations:
         return None
 
     async def on_event(self, event: dict) -> None:
-        """Called once per newly stored event, after commit. Never breaks ingest."""
+        """Call the response hook after commit with backend-created provenance."""
         if not self._on_event:
             return
+        trusted_context = {
+            "source": "backend_ingest",
+            "persisted_event_id": event.get("event_id"),
+            "received_at": event.get("ingested_at"),
+        }
         try:
             if inspect.iscoroutinefunction(self._on_event):
-                await self._on_event(event)
+                await self._on_event(event, trusted_context)
             else:
-                await run_in_threadpool(self._on_event, event)  # file I/O must not block the event loop
+                await run_in_threadpool(self._on_event, event, trusted_context)  # file I/O must not block the event loop
         except Exception:
             log.exception("response.on_event failed for %s", event.get("event_id"))
 
