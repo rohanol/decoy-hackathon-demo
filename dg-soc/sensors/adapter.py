@@ -19,6 +19,7 @@ import ipaddress
 import json
 import logging
 import os
+import os
 import sys
 import time
 import urllib.error
@@ -32,11 +33,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SENSOR_IDS = {"ssh-decoy-01", "web-decoy-01"}
 EVENT_TYPES = {
     "connection_open", "auth_failure", "auth_success", "command_input", "connection_close",
-    "http_request", "synthetic_file_access", "blocked_request",
+    "http_request", "synthetic_file_access", "blocked_request", "bait_served",
 }
 TOP_LEVEL_KEYS = {
     "schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip",
-    "src_port", "session_id", "lab_run_id", "capture_mode", "attributes",
+    "src_port", "session_id", "lab_run_id", "capture_mode", "attributes", "origin_record_id",
 }
 COWRIE_TYPES = {
     "cowrie.session.connect": "connection_open",
@@ -44,6 +45,7 @@ COWRIE_TYPES = {
     "cowrie.login.success": "auth_success",
     "cowrie.command.input": "command_input",
     "cowrie.session.closed": "connection_close",
+    "dgsoc.network.denied": "command_input",
 }
 MAX_BATCH_EVENTS = 100
 MAX_BATCH_BYTES = 900_000  # contract limit is 1 MiB; stay under it
@@ -90,11 +92,22 @@ def load_honeytokens(path: str) -> Dict[str, str]:
 
 # ---------------------------------------------------------------- mapping
 class CowrieMapper:
+    sensor_id = "ssh-decoy-01"
     def __init__(self, lab_run_id: str, capture_mode: str, honeytokens: Dict[str, str]):
         self.lab_run_id, self.capture_mode, self.honeytokens = lab_run_id, capture_mode, honeytokens
         self.pending_version: Dict[str, str] = {}  # session -> client version waiting for its next event
+        self.last_record_ignored = False
+
+    def export_state(self) -> Dict[str, str]:
+        return dict(self.pending_version)
+
+    def restore_state(self, state: Any) -> None:
+        if isinstance(state, dict):
+            self.pending_version = {str(k): str(v)[:256] for k, v in state.items()
+                                    if isinstance(k, str) and isinstance(v, str)}
 
     def map(self, raw_line: str) -> Optional[Dict[str, Any]]:
+        self.last_record_ignored = False
         try:
             rec = json.loads(raw_line)
         except ValueError:
@@ -104,6 +117,7 @@ class CowrieMapper:
             return None
         eid, session = rec.get("eventid"), rec.get("session")
         if eid == "cowrie.client.version":
+            self.last_record_ignored = True
             v = rec.get("version")
             v = ",".join(map(str, v)) if isinstance(v, list) else v
             if isinstance(session, str) and isinstance(v, str):
@@ -125,9 +139,15 @@ class CowrieMapper:
                 if token:
                     attrs["honeytoken_id"] = token
         elif etype == "command_input":
-            cmd = rec.get("input")
+            cmd = rec.get("input") if isinstance(rec.get("input"), str) else rec.get("command")
             if isinstance(cmd, str):
                 attrs["command"] = cmd[:4096]
+            if eid == "dgsoc.network.denied":
+                attrs["network_attempt_outcome"] = "denied"
+                attrs["real_execution"] = False
+                digest = rec.get("attempt_sha256")
+                if isinstance(digest, str) and len(digest) == 64:
+                    attrs["attempt_sha256"] = digest
         if isinstance(session, str) and session in self.pending_version and etype != "connection_close":
             attrs["client_version"] = self.pending_version.pop(session)
         if etype == "connection_close" and isinstance(session, str):
@@ -151,6 +171,7 @@ class CowrieMapper:
 class WebMapper:
     """The web decoy (M4) is expected to log one event-shaped JSON object per line.
     We fill the envelope defaults, hash anything password-like that slipped in, and validate."""
+    sensor_id = "web-decoy-01"
 
     def __init__(self, lab_run_id: str, capture_mode: str, honeytokens: Dict[str, str]):
         self.lab_run_id, self.capture_mode, self.honeytokens = lab_run_id, capture_mode, honeytokens
@@ -189,7 +210,8 @@ class WebMapper:
 
 def validate(ev: Dict[str, Any]) -> Optional[str]:
     """Return a reason string if the event would be rejected by the backend, else None."""
-    if ev.get("schema_version") != "1.0":
+    version = ev.get("schema_version")
+    if version not in ("1.0", "1.1"):
         return "schema_version"
     if ev.get("sensor_id") not in SENSOR_IDS:
         return "sensor_id"
@@ -205,6 +227,84 @@ def validate(ev: Dict[str, Any]) -> Optional[str]:
         return "capture_mode"
     if not isinstance(ev.get("lab_run_id"), str) or not ev["lab_run_id"]:
         return "lab_run_id"
+    attrs = ev.get("attributes", {})
+    if not isinstance(attrs, dict):
+        return "attributes"
+    if version == "1.0":
+        if ev.get("event_type") == "bait_served":
+            return "event_type: bait_served requires schema_version 1.1"
+        if "origin_record_id" in ev:
+            return "origin_record_id: needs schema_version 1.1"
+        return None
+
+    origin = ev.get("origin_record_id")
+    if origin is not None and (not isinstance(origin, str) or not 0 < len(origin) <= 128):
+        return "origin_record_id"
+    if ev.get("capture_mode") == "live" and origin is not None:
+        return "origin_record_id: live events cannot refer to an origin record"
+    if ev.get("event_type") == "bait_served":
+        token_ids = attrs.get("honeytoken_ids")
+        if not all(isinstance(attrs.get(key), str) and attrs[key] for key in
+                   ("asset_id", "issuance_id")):
+            return "attributes: bait_served needs asset_id and issuance_id"
+        if (not isinstance(token_ids, list) or not 1 <= len(token_ids) <= 16
+                or any(not isinstance(token, str) or not token or len(token) > 128 for token in token_ids)
+                or len(set(token_ids)) != len(token_ids)):
+            return "attributes: bait_served needs unique honeytoken_ids"
+        if attrs.get("evidence_basis") not in ("sensor_response", "session_output_log"):
+            return "attributes: bait_served needs evidence_basis"
+        if attrs.get("evidence_role") not in (None, "bait"):
+            return "attributes.evidence_role: bait_served must be bait evidence"
+    problem = _validate_v11_features(attrs)
+    if problem:
+        return problem
+    return None
+
+
+def _validate_v11_features(attrs: Dict[str, Any]) -> Optional[str]:
+    """Validate M4's v1.1 nested evidence without changing or dropping it."""
+    indicators_allowed = {"sql_quote", "sql_keyword", "sql_comment", "script_tag", "event_handler", "js_scheme",
+        "path_traversal", "sensitive_file_path", "php_wrapper", "remote_url_in_param",
+        "shell_metachar_command", "command_substitution", "null_byte", "encoded_payload"}
+    features = attrs.get("input_features")
+    if features is not None:
+        if not isinstance(features, dict) or set(features) - {"source", "field_count", "field_names",
+                "max_value_length", "indicators", "truncated"}:
+            return "attributes.input_features"
+        indicators = features.get("indicators")
+        if (features.get("source") not in ("query", "form", "json", "multipart", "none")
+                or type(features.get("field_count")) is not int or not 0 <= features["field_count"] <= 256
+                or not isinstance(indicators, list) or len(indicators) > 16
+                or any(not isinstance(item, str) or item not in indicators_allowed for item in indicators)
+                or len(set(indicators)) != len(indicators)):
+            return "attributes.input_features"
+        names = features.get("field_names", [])
+        if (not isinstance(names, list) or len(names) > 32
+                or any(not isinstance(name, str) or len(name) > 64 for name in names)):
+            return "attributes.input_features.field_names"
+        max_length = features.get("max_value_length")
+        if max_length is not None and (type(max_length) is not int or max_length < 0):
+            return "attributes.input_features.max_value_length"
+        truncated = features.get("truncated")
+        if truncated is not None and not isinstance(truncated, bool):
+            return "attributes.input_features.truncated"
+    processing = attrs.get("processing")
+    if processing is not None:
+        keys = {"parse_status", "body_bytes", "body_consumed", "redaction_version", "producer_version"}
+        if not isinstance(processing, dict) or set(processing) - keys:
+            return "attributes.processing"
+        if processing.get("parse_status") not in ("parsed", "no_body", "rejected_too_large", "unsupported_type", "malformed"):
+            return "attributes.processing.parse_status"
+        body_bytes = processing.get("body_bytes")
+        if body_bytes is not None and (type(body_bytes) is not int or body_bytes < 0):
+            return "attributes.processing.body_bytes"
+        body_consumed = processing.get("body_consumed")
+        if body_consumed is not None and not isinstance(body_consumed, bool):
+            return "attributes.processing.body_consumed"
+        for key in ("redaction_version", "producer_version"):
+            value = processing.get(key)
+            if value is not None and (not isinstance(value, str) or len(value) > 32):
+                return f"attributes.processing.{key}"
     return None
 
 
@@ -223,8 +323,14 @@ class Checkpoint:
         entry = self.data.get(log_path)
         return int(entry["offset"]) if entry and entry.get("inode") == inode else 0
 
-    def set(self, log_path: str, inode: int, offset: int) -> None:
+    def get_state(self, log_path: str, inode: int) -> Any:
+        entry = self.data.get(log_path)
+        return entry.get("mapper_state") if entry and entry.get("inode") == inode else None
+
+    def set(self, log_path: str, inode: int, offset: int, mapper_state: Any = None) -> None:
         self.data[log_path] = {"inode": inode, "offset": offset}
+        if mapper_state is not None:
+            self.data[log_path]["mapper_state"] = mapper_state
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         tmp = self.path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as fh:
@@ -282,41 +388,113 @@ class Sender:
         self.url = backend_url.rstrip("/") + "/api/ingest/events"
         self.max_retries = max_retries
         self.sleep = sleep or (lambda seconds: time.sleep(seconds))  # resolved at call time so tests can patch
+        self.error_count = 0
+        self.last_successful_ingest_at: Optional[str] = None
+        self.accepted_count = self.duplicate_count = self.rejected_count = 0
+        self.quarantine_count = self.retry_count = 0
+        self.sensor_totals: Dict[str, Dict[str, Any]] = {}
+        self.heartbeat_url = self.url.rsplit("/", 1)[0] + "/heartbeat"
 
-    def post(self, events: List[Dict[str, Any]]) -> bool:
-        """True when the backend handled the batch (or answered with a non-retryable 4xx we must skip).
-        False when retries ran out: the caller must NOT advance the checkpoint."""
+    def _totals(self, sensor_id: str) -> Dict[str, Any]:
+        return self.sensor_totals.setdefault(sensor_id, {"error_count": 0,
+            "ingest": {"accepted": 0, "duplicate": 0, "rejected": 0, "quarantined": 0, "retry": 0}})
+
+    def post(self, events: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+        """Return backend rejections; None means retries ran out and checkpoint must not advance."""
         body = json.dumps({"events": events}).encode()
+        sensors = {ev.get("sensor_id") for ev in events if ev.get("sensor_id") in SENSOR_IDS}
         delay = 0.5
         for attempt in range(1, self.max_retries + 1):
             try:
                 req = urllib.request.Request(self.url, data=body, headers={"Content-Type": "application/json"}, method="POST")
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     result = json.load(resp)
-                if result.get("rejected"):
-                    log.warning("backend rejected %d events: %s", len(result["rejected"]), result["rejected"][:3])
+                self.last_successful_ingest_at = datetime.now(timezone.utc).isoformat()
+                rejected = result.get("rejected", [])
+                accepted_count = int(result.get("accepted", 0) or 0)
+                duplicate_count = int(result.get("duplicates", 0) or 0)
+                self.accepted_count += accepted_count
+                self.duplicate_count += duplicate_count
+                for sensor in sensors:
+                    counts = self._totals(sensor)["ingest"]
+                    counts["accepted"] += accepted_count
+                    counts["duplicate"] += duplicate_count
+                if rejected:
+                    log.warning("backend rejected %d events", len(rejected))
+                    self.rejected_count += len(rejected)
+                    for item in rejected:
+                        index = item.get("index") if isinstance(item, dict) else None
+                        if isinstance(index, int) and 0 <= index < len(events):
+                            self._totals(events[index]["sensor_id"])["ingest"]["rejected"] += 1
                 log.info("sent %d events: accepted=%s duplicates=%s", len(events), result.get("accepted"), result.get("duplicates"))
-                return True
+                return rejected if isinstance(rejected, list) else []
             except urllib.error.HTTPError as exc:
                 if exc.code in (400, 413, 422):  # our batch is bad; retrying will not help
-                    log.error("backend returned %s for a batch of %d, skipping it: %s", exc.code, len(events), exc.read()[:300])
-                    return True
+                    log.error("backend returned %s for a batch of %d; quarantining", exc.code, len(events))
+                    self.rejected_count += len(events)
+                    for sensor in sensors:
+                        self._totals(sensor)["error_count"] += 1
+                    for event in events:
+                        totals = self._totals(event["sensor_id"])
+                        totals["ingest"]["rejected"] += 1
+                    return [{"index": i, "reason": f"backend_http_{exc.code}"} for i in range(len(events))]
                 log.warning("backend HTTP %s (attempt %d)", exc.code, attempt)
+                self.error_count += 1
+                self.retry_count += 1
+                for sensor in sensors:
+                    totals = self._totals(sensor)
+                    totals["error_count"] += 1
+                    totals["ingest"]["retry"] += 1
             except (urllib.error.URLError, OSError, ValueError) as exc:
                 log.warning("backend unreachable: %s (attempt %d)", exc, attempt)
+                self.error_count += 1
+                self.retry_count += 1
+                for sensor in sensors:
+                    totals = self._totals(sensor)
+                    totals["error_count"] += 1
+                    totals["ingest"]["retry"] += 1
             self.sleep(delay)
             delay = min(delay * 2, 8)
-        return False
+        return None
+
+    def post_heartbeat(self, payload: Dict[str, Any]) -> bool:
+        """Send the proposed M3 v1.1 heartbeat independently of event delivery."""
+        try:
+            req = urllib.request.Request(self.heartbeat_url, data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                result = json.load(resp)
+            return resp.status == 200 and isinstance(result, dict) and result.get("ok") is True
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log.warning("heartbeat unavailable for %s: %s", payload.get("sensor_id"), exc)
+            return False
+
+
+def quarantine(path: str, sensor: str, source_record_id: str, reason: str,
+               event: Optional[Dict[str, Any]] = None) -> None:
+    """Durably store sanitized rejection details before allowing the source checkpoint to move."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    record: Dict[str, Any] = {"sensor_id": sensor, "source_record_id": source_record_id,
+                              "reason": str(reason)[:240], "quarantined_at": datetime.now(timezone.utc).isoformat()}
+    if event is not None:
+        # Mapper output is schema-bounded and contains password hashes only.
+        record["event"] = event
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, separators=(",", ":")) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
 
 
 # ---------------------------------------------------------------- main loop
-def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender) -> int:
+def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quarantine_path: Optional[str] = None) -> int:
     """One pass over one log file. Returns the number of events delivered."""
     try:
         inode = os.stat(path).st_ino
     except OSError:
         return 0
     offset = ckpt.get(path, inode)
+    if hasattr(mapper, "restore_state"):
+        mapper.restore_state(ckpt.get_state(path, inode))
     delivered = 0
     while True:
         lines, new_offset = read_new_lines(path, offset)
@@ -326,18 +504,49 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender) -> int:
         for line in lines:
             ev = mapper.map(line)
             if ev is None:
+                if getattr(mapper, "last_record_ignored", False):
+                    continue
+                if quarantine_path:
+                    sensor = getattr(mapper, "sensor_id", "unknown")
+                    quarantine(quarantine_path, sensor, sha256_hex(line), "unmapped_or_malformed_record")
+                    sender.quarantine_count += 1
+                    sender.rejected_count += 1
+                    if sensor in SENSOR_IDS:
+                        counts = sender._totals(sensor)["ingest"]
+                        counts["rejected"] += 1
+                        counts["quarantined"] += 1
                 continue
             problem = validate(ev)
             if problem:
-                log.warning("dropped event (%s)", problem)
+                log.warning("quarantining invalid event (%s)", problem)
+                if quarantine_path:
+                    quarantine(quarantine_path, ev.get("sensor_id", "unknown"), ev.get("source_record_id", ""), problem, ev)
+                    sender.quarantine_count += 1
+                    sender.rejected_count += 1
+                    sensor = ev.get("sensor_id")
+                    if sensor in SENSOR_IDS:
+                        counts = sender._totals(sensor)["ingest"]
+                        counts["rejected"] += 1
+                        counts["quarantined"] += 1
                 continue
             events.append(ev)
         for batch in batches(events):
-            if not sender.post(batch):
+            rejected = sender.post(batch)
+            if rejected is None:
                 return delivered  # keep old checkpoint, retry next pass
-            delivered += len(batch)
+            if rejected and quarantine_path:
+                for item in rejected:
+                    index = item.get("index") if isinstance(item, dict) else None
+                    if isinstance(index, int) and 0 <= index < len(batch):
+                        event = batch[index]
+                        quarantine(quarantine_path, event["sensor_id"], event["source_record_id"],
+                                   item.get("reason", "backend_rejected"), event)
+                        sender.quarantine_count += 1
+                        sender._totals(event["sensor_id"])["ingest"]["quarantined"] += 1
+            delivered += len(batch) - len(rejected)
         offset = new_offset
-        ckpt.set(path, inode, offset)
+        state = mapper.export_state() if hasattr(mapper, "export_state") else None
+        ckpt.set(path, inode, offset, state)
     return delivered
 
 
@@ -355,6 +564,43 @@ def parse_env_file(path: str) -> Dict[str, str]:
     return out
 
 
+def _pending_lines(path: str, ckpt: Checkpoint) -> Tuple[int, Optional[int]]:
+    try:
+        inode = os.stat(path).st_ino
+        offset = ckpt.get(path, inode)
+        lines, _ = read_new_lines(path, offset)
+        ages = []
+        now = datetime.now(timezone.utc)
+        for line in lines:
+            try:
+                record = json.loads(line)
+                if not isinstance(record, dict):
+                    continue
+                timestamp = norm_ts(record.get("timestamp") or record.get("occurred_at"))
+                if timestamp:
+                    occurred = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    ages.append(max(0, int((now - occurred).total_seconds())))
+            except (TypeError, ValueError):
+                continue
+        return len(lines), max(ages) if ages else (None if lines else 0)
+    except OSError:
+        return 0, None
+
+
+def _heartbeat_payloads(sources, ckpt, sender, collector_id, now_text):
+    payloads = []
+    for path, mapper in sources:
+        sensor = mapper.sensor_id
+        totals = sender._totals(sensor)
+        backlog, oldest_age = _pending_lines(path, ckpt)
+        payloads.append({"collector_id": collector_id, "sensor_id": sensor, "sent_at": now_text,
+            "process_state": "running", "last_read_at": now_text if os.path.isfile(path) else None,
+            "last_ingest_at": sender.last_successful_ingest_at, "backlog_records": backlog,
+            "oldest_backlog_age_s": oldest_age, "error_count": totals["error_count"],
+            "ingest": dict(totals["ingest"])})
+    return payloads
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     env = parse_env_file(os.path.join(ROOT, "deployment", "lab.env"))
     state = os.path.join(ROOT, "deployment", "state")
@@ -365,6 +611,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--cowrie-log", default=os.path.join(state, "cowrie-log", "cowrie.json"))
     ap.add_argument("--web-log", default=os.path.join(state, "web-log", "web.json"))
     ap.add_argument("--checkpoint", default=os.path.join(state, "adapter-checkpoint.json"))
+    ap.add_argument("--quarantine", default=os.path.join(state, "rejected-events.jsonl"))
+    ap.add_argument("--health", default=os.path.join(state, "collector-health.json"))
+    ap.add_argument("--collector-id", default=os.environ.get("COLLECTOR_ID", "adapter-laptop-b"))
     ap.add_argument("--honeytokens", default=os.path.join(ROOT, "config", "honeytokens.yaml"))
     ap.add_argument("--interval", type=float, default=1.0)
     ap.add_argument("--once", action="store_true")
@@ -377,9 +626,44 @@ def main(argv: Optional[List[str]] = None) -> int:
         (args.web_log, WebMapper(args.lab_run_id, args.capture_mode, tokens)),
     ]
     ckpt, sender = Checkpoint(args.checkpoint), Sender(args.backend)
+    last_heartbeat = 0.0
+    last_api_heartbeats = []
+    heartbeat_results = {}
+    heartbeat_api_status = "not_sent"
     log.info("adapter up: backend=%s run=%s mode=%s honeytokens=%d", args.backend, args.lab_run_id, args.capture_mode, len(tokens))
     while True:
-        total = sum(process_source(path, mapper, ckpt, sender) for path, mapper in sources)
+        errors_before = sender.error_count
+        counters_before = (sender.accepted_count, sender.duplicate_count, sender.rejected_count,
+                           sender.quarantine_count, sender.retry_count)
+        total = sum(process_source(path, mapper, ckpt, sender, args.quarantine) for path, mapper in sources)
+        counters_after = (sender.accepted_count, sender.duplicate_count, sender.rejected_count,
+                          sender.quarantine_count, sender.retry_count)
+        accepted, duplicates, rejected, quarantined, retries = (a - b for a, b in zip(counters_after, counters_before))
+        poll_time = datetime.now(timezone.utc)
+        poll_at = poll_time.isoformat()
+        api_heartbeats = []
+        should_heartbeat = args.once or time.monotonic() - last_heartbeat >= 10
+        if should_heartbeat:
+            last_api_heartbeats = _heartbeat_payloads(sources, ckpt, sender, args.collector_id, poll_at)
+            heartbeat_results = {h["sensor_id"]: sender.post_heartbeat(h) for h in last_api_heartbeats}
+            heartbeat_api_status = "ok" if all(heartbeat_results.values()) else "unavailable"
+            last_heartbeat = time.monotonic()
+        health = {"status": "degraded" if sender.error_count > errors_before else "healthy",
+                  "last_poll_at": poll_at, "last_successful_ingest_at": sender.last_successful_ingest_at,
+                  "last_poll_delivered": total, "accepted": accepted, "duplicates": duplicates,
+                  "rejected": rejected, "quarantined": quarantined, "retries": retries,
+                  "error_count": sender.error_count,
+                  "heartbeat_api": heartbeat_api_status,
+                  "heartbeats": last_api_heartbeats,
+                  "heartbeat_results": heartbeat_results,
+                  "sources": [{"name": os.path.basename(path), "present": os.path.isfile(path)} for path, _ in sources]}
+        tmp_health = args.health + ".tmp"
+        os.makedirs(os.path.dirname(args.health) or ".", exist_ok=True)
+        with open(tmp_health, "w", encoding="utf-8") as fh:
+            json.dump(health, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_health, args.health)
         if args.once:
             log.info("done, %d events delivered", total)
             return 0
