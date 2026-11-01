@@ -35,6 +35,7 @@ def main():
     parser.add_argument("--control-port", type=int, default=18182)
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--trip-web-port", type=int, help="optional loopback-only HTTP endpoint for controlled-trip browser tests; synthetic peer")
     args = parser.parse_args()
     os.environ["NO_PROXY"] = "127.0.0.1,localhost"
     os.environ["DG_CORS_ORIGINS"] = "http://127.0.0.1:15173"
@@ -58,6 +59,7 @@ def main():
         if not server.started:
             raise RuntimeError("Backend not ready")
         controller = None
+        portal_server = None
         try:
             def api(route, body=None):
                 request = Request(base + route, data=None if body is None else json.dumps(body).encode(),
@@ -147,6 +149,21 @@ def main():
                 args.output.write_text(json.dumps(receipt, indent=2) + "\n")
             print(json.dumps({"ready": status, "backend": base, "checks": len(receipt["checks"])}), flush=True)
             if not args.once:
+                if args.trip_web_port:
+                    from werkzeug.serving import make_server, WSGIRequestHandler
+                    class Quiet(WSGIRequestHandler):
+                        def log(self, *args, **kwargs):
+                            pass
+                    def portal_endpoint(environ, start_response):
+                        # Test-only synthetic peer; never physical source-IP proof.
+                        environ["REMOTE_ADDR"] = environ.get("HTTP_X_DG_TEST_PEER", "192.168.77.10")
+                        response = web(environ, start_response)
+                        with lock:
+                            collect()
+                            heartbeats()
+                        return response
+                    portal_server = make_server("127.0.0.1", args.trip_web_port, portal_endpoint, request_handler=Quiet)
+                    threading.Thread(target=portal_server.serve_forever, daemon=True).start()
                 class Control(BaseHTTPRequestHandler):
                     def log_message(self, *args):
                         pass
@@ -174,6 +191,9 @@ def main():
                 except KeyboardInterrupt:
                     pass
         finally:
+            if portal_server:
+                portal_server.shutdown()
+                portal_server.server_close()
             if controller:
                 controller.shutdown()
                 controller.server_close()

@@ -133,6 +133,11 @@ export function fetchHealth(): Promise<Health> {
   return get<Health>('/api/health');
 }
 
+export function fetchTripRuns(): Promise<{ items: Array<{ lab_run_id: string; capture_mode: string; active: boolean; legacy_mixed: boolean }> }> {
+  if (MOCK) return Promise.resolve({ items: [] });
+  return get('/api/runs');
+}
+
 export function fetchIncidents(): Promise<{ items: IncidentSummary[] }> {
   if (MOCK) return fixtures().then((mock) => mock.fetchIncidents());
   return get<{ items: IncidentSummary[] }>('/api/incidents');

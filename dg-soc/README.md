@@ -3,6 +3,10 @@
 D3COY 1.0, PS 04: deception-driven threat detection and response. Two laptops, emulated services, a dark SOC dashboard, scored evidence-linked incidents, and a manual web block with undo.
 
 **Current Kali release:** [four-honeypot runbook](deployment/KALI_FOUR_RUNBOOK.md).
+**OC-05 feature:** [Controlled web trip / Chain Health](deployment/CONTROLLED_TRIP.md).
+On the Sensors screen, generate one attacker command and verify its exact
+stored event, R07 alert and current collector evidence. Results expire after
+five minutes; this check covers the web chain only.
 It preserves the original dashboard and web portal, and adds inert ZIP bait,
 MySQL authentication deception and a bounded SMB2 file service. The original
 two-service Compose file still works; four-service mode is an explicit override.

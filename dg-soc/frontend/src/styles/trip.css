@@ -1,0 +1,13 @@
+.trip { margin-bottom: var(--s4); padding: var(--s4); }
+.trip__head { display: flex; align-items: start; justify-content: space-between; gap: var(--s4); flex-wrap: wrap; }
+.trip h2 { font-size: 17px; margin: 0 0 8px; }
+.trip p { color: var(--text-secondary); margin: 8px 0 14px; line-height: 1.5; }
+.trip .trip__status--passed { color: var(--ok); border-color: var(--ok); }
+.trip .trip__status--incomplete, .trip .trip__status--error { color: var(--danger); }
+.trip .trip__status--expired { color: var(--warn); }
+.trip__command-label { display: block; margin: 12px 0; color: var(--text-secondary); }
+.trip textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 8px; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--bg-inset); color: var(--text-primary); font: 12px/1.6 var(--font-mono, monospace); resize: vertical; }
+.trip__steps { padding-left: 24px; margin: 16px 0; line-height: 1.9; color: var(--text-secondary); }
+.trip__steps [data-passed="true"] { color: var(--ok); }
+.trip__evidence { overflow-wrap: anywhere; }
+.trip .trip__error { color: var(--danger); }

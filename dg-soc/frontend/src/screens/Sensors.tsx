@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { sensorActivity, sensorHealth } from '../components/Shell';
 import { HealthDimensions } from '../components/evidence/HealthDimensions';
+import { ControlledTrip } from '../components/ControlledTrip';
 import { healthFromV1 } from '../evidence/fromV1';
 import { Dot } from '../components/primitives';
 import { eventTypeLabel } from '../copy';
@@ -105,6 +106,8 @@ export function Sensors() {
         <span className="page__head-spacer" />
         <span className="pill">Read-only · management in progress</span>
       </div>
+
+      <ControlledTrip />
 
       <section className="panel" style={{ marginBottom: 'var(--s4)', padding: 'var(--s4)' }}>
         <HealthDimensions
