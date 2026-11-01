@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "finding_id": { "type": "string" },
-    "rule_id": { "enum": ["R01", "R02", "R03", "R04", "R05", "R07", "R08", "R09"] },
+    "rule_id": { "enum": ["R01", "R02", "R03", "R04", "R05", "R07", "R08", "R09", "R11", "R12"], "description": "R11 and R12 are v1.2 (contracts/API.md, Cases and rules (v1.2))" },
     "rule_version": { "type": "string", "description": "e.g. R01@1. Bumped whenever matching or mapping changes; old findings keep the version that produced them." },
     "incident_id": { "type": "string", "description": "The case (or investigation) this finding belongs to. Name kept for v1.0 compatibility." },
     "src_ip": { "type": "string", "format": "ipv4" },
