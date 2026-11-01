@@ -340,6 +340,14 @@ export function eligibilityFromV1(events: SocEvent[]): ResponseEligibility {
       message: 'Every observation here is replayed. A replay cannot change the live web policy.',
     });
   }
+  // v1.2: the only response is the web block. A case seen only on decoys with
+  // no response capability is never offered it as if it enforced anything there.
+  if (events.length > 0 && events.every((event) => event.sensor_id === 'db-decoy-01' || event.sensor_id === 'file-decoy-01')) {
+    reasons.push({
+      code: 'response_unsupported_sensor',
+      message: 'This source was seen only on the MySQL/SMB decoys. The web block does not enforce anything there.',
+    });
+  }
   return { eligible: reasons.length === 0, source: 'ui_guard', reasons };
 }
 
@@ -347,14 +355,18 @@ export function healthFromV1(health: Health | null, checkedAt: string | null, se
   return {
     basis: health?.sensor_health ? 'contract_v11' : 'contract_v1',
     service: { backend: health === null ? 'down' : health.ok ? 'up' : 'unknown', checked_at: checkedAt },
-    // v1.0 /api/health has no collector heartbeat: do not invent one.
-    collectors: health?.sensor_health ? sensorIds.map(sensor_id => {
+    // v1.0 /api/health has no collector heartbeat: do not invent one. Rows only
+    // for sensors the backend actually reports: a sensor this backend does not
+    // know (for example a v1.2 decoy on a v1.1 backend) gets no row at all,
+    // never a fabricated 'unknown' one.
+    collectors: health?.sensor_health ? sensorIds.filter(sensor_id => health.sensor_health?.[sensor_id] !== undefined).map(sensor_id => {
       const row = health.sensor_health?.[sensor_id];
       return { sensor_id, process_state: row?.process_state ?? 'unknown', heartbeat_at: row?.heartbeat_at ?? null,
         last_read_at: row?.last_read_at ?? null, last_ingest_at: row?.last_ingest_at ?? null,
         backlog_records: row?.backlog_records ?? null, oldest_backlog_age_s: row?.oldest_backlog_age_s ?? null,
         error_count: row?.error_count ?? null, clock_skew_s: row?.clock_skew_s ?? null, ingest: row?.ingest ?? null };
     }) : null,
-    activity: sensorIds.map((sensor_id) => ({ sensor_id, last_event_at: health?.sensors[sensor_id] ?? null })),
+    activity: (health ? sensorIds.filter((sensor_id) => sensor_id in health.sensors) : sensorIds)
+      .map((sensor_id) => ({ sensor_id, last_event_at: health?.sensors[sensor_id] ?? null })),
   };
 }

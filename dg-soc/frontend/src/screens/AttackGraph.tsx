@@ -26,7 +26,6 @@ import { number } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { GraphViewToggle } from './GraphViewToggle';
 import {
-  SENSOR_IDS,
   type IncidentSummary,
   type Link,
   type SensorId,
@@ -44,6 +43,13 @@ const ATTACKER_Y0 = 56;
 const SENSOR_X = 640;
 const SENSOR_W = 220;
 const SENSOR_H = 76;
+/**
+ * This fallback view's fixed geometry draws the SSH and web decoys and the
+ * link between them. MySQL and SMB decoys (v1.2) are not drawn here; the note
+ * under the graph says so, and the incident pages show their evidence.
+ */
+const GRAPH_SENSORS: readonly SensorId[] = ['ssh-decoy-01', 'web-decoy-01'];
+
 const SSH_Y = 48;
 const WEB_Y = 268;
 
@@ -180,12 +186,12 @@ export function AttackGraph() {
           const touched = new Set<SensorId>();
           const [detail, ...probes] = await Promise.all([
             fetchEvents({ incident_id: incident.incident_id, limit: 200 }),
-            ...SENSOR_IDS.map((sensorId) =>
+            ...GRAPH_SENSORS.map((sensorId) =>
               fetchEvents({ incident_id: incident.incident_id, sensor_id: sensorId, limit: 1 }),
             ),
           ]);
           probes.forEach((page, index) => {
-            const sensorId = SENSOR_IDS[index];
+            const sensorId = GRAPH_SENSORS[index];
             if (sensorId && page.items.length > 0) touched.add(sensorId);
           });
           presence.set(incident.incident_id, touched);
@@ -280,7 +286,7 @@ export function AttackGraph() {
             {incidents.map((incident, index) => {
               const y = ATTACKER_Y0 + index * ATTACKER_GAP;
               const touched = data?.presence.get(incident.incident_id) ?? new Set<SensorId>();
-              return SENSOR_IDS.filter((sensorId) => touched.has(sensorId)).map((sensorId) => (
+              return GRAPH_SENSORS.filter((sensorId) => touched.has(sensorId)).map((sensorId) => (
                 <path
                   key={`${incident.incident_id}-${sensorId}`}
                   className="gedge gedge--traffic"
@@ -354,7 +360,7 @@ export function AttackGraph() {
               />
             ))}
 
-            {SENSOR_IDS.map((sensorId) => (
+            {GRAPH_SENSORS.map((sensorId) => (
               <SensorNode
                 key={sensorId}
                 sensorId={sensorId}
@@ -386,6 +392,10 @@ export function AttackGraph() {
         An edge means the API reported traffic from that source on that decoy. A link between
         the decoys is a claim about the same source following our planted trail — it does not
         identify a person.
+      </p>
+      <p className="graph__note">
+        This view draws the SSH and web decoys only. MySQL and SMB decoy evidence is on the incident
+        pages and in the Live Feed; a web block never covers them.
       </p>
 
       {decidingLink && data ? (

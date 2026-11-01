@@ -23,24 +23,36 @@ export const EVENT_TYPE_LABEL: Record<EventType, string> = {
   synthetic_file_access: 'synthetic file access',
   blocked_request: 'blocked request',
   bait_served: 'bait served',
+  db_request: 'database command received',
+  file_operation: 'file operation',
 };
 
 /** Longer form, used in the raw event drawer and tooltips. */
 export const EVENT_TYPE_DESCRIPTION: Record<EventType, string> = {
   connection_open: 'A connection was opened to the decoy.',
   auth_failure: 'A login attempt was rejected by the decoy.',
-  auth_success: 'Credentials were accepted by the emulated shell. No real account exists.',
+  auth_success:
+    'The decoy completed the login as if it succeeded. No real account, shell or database session exists.',
   command_input: 'A command was submitted to the emulated shell. Nothing executed on a real host.',
   connection_close: 'The connection was closed.',
   http_request: 'An HTTP request reached the web decoy.',
   synthetic_file_access: 'A synthetic file was served. No real data exists in this lab.',
   blocked_request: 'A request was rejected by an analyst-applied block.',
   bait_served: 'The decoy recorded returning a synthetic credential lure. Client receipt is not proven.',
+  db_request:
+    'A database command packet arrived after the handshake. The emulator records its verb and size only and executes nothing.',
+  file_operation:
+    'An SMB file operation reached the file decoy. Uploaded content is stored inert or discarded: never executed, opened or given a verdict.',
 };
 
 export const SENSOR_LABEL: Record<string, string> = {
   'ssh-decoy-01': 'SSH decoy',
   'web-decoy-01': 'Web decoy',
+  'db-decoy-01': 'MySQL decoy',
+  'file-decoy-01': 'SMB file decoy',
+  // Telemetry sources (v1.2): never honeypots, never in sensor counts.
+  'gateway-01': 'HTTP gateway',
+  'demo-app-01': 'Research Portal (normal app)',
 };
 
 export const STAGE_LABEL: Record<Stage, string> = {
@@ -317,3 +329,89 @@ export function eventTypeDescription(type: string): string {
     'An event type this dashboard build does not describe yet. Shown as received.'
   );
 }
+
+/* ---------------------------------------------------------------------------
+ * Contract v1.2 wording: four honeypots, gateway and normal-app telemetry.
+ * A request, a decision, a response, a completed transfer, an extraction, a
+ * verdict and an identity are different claims, and the words say which.
+ * ------------------------------------------------------------------------- */
+
+export const PROOF_CHECK_LABEL: Record<string, string> = {
+  matched_honeytoken: 'proof matched a planted lab credential',
+  not_matched: 'proof checked: matched no planted credential',
+  not_checked: 'proof not checked',
+  unsupported_scheme: 'auth scheme not checkable',
+  malformed: 'malformed proof',
+};
+
+export const PROOF_CHECK_MEANING =
+  'Challenge-response login: the decoy never sees the password, so attempts cannot be shown to repeat or differ. Only a match against a planted DGLAB- credential is evidence of which credential was used.';
+
+export const ROUTING_REASON_LABEL: Record<string, string> = {
+  no_trigger: 'no trigger',
+  session_pinned: 'session pinned to decoy',
+  source_pinned: 'source pinned to decoy',
+  web_attack_indicator: 'structural web-attack indicator',
+  hidden_path_probe: 'hidden-path probe',
+  bait_path_requested: 'bait path requested',
+  honeytoken_presented: 'honeytoken presented',
+  manual_lab_rule: 'manual lab rule',
+};
+
+export const CORRELATION_LABEL: Record<string, string> = {
+  observed: 'decision and upstream record agree',
+  gateway_only: 'decision only: no upstream record carries its id',
+  upstream_only: 'upstream record only: no matching decision received',
+  conflict: 'decision and upstream record disagree',
+};
+
+export const INGRESS_LABEL: Record<string, string> = {
+  verified: 'via gateway (verified context)',
+  absent: 'direct (no gateway context)',
+  invalid: 'gateway context invalid',
+};
+
+export const ROUTING_COPY = {
+  requested: 'Requested by the gateway',
+  gatewayObserved: 'Seen by the gateway coming back',
+  upstreamObserved: 'Recorded by the upstream itself',
+  joinRule: 'Joined only through the verified gateway request id, never by IP and time.',
+  noRouting: 'No gateway requests are linked to this case.',
+  unavailable:
+    'The backend does not serve routing views yet (contract v1.2, PR #19). Nothing about gateway diversion is shown or inferred.',
+  telemetryNotHoneypot: 'Telemetry source: never counted as a honeypot, never scored, never verifies a block.',
+} as const;
+
+export const ARCHIVE_CLAIM_LABEL: Record<string, string> = {
+  requested: 'Requested',
+  served: 'Served by the decoy',
+  client_completed_download: 'Client finished downloading',
+  extracted_or_opened: 'Extracted or opened',
+  planted_credential_used: 'A planted credential from it was later used',
+};
+
+export const ARCHIVE_COPY = {
+  title: 'Archive bait',
+  contents: 'Fixed plain-text and CSV entries only; synthetic values.',
+  neverObservable: 'never observable',
+  notObserved: 'not observed',
+  observed: 'observed',
+} as const;
+
+export const SCOPE_COPY = {
+  enforced: 'Block enforced on',
+  notEnforced: 'Not enforced on',
+  v11: 'The only response is the web block on web-decoy-01. It does not block SSH, MySQL or SMB.',
+  unsupported: 'This case is on a decoy with no response capability. The web block would not enforce anything here.',
+} as const;
+
+export const DB_COPY = {
+  notExecuted: 'not executed',
+  noStatementText: 'Statement text is not recorded; the emulator executes nothing.',
+} as const;
+
+export const FILE_COPY = {
+  inert: 'stored inert',
+  discarded: 'discarded',
+  hintNotVerdict: 'type hint from first bytes; not a verdict',
+} as const;
