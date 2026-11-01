@@ -24,7 +24,6 @@ import {
 import { ActionCard } from './ActionCard';
 import { ErrorCard } from './primitives';
 import { COPY } from '../copy';
-import { timeUtcZ } from '../lib/format';
 import type { BlockPreview, ResponseAction } from '../types/api';
 
 const MIN_REASON = 5;
@@ -256,8 +255,7 @@ export function BlockFlowModal({
               ) : null}
               {action.status === 'verified' ? (
                 <p className="modal__verified">
-                  Verified at {timeUtcZ(new Date().toISOString())} by a blocked request carrying
-                  this action id.
+                  A persisted denied request matched this action&apos;s verification checks.
                 </p>
               ) : null}
             </>

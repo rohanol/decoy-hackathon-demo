@@ -38,6 +38,7 @@ services:
       LOG_PATH: /logs/web.json
       BLOCKLIST_PATH: /state/blocklist.json
       HONEYTOKENS_PATH: /config/honeytokens.yaml
+      WEB_EVENT_SCHEMA_VERSION: ${WEB_EVENT_SCHEMA_VERSION:-1.1}
     volumes:
       - ./state/web-log:/logs
       # A directory mount observes atomic rename updates to blocklist.json.

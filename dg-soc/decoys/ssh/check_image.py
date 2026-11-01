@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "cowrie/cowrie@sha256:baf351038db967704dfa39f7ce860e8875c9456cdab72a9d3257c4247211050d"
 CODE = r'''
 import socket
+from types import SimpleNamespace
 from cowrie.core.config import CowrieConfig
 CowrieConfig.read(["/lab/cowrie.cfg"])
 from cowrie.shell.pwd import Passwd
@@ -31,11 +32,16 @@ for name in ("wget", "curl", "nc", "ftpget", "tftp", "dig", "ping", "netstat", "
     assert cls is CommandLabNetwork
     command = cls.__new__(cls)
     command.args = ["https://example.invalid/not-fetched"]
+    emitted = []
+    command.protocol = SimpleNamespace(events=SimpleNamespace(dispatch=lambda *args, **kwargs: emitted.append((args, kwargs))))
     result = []
     command.write = result.append
     command.exit = lambda: None
     command.start()
     assert command.exit_code == 1 and result == ["Network access is unavailable on this host.\n"]
+    assert emitted and emitted[0][0][0] == "dgsoc.network.denied"
+    assert emitted[0][1]["command"] == "network tool"
+    assert len(emitted[0][1]["attempt_sha256"]) == 64
 print("PASS: real Cowrie passwd loader and filesystem read the embedded user/note; network commands are canned with DNS/connect traps")
 '''
 

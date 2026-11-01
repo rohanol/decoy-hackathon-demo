@@ -27,4 +27,14 @@ export const EVENT_STYLE: Record<EventType, EventStyle> = {
   http_request: { glyph: '◆', tone: 'accent' },
   synthetic_file_access: { glyph: '◆', tone: 'danger' },
   blocked_request: { glyph: '⊘', tone: 'ok' },
+  bait_served: { glyph: '◇', tone: 'warn' },
+  db_request: { glyph: '▹', tone: 'accent' },
+  file_operation: { glyph: '▤', tone: 'accent' },
 };
+
+const UNKNOWN_STYLE: EventStyle = { glyph: '·', tone: 'muted' };
+
+/** Style for any event type, including ones this build does not know (v1.1 adds types). */
+export function styleOf(type: string): EventStyle {
+  return (EVENT_STYLE as Record<string, EventStyle>)[type] ?? UNKNOWN_STYLE;
+}

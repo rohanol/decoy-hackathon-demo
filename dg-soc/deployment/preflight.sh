@@ -48,7 +48,18 @@ curl --connect-timeout 2 --max-time 5 -fsS "${BACKEND_URL}/api/health" >/dev/nul
 [ -f "$(dirname "$0")/state/blocklist.json" ] && python3 -c "import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d['entries'],list)" "$(dirname "$0")/state/blocklist.json" 2>/dev/null \
   && pass "blocklist.json exists and is valid JSON" || bad "blocklist.json missing or invalid (run deployment/bootstrap_state.sh)"
 [ -f "$(dirname "$0")/../decoys/ssh/fs.pickle" ] && pass "cowrie fs.pickle built" || bad "decoys/ssh/fs.pickle missing (run decoys/ssh/build_fs.sh)"
-pgrep -f '^python3? .*sensors/adapter\.py' >/dev/null && pass "adapter running" || bad "adapter not running (python sensors/adapter.py)"
+pgrep -f '(^|/)python(3([.][0-9]+)?)? .*sensors/adapter[.]py' >/dev/null && pass "adapter running" || bad "adapter not running (python sensors/adapter.py)"
+python3 - "$(dirname "$0")/state/collector-health.json" <<'PY' && pass "collector heartbeat fresh and healthy" || bad "collector heartbeat missing, stale or degraded"
+import json, sys
+from datetime import datetime, timezone
+try:
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+    stamp = datetime.fromisoformat(data["last_poll_at"].replace("Z", "+00:00"))
+    age = (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds()
+    raise SystemExit(0 if data.get("status") == "healthy" and 0 <= age <= 30 else 1)
+except (OSError, ValueError, KeyError, TypeError):
+    raise SystemExit(1)
+PY
 echo "$ATTACKER_IPS" | tr ',' '\n' | grep -qxE "${LAB_HOST_IP}|127\.0\.0\.1|.*/.*" && bad "ATTACKER_IPS contains the lab host, loopback or a range" || pass "ATTACKER_IPS are exact attacker IPs"
 grep -qE '^[[:space:]]*image:[[:space:]]*cowrie/cowrie@sha256:[0-9a-f]{64}' "$(dirname "$0")/docker-compose.yml" && pass "cowrie image pinned by digest" || bad "cowrie image not pinned (deployment/pin_cowrie.sh)"
 

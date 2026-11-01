@@ -1,5 +1,5 @@
 """R02: command_input in an SSH session that had auth_success."""
-from ._util import finding, in_order, ts
+from ._util import finding, in_order, mapped, roles, ts
 
 
 def evaluate(events: list, cfg) -> list:
@@ -14,9 +14,10 @@ def evaluate(events: list, cfg) -> list:
         if cmds:
             out.append(finding(
                 "R02", f"session={sid}",
-                techniques=["T1059.004"], stage="post_access",
+                mapping=[mapped("T1059.004", "emulated", "commands typed into the emulated Unix shell after login")],
+                stage="post_access",
                 label=f"Command submitted to an emulated shell after login ({len(cmds)} command(s))",
                 limitation="The shell is emulated; this does not show real command execution.",
-                events=[logins[0]] + cmds,
+                events=[logins[0]] + cmds, version=2, evidence_roles=roles(cmds, "request"),
             ))
     return out

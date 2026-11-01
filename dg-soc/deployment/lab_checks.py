@@ -97,8 +97,11 @@ def main(argv):
         if not expected:
             raise ValueError("ATTACKER_IPS must not be empty")
         errors = source_errors({"Cowrie": argv[1], "web": argv[2]}, expected)
+    elif len(argv) == 5 and argv[0] == "source-four":
+        expected = set(os.environ.get("ATTACKER_IPS", "192.168.77.10").replace(",", " ").split())
+        errors = source_errors(dict(zip(("Cowrie", "web", "MySQL", "SMB"), argv[1:])), expected)
     else:
-        raise ValueError("Usage: lab_checks.py host | source COWRIE_LOG WEB_LOG")
+        raise ValueError("Usage: lab_checks.py host | profile | source COWRIE_LOG WEB_LOG | source-four COWRIE_LOG WEB_LOG DB_LOG FILE_LOG")
     for error in errors:
         print("FAIL ", error)
     return int(bool(errors))

@@ -1,0 +1,1378 @@
+{
+  "note": "Generated from local synthetic clients and the real integrated backend; not physical captures.",
+  "incident": {
+    "incident_id": "inc_04",
+    "src_ip": "192.168.77.10",
+    "lab_run_id": "prototype-synthetic-browser",
+    "score": 15,
+    "severity": "low",
+    "capture_mode": "live",
+    "stages_observed": [
+      "post_access"
+    ],
+    "first_seen": "2026-11-01T00:37:55Z",
+    "last_seen": "2026-11-01T00:37:55Z",
+    "event_count": 3,
+    "case_kind": "ssh_session",
+    "grouping_basis": "sensor_session",
+    "sensor_id": "ssh-decoy-01",
+    "session_id": "prototype-ssh",
+    "parent_id": null,
+    "children": [],
+    "status": "open",
+    "quiet": false,
+    "findings": [
+      {
+        "rule_id": "R02",
+        "rule_version": "R02@2",
+        "technique_ids": [
+          "T1059.004"
+        ],
+        "mapping": [
+          {
+            "technique_id": "T1059.004",
+            "status": "emulated",
+            "rationale": "commands typed into the emulated Unix shell after login"
+          }
+        ],
+        "mapping_version": "map@2",
+        "stage": "post_access",
+        "label": "Command submitted to an emulated shell after login (1 command(s))",
+        "limitation": "The shell is emulated; this does not show real command execution.",
+        "evidence_event_ids": [
+          "evt_57a8452672fa",
+          "evt_4a0b8c54311c"
+        ],
+        "evidence_roles": {
+          "evt_4a0b8c54311c": "request"
+        },
+        "finding_id": "fnd_5b290163ef6d",
+        "incident_id": "inc_04",
+        "src_ip": "192.168.77.10",
+        "created_at": "2026-11-01T00:37:55.685Z",
+        "points": 15,
+        "pending_confirmation": false
+      },
+      {
+        "rule_id": "R09",
+        "rule_version": "R09@2",
+        "technique_ids": [],
+        "mapping": [],
+        "mapping_version": "map@2",
+        "stage": "none",
+        "label": "Honeytoken tok_backup_01 presented on ssh-decoy-01; served earlier by web-decoy-01 (honeytoken tok_backup_01 served by web:/.env (sensor response))",
+        "limitation": "Token reuse does not show that it is the same person.",
+        "evidence_event_ids": [
+          "evt_6359171eb9c1",
+          "evt_57a8452672fa"
+        ],
+        "evidence_roles": {
+          "evt_57a8452672fa": "presentation",
+          "evt_6359171eb9c1": "bait"
+        },
+        "token_relation": "linked",
+        "attribution": "unique",
+        "finding_id": "fnd_7f4da0a126a9",
+        "incident_id": "inc_04",
+        "src_ip": "192.168.77.10",
+        "created_at": "2026-11-01T00:37:55.685Z",
+        "points": 0,
+        "pending_confirmation": true
+      }
+    ],
+    "score_breakdown": [
+      {
+        "rule_id": "R02",
+        "points": 15,
+        "counted": true,
+        "reason": "first R02",
+        "finding_id": "fnd_5b290163ef6d"
+      },
+      {
+        "rule_id": "R09",
+        "points": 0,
+        "counted": false,
+        "reason": "R09 waits for the analyst to confirm the link",
+        "finding_id": "fnd_7f4da0a126a9"
+      }
+    ],
+    "links": [
+      {
+        "link_id": "lnk_0c6c61204f",
+        "from_event_id": "evt_6359171eb9c1",
+        "to_event_id": "evt_57a8452672fa",
+        "from_sensor": "web-decoy-01",
+        "to_sensor": "ssh-decoy-01",
+        "kind": "strong_candidate",
+        "basis": "honeytoken tok_backup_01 served by web:/.env (sensor response)",
+        "status": "open",
+        "decided_at": null,
+        "rationale": null,
+        "from_incident_id": "inc_02",
+        "to_incident_id": "inc_04",
+        "attribution": "unique",
+        "candidate_issuance_ids": []
+      },
+      {
+        "link_id": "lnk_96ba2ad707",
+        "from_event_id": "evt_dd63439513be",
+        "to_event_id": "evt_816b6ffe0a3f",
+        "from_sensor": "web-decoy-01",
+        "to_sensor": "ssh-decoy-01",
+        "kind": "candidate",
+        "basis": "same src_ip within 5 min",
+        "status": "open",
+        "decided_at": null,
+        "rationale": null,
+        "from_incident_id": "inc_03",
+        "to_incident_id": "inc_04",
+        "attribution": null,
+        "candidate_issuance_ids": []
+      },
+      {
+        "link_id": "lnk_a253af919e",
+        "from_event_id": "evt_19d032b6c73f",
+        "to_event_id": "evt_816b6ffe0a3f",
+        "from_sensor": "web-decoy-01",
+        "to_sensor": "ssh-decoy-01",
+        "kind": "candidate",
+        "basis": "same src_ip within 5 min",
+        "status": "open",
+        "decided_at": null,
+        "rationale": null,
+        "from_incident_id": "inc_01",
+        "to_incident_id": "inc_04",
+        "attribution": null,
+        "candidate_issuance_ids": []
+      },
+      {
+        "link_id": "lnk_e56821bee1",
+        "from_event_id": "evt_4d11505f05b5",
+        "to_event_id": "evt_816b6ffe0a3f",
+        "from_sensor": "web-decoy-01",
+        "to_sensor": "ssh-decoy-01",
+        "kind": "candidate",
+        "basis": "same src_ip within 5 min",
+        "status": "open",
+        "decided_at": null,
+        "rationale": null,
+        "from_incident_id": "inc_02",
+        "to_incident_id": "inc_04",
+        "attribution": null,
+        "candidate_issuance_ids": []
+      }
+    ],
+    "sessions": [
+      {
+        "session_id": "prototype-ssh",
+        "sensor_id": "ssh-decoy-01",
+        "started_at": "2026-11-01T00:37:55Z",
+        "commands": 1
+      }
+    ],
+    "summary": {
+      "source": "rules",
+      "text": "A command was submitted to an emulated shell [evidence: evt_57a8452672fa, evt_4a0b8c54311c]. A planted honeytoken was presented on another sensor; the candidate link awaits analyst confirmation [evidence: evt_6359171eb9c1, evt_57a8452672fa].",
+      "cited_event_ids": [
+        "evt_57a8452672fa",
+        "evt_4a0b8c54311c",
+        "evt_6359171eb9c1"
+      ],
+      "stale": false
+    },
+    "active_block": null
+  },
+  "cases": [
+    {
+      "incident_id": "inc_05",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-replay",
+      "score": 0,
+      "severity": "low",
+      "capture_mode": "replay",
+      "stages_observed": [],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 1,
+      "case_kind": "ssh_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "ssh-decoy-01",
+      "session_id": "replay-session",
+      "parent_id": null,
+      "children": [],
+      "status": "open",
+      "quiet": true
+    },
+    {
+      "incident_id": "inc_04",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-synthetic-browser",
+      "score": 15,
+      "severity": "low",
+      "capture_mode": "live",
+      "stages_observed": [
+        "post_access"
+      ],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 3,
+      "case_kind": "ssh_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "ssh-decoy-01",
+      "session_id": "prototype-ssh",
+      "parent_id": null,
+      "children": [],
+      "status": "open",
+      "quiet": false
+    },
+    {
+      "incident_id": "inc_03",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-synthetic-browser",
+      "score": 0,
+      "severity": "low",
+      "capture_mode": "live",
+      "stages_observed": [],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 3,
+      "case_kind": "web_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "web-decoy-01",
+      "session_id": "web_c0f232dc903325e161c176515e5f45848b3dde7221850421cfe298fdc0fa1023",
+      "parent_id": null,
+      "children": [],
+      "status": "open",
+      "quiet": false
+    },
+    {
+      "incident_id": "inc_02",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-synthetic-browser",
+      "score": 45,
+      "severity": "medium",
+      "capture_mode": "live",
+      "stages_observed": [
+        "exploit_attempt",
+        "lure_access"
+      ],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 7,
+      "case_kind": "web_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "web-decoy-01",
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "parent_id": null,
+      "children": [],
+      "status": "open",
+      "quiet": false
+    },
+    {
+      "incident_id": "inc_01",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-synthetic-browser",
+      "score": 0,
+      "severity": "low",
+      "capture_mode": "live",
+      "stages_observed": [],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 1,
+      "case_kind": "web_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "web-decoy-01",
+      "session_id": "web_b7d2ceaab418130bb8d182153df21aeef3a44f5503503d25a4ff6a2725cf697b",
+      "parent_id": null,
+      "children": [],
+      "status": "open",
+      "quiet": true
+    }
+  ],
+  "events": [
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_19d032b6c73f",
+      "seq": 1,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_01",
+      "source_record_id": "3400fcfe-c85f-424f-ad3f-32851dbeb7ea",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_b7d2ceaab418130bb8d182153df21aeef3a44f5503503d25a4ff6a2725cf697b",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "GET",
+        "path": "/",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_50bde1cd2e814698995923c38d15d415",
+        "input_features": {
+          "source": "none",
+          "field_count": 0,
+          "field_names": [],
+          "max_value_length": 0,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "anonymous"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_2eb51a8a3046",
+      "seq": 2,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_02",
+      "source_record_id": "e0bfeb49-eece-464a-b383-499a70c920e5",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "POST",
+        "path": "/login",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_b4de71518c0c4b36aebd5756a9108fd6",
+        "input_features": {
+          "source": "form",
+          "field_count": 2,
+          "field_names": [
+            "username"
+          ],
+          "max_value_length": 10,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "parsed",
+          "body_bytes": 46,
+          "body_consumed": true,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "form",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_89409ce50cd4",
+      "seq": 3,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_02",
+      "source_record_id": "db39e96a-a3fc-40ac-ba6e-ad4fe6328e3e",
+      "sensor_id": "web-decoy-01",
+      "event_type": "auth_success",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "username": "svc_portal",
+        "password_sha256": "084c235fbf6efc6ab082575c6977c6c7cade5e46a982a9692e2c1e9a8af7a443",
+        "method": "POST",
+        "path": "/login",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "honeytoken_id": "tok_portal_01",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_b4de71518c0c4b36aebd5756a9108fd6",
+        "input_features": {
+          "source": "form",
+          "field_count": 2,
+          "field_names": [
+            "username"
+          ],
+          "max_value_length": 10,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "parsed",
+          "body_bytes": 46,
+          "body_consumed": true,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "form",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated",
+        "previous_session_id": "web_b7d2ceaab418130bb8d182153df21aeef3a44f5503503d25a4ff6a2725cf697b"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_008318ad5180",
+      "seq": 4,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_02",
+      "source_record_id": "a2d33362-42a7-4dc7-b157-a404116c3924",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "GET",
+        "path": "/.env",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_e6a3ca5699df4082843ab89fead85c6a",
+        "input_features": {
+          "source": "none",
+          "field_count": 0,
+          "field_names": [],
+          "max_value_length": 0,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_6359171eb9c1",
+      "seq": 5,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_02",
+      "source_record_id": "beabfdca-ce78-4dae-a116-33deeee9b247",
+      "sensor_id": "web-decoy-01",
+      "event_type": "bait_served",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "emulated_result",
+      "evidence_role": "bait",
+      "attributes": {
+        "method": "GET",
+        "path": "/.env",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "asset_id": "web:/.env",
+        "size_bytes": 71,
+        "sha256": "81d324a52d87655947501ca5ac06a5b3a5f0ad91ac1fd0e99c43a8e03bfc2668",
+        "outcome": "served",
+        "observation_kind": "emulated_result",
+        "evidence_role": "bait",
+        "request_id": "req_e6a3ca5699df4082843ab89fead85c6a",
+        "honeytoken_ids": [
+          "tok_backup_01"
+        ],
+        "issuance_id": "issue_2cd075a9b03d49b19c8716b536efc3c7",
+        "evidence_basis": "sensor_response",
+        "fixture_version": "1",
+        "digest_scope": "full_asset",
+        "input_features": {
+          "source": "none",
+          "field_count": 0,
+          "field_names": [],
+          "max_value_length": 0,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated",
+        "evidence_kind": "bait_served"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_66389cd11af4",
+      "seq": 6,
+      "ingested_at": "2026-11-01T00:37:55.636Z",
+      "incident_id": "inc_02",
+      "source_record_id": "3fa6f67e-2871-42af-bc53-f8d8ca9ee82b",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "POST",
+        "path": "/search",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 500,
+        "response_class": "fake_error",
+        "outcome": "denied",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_1dd9d4cf41f444a29508e4dcede11303",
+        "input_features": {
+          "source": "json",
+          "field_count": 1,
+          "field_names": [
+            "q"
+          ],
+          "max_value_length": 28,
+          "indicators": [
+            "sql_keyword",
+            "sql_union_select"
+          ],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "parsed",
+          "body_bytes": 37,
+          "body_consumed": true,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "json",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_1542baf350d3",
+      "seq": 7,
+      "ingested_at": "2026-11-01T00:37:55.638Z",
+      "incident_id": "inc_02",
+      "source_record_id": "ec95acf3-bd40-4a05-bf0f-6bfab2875a09",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "GET",
+        "path": "/download",
+        "query_redacted": "file=customer_data.csv",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "fake_data",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_d48212fb808f432cb194ff5959f30990",
+        "input_features": {
+          "source": "query",
+          "field_count": 1,
+          "field_names": [
+            "file"
+          ],
+          "max_value_length": 17,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_4d11505f05b5",
+      "seq": 8,
+      "ingested_at": "2026-11-01T00:37:55.638Z",
+      "incident_id": "inc_02",
+      "source_record_id": "852928be-55d7-41bf-a54f-06aa168d0e3c",
+      "sensor_id": "web-decoy-01",
+      "event_type": "synthetic_file_access",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "emulated_result",
+      "evidence_role": "result",
+      "attributes": {
+        "method": "GET",
+        "path": "/download",
+        "query_redacted": "file=customer_data.csv",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "fake_data",
+        "asset_id": "customer_data.csv",
+        "size_bytes": 3728,
+        "sha256": "9753af0adf6da1ed936eeb50b4df0718eb1cee76e5c3d48bafc015980201f745",
+        "outcome": "served",
+        "observation_kind": "emulated_result",
+        "evidence_role": "result",
+        "request_id": "req_d48212fb808f432cb194ff5959f30990",
+        "fixture_version": "1",
+        "digest_scope": "full_asset",
+        "input_features": {
+          "source": "query",
+          "field_count": 1,
+          "field_names": [
+            "file"
+          ],
+          "max_value_length": 17,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated",
+        "evidence_kind": "asset_served"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_50feae1ed35f",
+      "seq": 9,
+      "ingested_at": "2026-11-01T00:37:55.638Z",
+      "incident_id": "inc_03",
+      "source_record_id": "ea24a576-42a9-45c2-b877-5eb528551970",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_c0f232dc903325e161c176515e5f45848b3dde7221850421cfe298fdc0fa1023",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "POST",
+        "path": "/login",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_cda86e9d03b149a19a07810734bf6e42",
+        "input_features": {
+          "source": "form",
+          "field_count": 2,
+          "field_names": [
+            "username"
+          ],
+          "max_value_length": 10,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "parsed",
+          "body_bytes": 46,
+          "body_consumed": true,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "form",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_6fcb6186dc80",
+      "seq": 10,
+      "ingested_at": "2026-11-01T00:37:55.638Z",
+      "incident_id": "inc_03",
+      "source_record_id": "ac9e268a-f67f-435d-ba0f-0b38d0df679b",
+      "sensor_id": "web-decoy-01",
+      "event_type": "auth_success",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_c0f232dc903325e161c176515e5f45848b3dde7221850421cfe298fdc0fa1023",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "username": "svc_portal",
+        "password_sha256": "084c235fbf6efc6ab082575c6977c6c7cade5e46a982a9692e2c1e9a8af7a443",
+        "method": "POST",
+        "path": "/login",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "honeytoken_id": "tok_portal_01",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_cda86e9d03b149a19a07810734bf6e42",
+        "input_features": {
+          "source": "form",
+          "field_count": 2,
+          "field_names": [
+            "username"
+          ],
+          "max_value_length": 10,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "parsed",
+          "body_bytes": 46,
+          "body_consumed": true,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "form",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated",
+        "previous_session_id": "web_7a785c927fba3b96319680c50d94e820e0ba0ab4947294968f2e9e81c9428458"
+      }
+    },
+    {
+      "schema_version": "1.1",
+      "event_id": "evt_dd63439513be",
+      "seq": 11,
+      "ingested_at": "2026-11-01T00:37:55.638Z",
+      "incident_id": "inc_03",
+      "source_record_id": "864817c5-4735-4057-a544-aa71492c6876",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "web_c0f232dc903325e161c176515e5f45848b3dde7221850421cfe298fdc0fa1023",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "method": "GET",
+        "path": "/dashboard",
+        "query_redacted": "",
+        "user_agent": "Werkzeug/3.1.9",
+        "status_code": 200,
+        "response_class": "normal",
+        "observation_kind": "network_input",
+        "evidence_role": "request",
+        "request_id": "req_c1b19c8030284d42a85b81438e52ec8b",
+        "input_features": {
+          "source": "none",
+          "field_count": 0,
+          "field_names": [],
+          "max_value_length": 0,
+          "indicators": [],
+          "truncated": false
+        },
+        "processing": {
+          "parse_status": "no_body",
+          "body_consumed": false,
+          "redaction_version": "2",
+          "producer_version": "m4-web@4"
+        },
+        "input_truncated": false,
+        "body_observation": "absent",
+        "normalisation_version": 1,
+        "redaction_version": 2,
+        "session_state": "authenticated"
+      }
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt_816b6ffe0a3f",
+      "seq": 12,
+      "ingested_at": "2026-11-01T00:37:55.683Z",
+      "incident_id": "inc_04",
+      "source_record_id": "ebb86d3822241e5fa61afdd7f8abdc2932420b6a31afa57360b0ac0e8845a489",
+      "sensor_id": "ssh-decoy-01",
+      "event_type": "connection_open",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 45000,
+      "session_id": "prototype-ssh",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {}
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt_57a8452672fa",
+      "seq": 13,
+      "ingested_at": "2026-11-01T00:37:55.683Z",
+      "incident_id": "inc_04",
+      "source_record_id": "cb3c711bfa2763cd3d9729ca22ad1807316b22c1991c6af65cf0acb21611282a",
+      "sensor_id": "ssh-decoy-01",
+      "event_type": "auth_success",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "prototype-ssh",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "network_input",
+      "evidence_role": "request",
+      "attributes": {
+        "username": "backup",
+        "password_sha256": "aeed687d56b3778fb5b51158ff6005ac65874f3169360258ef18279a6d9751cd",
+        "honeytoken_id": "tok_backup_01"
+      }
+    },
+    {
+      "schema_version": "1.0",
+      "event_id": "evt_4a0b8c54311c",
+      "seq": 14,
+      "ingested_at": "2026-11-01T00:37:55.683Z",
+      "incident_id": "inc_04",
+      "source_record_id": "c35dcae20ccfe96476392a42769bdd0f53cfaaffdab9e8d563672a1e1cfa17bf",
+      "sensor_id": "ssh-decoy-01",
+      "event_type": "command_input",
+      "occurred_at": "2026-11-01T00:37:55Z",
+      "src_ip": "192.168.77.10",
+      "src_port": null,
+      "session_id": "prototype-ssh",
+      "lab_run_id": "prototype-synthetic-browser",
+      "capture_mode": "live",
+      "ingest_namespace": "live",
+      "origin_record_id": null,
+      "observation_kind": "command_input",
+      "evidence_role": "request",
+      "attributes": {
+        "command": "whoami"
+      }
+    }
+  ],
+  "profile": {
+    "src_ip": "192.168.77.10",
+    "lab_run_id": "prototype-synthetic-browser",
+    "capture_mode": "live",
+    "first_seen": "2026-11-01T00:37:55Z",
+    "last_seen": "2026-11-01T00:37:55Z",
+    "sensors": {
+      "ssh-decoy-01": {
+        "cases": 1,
+        "events": 3
+      },
+      "web-decoy-01": {
+        "cases": 3,
+        "events": 11
+      }
+    },
+    "attempted_usernames": [
+      "backup",
+      "svc_portal"
+    ],
+    "client_claims": [
+      {
+        "sensor_id": "web-decoy-01",
+        "user_agent": "Werkzeug/3.1.9"
+      }
+    ],
+    "case_ids": [
+      "inc_01",
+      "inc_02",
+      "inc_03",
+      "inc_04"
+    ],
+    "note": "Everything seen from this address in this run. Several people can share one address (NAT); this is not a person."
+  },
+  "eligibility": {
+    "incident_id": "inc_04",
+    "eligible": true,
+    "target_ip": "192.168.77.10",
+    "lab_run_id": "prototype-synthetic-browser",
+    "capture_mode": "live",
+    "reasons": [],
+    "last_web_observation_at": "2026-11-01T00:37:55Z",
+    "checked_at": "2026-11-01T00:37:55.764Z"
+  },
+  "health": {
+    "ok": true,
+    "sensors": {
+      "ssh-decoy-01": "2026-11-01T00:37:55Z",
+      "web-decoy-01": "2026-11-01T00:37:55Z"
+    },
+    "sensor_health": {
+      "ssh-decoy-01": {
+        "service": "up",
+        "collection": "ok",
+        "activity": "recent",
+        "collector_id": "prototype-local-collector",
+        "heartbeat_at": "2026-11-01T00:37:55.699Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-01T00:37:55.695493Z",
+        "last_ingest_at": "2026-11-01T00:37:55.688114Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 3,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "clock_skew_s": -0.004,
+        "last_event_at": "2026-11-01T00:37:55Z"
+      },
+      "web-decoy-01": {
+        "service": "up",
+        "collection": "ok",
+        "activity": "recent",
+        "collector_id": "prototype-local-collector",
+        "heartbeat_at": "2026-11-01T00:37:55.697Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-01T00:37:55.695493Z",
+        "last_ingest_at": "2026-11-01T00:37:55.688114Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 11,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "clock_skew_s": -0.002,
+        "last_event_at": "2026-11-01T00:37:55Z"
+      }
+    }
+  },
+  "confirmed": {
+    "incident": {
+      "incident_id": "inc_04",
+      "src_ip": "192.168.77.10",
+      "lab_run_id": "prototype-synthetic-browser",
+      "score": 30,
+      "severity": "medium",
+      "capture_mode": "live",
+      "stages_observed": [
+        "post_access"
+      ],
+      "first_seen": "2026-11-01T00:37:55Z",
+      "last_seen": "2026-11-01T00:37:55Z",
+      "event_count": 3,
+      "case_kind": "ssh_session",
+      "grouping_basis": "sensor_session",
+      "sensor_id": "ssh-decoy-01",
+      "session_id": "prototype-ssh",
+      "parent_id": "inv_06",
+      "children": [],
+      "status": "open",
+      "quiet": false,
+      "findings": [
+        {
+          "rule_id": "R02",
+          "rule_version": "R02@2",
+          "technique_ids": [
+            "T1059.004"
+          ],
+          "mapping": [
+            {
+              "technique_id": "T1059.004",
+              "status": "emulated",
+              "rationale": "commands typed into the emulated Unix shell after login"
+            }
+          ],
+          "mapping_version": "map@2",
+          "stage": "post_access",
+          "label": "Command submitted to an emulated shell after login (1 command(s))",
+          "limitation": "The shell is emulated; this does not show real command execution.",
+          "evidence_event_ids": [
+            "evt_57a8452672fa",
+            "evt_4a0b8c54311c"
+          ],
+          "evidence_roles": {
+            "evt_4a0b8c54311c": "request"
+          },
+          "finding_id": "fnd_5b290163ef6d",
+          "incident_id": "inc_04",
+          "src_ip": "192.168.77.10",
+          "created_at": "2026-11-01T00:37:55.685Z",
+          "points": 15,
+          "pending_confirmation": false
+        },
+        {
+          "rule_id": "R09",
+          "rule_version": "R09@2",
+          "technique_ids": [],
+          "mapping": [],
+          "mapping_version": "map@2",
+          "stage": "none",
+          "label": "Honeytoken tok_backup_01 presented on ssh-decoy-01; served earlier by web-decoy-01 (honeytoken tok_backup_01 served by web:/.env (sensor response))",
+          "limitation": "Token reuse does not show that it is the same person.",
+          "evidence_event_ids": [
+            "evt_6359171eb9c1",
+            "evt_57a8452672fa"
+          ],
+          "evidence_roles": {
+            "evt_57a8452672fa": "presentation",
+            "evt_6359171eb9c1": "bait"
+          },
+          "token_relation": "linked",
+          "attribution": "unique",
+          "finding_id": "fnd_7f4da0a126a9",
+          "incident_id": "inc_04",
+          "src_ip": "192.168.77.10",
+          "created_at": "2026-11-01T00:37:55.685Z",
+          "points": 15,
+          "pending_confirmation": false
+        }
+      ],
+      "score_breakdown": [
+        {
+          "rule_id": "R02",
+          "points": 15,
+          "counted": true,
+          "reason": "first R02",
+          "finding_id": "fnd_5b290163ef6d"
+        },
+        {
+          "rule_id": "R09",
+          "points": 15,
+          "counted": true,
+          "reason": "first R09",
+          "finding_id": "fnd_7f4da0a126a9"
+        }
+      ],
+      "links": [
+        {
+          "link_id": "lnk_0c6c61204f",
+          "from_event_id": "evt_6359171eb9c1",
+          "to_event_id": "evt_57a8452672fa",
+          "from_sensor": "web-decoy-01",
+          "to_sensor": "ssh-decoy-01",
+          "kind": "strong_candidate",
+          "basis": "honeytoken tok_backup_01 served by web:/.env (sensor response)",
+          "status": "confirmed",
+          "decided_at": "2026-11-01T00:39:33.297Z",
+          "rationale": "Reviewed synthetic serving and token presentation evidence.",
+          "from_incident_id": "inc_02",
+          "to_incident_id": "inc_04",
+          "attribution": "unique",
+          "candidate_issuance_ids": []
+        },
+        {
+          "link_id": "lnk_96ba2ad707",
+          "from_event_id": "evt_dd63439513be",
+          "to_event_id": "evt_816b6ffe0a3f",
+          "from_sensor": "web-decoy-01",
+          "to_sensor": "ssh-decoy-01",
+          "kind": "candidate",
+          "basis": "same src_ip within 5 min",
+          "status": "open",
+          "decided_at": null,
+          "rationale": null,
+          "from_incident_id": "inc_03",
+          "to_incident_id": "inc_04",
+          "attribution": null,
+          "candidate_issuance_ids": []
+        },
+        {
+          "link_id": "lnk_a253af919e",
+          "from_event_id": "evt_19d032b6c73f",
+          "to_event_id": "evt_816b6ffe0a3f",
+          "from_sensor": "web-decoy-01",
+          "to_sensor": "ssh-decoy-01",
+          "kind": "candidate",
+          "basis": "same src_ip within 5 min",
+          "status": "open",
+          "decided_at": null,
+          "rationale": null,
+          "from_incident_id": "inc_01",
+          "to_incident_id": "inc_04",
+          "attribution": null,
+          "candidate_issuance_ids": []
+        },
+        {
+          "link_id": "lnk_e56821bee1",
+          "from_event_id": "evt_4d11505f05b5",
+          "to_event_id": "evt_816b6ffe0a3f",
+          "from_sensor": "web-decoy-01",
+          "to_sensor": "ssh-decoy-01",
+          "kind": "candidate",
+          "basis": "same src_ip within 5 min",
+          "status": "open",
+          "decided_at": null,
+          "rationale": null,
+          "from_incident_id": "inc_02",
+          "to_incident_id": "inc_04",
+          "attribution": null,
+          "candidate_issuance_ids": []
+        }
+      ],
+      "sessions": [
+        {
+          "session_id": "prototype-ssh",
+          "sensor_id": "ssh-decoy-01",
+          "started_at": "2026-11-01T00:37:55Z",
+          "commands": 1
+        }
+      ],
+      "summary": {
+        "source": "rules",
+        "text": "A command was submitted to an emulated shell [evidence: evt_57a8452672fa, evt_4a0b8c54311c]. A planted honeytoken was presented on another sensor; this does not identify a person [evidence: evt_6359171eb9c1, evt_57a8452672fa].",
+        "cited_event_ids": [
+          "evt_57a8452672fa",
+          "evt_4a0b8c54311c",
+          "evt_6359171eb9c1"
+        ],
+        "stale": false
+      },
+      "active_block": null
+    },
+    "cases": [
+      {
+        "incident_id": "inv_06",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-synthetic-browser",
+        "score": 90,
+        "severity": "critical",
+        "capture_mode": "live",
+        "stages_observed": [
+          "exploit_attempt",
+          "post_access",
+          "lure_access"
+        ],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 10,
+        "case_kind": "investigation",
+        "grouping_basis": "analyst_confirmed_link",
+        "sensor_id": null,
+        "session_id": null,
+        "parent_id": null,
+        "children": [
+          "inc_02",
+          "inc_04"
+        ],
+        "status": "open",
+        "quiet": false
+      },
+      {
+        "incident_id": "inc_05",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-replay",
+        "score": 0,
+        "severity": "low",
+        "capture_mode": "replay",
+        "stages_observed": [],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 1,
+        "case_kind": "ssh_session",
+        "grouping_basis": "sensor_session",
+        "sensor_id": "ssh-decoy-01",
+        "session_id": "replay-session",
+        "parent_id": null,
+        "children": [],
+        "status": "open",
+        "quiet": true
+      },
+      {
+        "incident_id": "inc_04",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-synthetic-browser",
+        "score": 30,
+        "severity": "medium",
+        "capture_mode": "live",
+        "stages_observed": [
+          "post_access"
+        ],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 3,
+        "case_kind": "ssh_session",
+        "grouping_basis": "sensor_session",
+        "sensor_id": "ssh-decoy-01",
+        "session_id": "prototype-ssh",
+        "parent_id": "inv_06",
+        "children": [],
+        "status": "open",
+        "quiet": false
+      },
+      {
+        "incident_id": "inc_03",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-synthetic-browser",
+        "score": 0,
+        "severity": "low",
+        "capture_mode": "live",
+        "stages_observed": [],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 3,
+        "case_kind": "web_session",
+        "grouping_basis": "sensor_session",
+        "sensor_id": "web-decoy-01",
+        "session_id": "web_c0f232dc903325e161c176515e5f45848b3dde7221850421cfe298fdc0fa1023",
+        "parent_id": null,
+        "children": [],
+        "status": "open",
+        "quiet": false
+      },
+      {
+        "incident_id": "inc_02",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-synthetic-browser",
+        "score": 45,
+        "severity": "medium",
+        "capture_mode": "live",
+        "stages_observed": [
+          "exploit_attempt",
+          "lure_access"
+        ],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 7,
+        "case_kind": "web_session",
+        "grouping_basis": "sensor_session",
+        "sensor_id": "web-decoy-01",
+        "session_id": "web_1ff8c15c7b3c2ac1b05ddc24ca5e6320fad3377841b7d6cca4a5ee2dea14f13e",
+        "parent_id": "inv_06",
+        "children": [],
+        "status": "open",
+        "quiet": false
+      },
+      {
+        "incident_id": "inc_01",
+        "src_ip": "192.168.77.10",
+        "lab_run_id": "prototype-synthetic-browser",
+        "score": 0,
+        "severity": "low",
+        "capture_mode": "live",
+        "stages_observed": [],
+        "first_seen": "2026-11-01T00:37:55Z",
+        "last_seen": "2026-11-01T00:37:55Z",
+        "event_count": 1,
+        "case_kind": "web_session",
+        "grouping_basis": "sensor_session",
+        "sensor_id": "web-decoy-01",
+        "session_id": "web_b7d2ceaab418130bb8d182153df21aeef3a44f5503503d25a4ff6a2725cf697b",
+        "parent_id": null,
+        "children": [],
+        "status": "open",
+        "quiet": true
+      }
+    ]
+  }
+}

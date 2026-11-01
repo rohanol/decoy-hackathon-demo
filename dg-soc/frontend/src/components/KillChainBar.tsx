@@ -9,7 +9,7 @@
  * the decoys only see what touched them.
  */
 
-import { STAGE_LABEL, STAGE_NOT_OBSERVED } from '../copy';
+import { STAGE_NOT_OBSERVED, stageLabel } from '../copy';
 import { KILL_CHAIN_STAGES, type Finding, type Severity, type Stage } from '../types/api';
 
 /**
@@ -39,10 +39,10 @@ export function KillChainStrip({
           <div
             key={stage}
             className={classes}
-            title={`${STAGE_LABEL[stage]}: ${isObserved ? 'observed' : STAGE_NOT_OBSERVED}`}
+            title={`${stageLabel(stage)}: ${isObserved ? 'observed' : STAGE_NOT_OBSERVED}`}
           >
             <span className="killchain__fill" aria-hidden="true" />
-            <span className="killchain__name">{STAGE_LABEL[stage]}</span>
+            <span className="killchain__name">{stageLabel(stage)}</span>
           </div>
         );
       })}
@@ -88,7 +88,7 @@ export function KillChainBar({
         const content = (
           <>
             <span className="killchain__fill" aria-hidden="true" />
-            <span className="killchain__name">{STAGE_LABEL[stage]}</span>
+            <span className="killchain__name">{stageLabel(stage)}</span>
             <span className="killchain__rules">
               {isObserved ? uniqueRules.join(' ') || '—' : STAGE_NOT_OBSERVED}
             </span>
@@ -100,7 +100,7 @@ export function KillChainBar({
             <div
               key={stage}
               className={classes}
-              aria-label={`${STAGE_LABEL[stage]}: ${isObserved ? uniqueRules.join(' ') : STAGE_NOT_OBSERVED}`}
+              aria-label={`${stageLabel(stage)}: ${isObserved ? uniqueRules.join(' ') : STAGE_NOT_OBSERVED}`}
             >
               {content}
             </div>
@@ -114,7 +114,7 @@ export function KillChainBar({
             className={classes}
             onClick={() => onStageClick(stage)}
             aria-pressed={isActive}
-            title={isActive ? 'Clear the stage filter' : `Filter findings to ${STAGE_LABEL[stage]}`}
+            title={isActive ? 'Clear the stage filter' : `Filter findings to ${stageLabel(stage)}`}
           >
             {content}
           </button>

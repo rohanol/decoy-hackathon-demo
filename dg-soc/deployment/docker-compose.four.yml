@@ -1,0 +1,43 @@
+# Optional direct-LAN four-decoy mode. No gateway or normal demo application.
+services:
+  cowrie:
+    restart: "no"
+  web-decoy:
+    restart: "no"
+    environment:
+      WEB_EVENT_SCHEMA_VERSION: "1.2"
+      CAPTURE_MODE: live
+  db-decoy:
+    build: ../decoys/database
+    container_name: dg-db-decoy
+    restart: "no"
+    ports: ["${LAB_HOST_IP}:3306:3306"]
+    environment:
+      LAB_RUN_ID: ${LAB_RUN_ID}
+      CAPTURE_MODE: live
+    volumes: ["./state/db-log:/logs"]
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [decoys]
+  file-decoy:
+    build:
+      context: ..
+      dockerfile: decoys/files/Dockerfile
+    container_name: dg-file-decoy
+    restart: "no"
+    ports: ["${LAB_HOST_IP}:445:1445"]
+    environment:
+      LAB_RUN_ID: ${LAB_RUN_ID}
+      CAPTURE_MODE: live
+    volumes:
+      - ./state/file-log:/logs
+      - ./state/file-quarantine:/quarantine
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    networks: [decoys]

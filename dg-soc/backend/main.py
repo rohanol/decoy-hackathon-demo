@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .db import Database
 from .integrations import Integrations
-from .models import IngestEvent, reason_for
+from .models import Heartbeat, IngestEvent, TelemetryRecord, reason_for
 
 HOST = "127.0.0.1"  # never bind anything else (AGENTS.md section 6)
 PORT = 8000
@@ -87,7 +87,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         yield
         db.close()
 
-    app = FastAPI(title="DeceptionGraph SOC", version="1.0", lifespan=lifespan)
+    app = FastAPI(title="DeceptionGraph SOC", version="1.2", lifespan=lifespan)
     app.state.db = db
     app.state.hooks = hooks
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_methods=["GET", "POST"],
@@ -114,7 +114,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     def full_incident(incident_id: str) -> dict:
         inc = db.incident_detail(incident_id)
-        inc["summary"] = hooks.summary(inc)
+        # Regenerated on every read, so never stale; the flag is for a future cached summary.
+        inc["summary"] = {**hooks.summary(inc), "stale": False}
         inc["active_block"] = hooks.active_block(inc["src_ip"])
         return inc
 
@@ -128,9 +129,7 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             summary = await run_in_threadpool(db.incident_summary, inc_id)
             await hub.send({"seq": seq, "type": "incident", "data": summary})
 
-    # ---- ingest ----
-    @app.post("/api/ingest/events")
-    async def ingest(request: Request):
+    async def json_batch(request: Request, key: str) -> list:
         # JSON only: a browser page cannot send this content type without a CORS preflight.
         if not request.headers.get("content-type", "").lower().startswith("application/json"):
             raise HTTPException(415, "Content-Type must be application/json")
@@ -139,46 +138,145 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
             body = json.loads(raw)
         except ValueError:
             raise HTTPException(400, "body is not valid JSON")
-        items = body.get("events") if isinstance(body, dict) else None
+        items = body.get(key) if isinstance(body, dict) else None
         if not isinstance(items, list):
-            raise HTTPException(400, 'body must be {"events": [...]}')
+            raise HTTPException(400, f'body must be {{"{key}": [...]}}')
         if len(items) > MAX_BATCH:
-            raise HTTPException(413, f"more than {MAX_BATCH} events in one request")
+            raise HTTPException(413, f"more than {MAX_BATCH} {key} in one request")
+        return items
+
+    # ---- ingest ----
+    @app.post("/api/ingest/events")
+    async def ingest(request: Request):
+        items = await json_batch(request, "events")
 
         valid: list[IngestEvent] = []
+        valid_index: list[int] = []  # position of each valid event in the request
         rejected: list[dict] = []
         for i, item in enumerate(items):
             try:
                 valid.append(IngestEvent.model_validate(item))
+                valid_index.append(i)
             except ValidationError as e:
                 rejected.append({"index": i, "reason": reason_for(e)})
 
         async with write_order:
             result = await run_in_threadpool(db.ingest, valid)  # commits; everything below runs after it
-            accepted = [s for s in result["stored"] if s is not None]
+            accepted, duplicates = [], 0
+            for i, (status, payload) in zip(valid_index, result["outcomes"]):
+                if status == "stored":
+                    accepted.append(payload)
+                elif status == "duplicate":
+                    duplicates += 1
+                else:  # rejected by storage rules, e.g. a run that already has the other capture mode
+                    rejected.append({"index": i, "reason": payload})
             for ev in accepted:
                 await hub.send({"seq": ev["seq"], "type": "event", "data": ev})
             await publish(result["findings"], result["links"], result["incidents"])
             for ev in accepted:
                 await hooks.on_event(ev)
-        return {"accepted": len(accepted), "duplicates": len(result["stored"]) - len(accepted),
-                "rejected": rejected}
+        return {"accepted": len(accepted), "duplicates": duplicates,
+                "rejected": sorted(rejected, key=lambda r: r["index"])}
+
+    @app.post("/api/ingest/telemetry")
+    async def ingest_telemetry(request: Request):
+        """v1.2: gateway and demo-app records. Stored apart from events; never cases, rules or scores."""
+        items = await json_batch(request, "records")
+        valid, valid_index, rejected = [], [], []
+        for i, item in enumerate(items):
+            try:
+                valid.append(TelemetryRecord.model_validate(item))
+                valid_index.append(i)
+            except ValidationError as e:
+                reason = reason_for(e, "record")
+                rejected.append({"index": i, "reason": reason.removeprefix("record: ")
+                                 if reason.startswith("record: attributes") else reason})
+        async with write_order:
+            outcomes = await run_in_threadpool(db.ingest_telemetry, valid)
+            accepted, duplicates = [], 0
+            for i, (status, payload) in zip(valid_index, outcomes):
+                if status == "stored":
+                    accepted.append(payload)
+                elif status == "duplicate":
+                    duplicates += 1
+                else:
+                    rejected.append({"index": i, "reason": payload})
+            if accepted:
+                seq = await run_in_threadpool(db.max_seq)
+                for rec in accepted:
+                    await hub.send({"seq": seq, "type": "telemetry", "data": rec})
+        return {"accepted": len(accepted), "duplicates": duplicates,
+                "rejected": sorted(rejected, key=lambda r: r["index"])}
+
+    @app.post("/api/ingest/heartbeat")
+    async def heartbeat(request: Request):
+        """One collector heartbeat per sensor (M2's adapter, every 10 s). Stored apart from events."""
+        if not request.headers.get("content-type", "").lower().startswith("application/json"):
+            raise HTTPException(415, "Content-Type must be application/json")
+        try:
+            body = json.loads(await _read_capped(request))
+        except ValueError:
+            raise HTTPException(400, "body is not valid JSON")
+        try:
+            hb = Heartbeat.model_validate(body)
+        except ValidationError as e:
+            raise HTTPException(400, reason_for(e))
+        await run_in_threadpool(db.record_heartbeat, hb)
+        return {"ok": True}
 
     # ---- reads ----
     @app.get("/api/events")
     def events(incident_id: Optional[str] = Query(None, max_length=64),
                sensor_id: Optional[str] = Query(None, max_length=64),
+               lab_run_id: Optional[str] = Query(None, max_length=128),
+               capture_mode: Optional[Literal["live", "replay"]] = None,
                since_seq: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
-        return db.list_events(incident_id, sensor_id, since_seq, limit)
+        return db.list_events(incident_id, sensor_id, since_seq, limit, lab_run_id, capture_mode)
+
+    @app.get("/api/telemetry")
+    def telemetry(source_id: Optional[Literal["gateway-01", "demo-app-01"]] = None,
+                  record_type: Optional[Literal["route_decision", "upstream_result", "app_request"]] = None,
+                  lab_run_id: Optional[str] = Query(None, max_length=128),
+                  capture_mode: Optional[Literal["live", "replay"]] = None,
+                  gateway_request_id: Optional[str] = Query(None, max_length=80),
+                  since_seq: int = Query(0, ge=0), limit: int = Query(200, ge=1, le=1000)):
+        return db.list_telemetry(source_id, record_type, lab_run_id, capture_mode, gateway_request_id, since_seq, limit)
+
+    @app.get("/api/gateway/requests/{gateway_request_id}")
+    def gateway_request(gateway_request_id: str, lab_run_id: Optional[str] = Query(None, max_length=128)):
+        out = db.gateway_request(gateway_request_id[:80], lab_run_id)
+        if out is None:
+            raise HTTPException(404, f"no record of gateway request {gateway_request_id[:80]}")
+        return out
+
+    @app.get("/api/sources")
+    def sources():
+        return db.sources()
+
+    @app.get("/api/runs")
+    def runs():
+        return {"items": db.list_runs()}
 
     @app.get("/api/incidents")
-    def incidents():
-        return {"items": db.list_incidents()}
+    def incidents(include_quiet: bool = True):
+        return {"items": db.list_incidents(include_quiet)}
 
     @app.get("/api/incidents/{incident_id}")
     def incident(incident_id: str):
         require_incident(incident_id)
         return full_incident(incident_id)
+
+    @app.get("/api/incidents/{incident_id}/response-eligibility")
+    def response_eligibility(incident_id: str):
+        out = db.response_eligibility(incident_id)
+        if out is None:
+            raise HTTPException(404, f"incident {incident_id} not found")
+        return out
+
+    @app.get("/api/incidents/{incident_id}/routing")
+    def incident_routing(incident_id: str):
+        require_incident(incident_id)
+        return db.incident_routing(incident_id)
 
     @app.get("/api/incidents/{incident_id}/transcript")
     def transcript(incident_id: str, session_id: Optional[str] = Query(None, max_length=128)):
@@ -201,6 +299,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     def links():
         return {"items": db.list_links()}
 
+    @app.get("/api/profiles")
+    def profiles(lab_run_id: Optional[str] = Query(None, max_length=128)):
+        return {"items": db.list_profiles(lab_run_id)}
+
+    @app.get("/api/profiles/{src_ip}")
+    def profile(src_ip: str, lab_run_id: str = Query(..., min_length=1, max_length=128)):
+        out = db.profile(src_ip, lab_run_id)
+        if out is None:
+            raise HTTPException(404, f"no events from {src_ip} in run {lab_run_id}")
+        return out
+
     @app.post("/api/links/{link_id}/decision")
     async def decide(link_id: str, body: LinkDecision):
         async with write_order:
@@ -218,7 +327,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "sensors": db.sensor_last_seen()}
+        return {"ok": True, "sensors": db.sensor_last_seen(), "sensor_health": db.sensor_health(),
+                "telemetry_health": db.telemetry_health()}
 
     @app.websocket("/ws/events")
     async def ws_events(ws: WebSocket):

@@ -12,6 +12,8 @@ import './styles/live.css';
 import './styles/incidents.css';
 import './styles/response.css';
 import './styles/chakra3d.css';
+import './styles/evidence.css';
+import './styles/v12.css';
 import './styles/captions.css';
 
 const container = document.getElementById('root');

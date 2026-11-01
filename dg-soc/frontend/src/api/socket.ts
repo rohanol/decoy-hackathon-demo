@@ -13,7 +13,7 @@ import { wsUrl } from './config';
 import type { FixtureSocket } from './fixtures';
 
 /** See client.ts: read here so a normal build drops the fake socket. */
-const MOCK = import.meta.env['VITE_USE_FIXTURES'] === '1';
+const MOCK = import.meta.env.VITE_USE_FIXTURES === '1';
 import type { WsMessage } from '../types/api';
 
 export type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'offline';

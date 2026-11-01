@@ -74,6 +74,12 @@
   font-size: 14px;
 }
 
+/* A v1.2 decoy the backend has not reported yet: present, but quiet. */
+.sensorcard--absent {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
 /* ---------- incident card meta ---------- */
 
 .inccard__count {

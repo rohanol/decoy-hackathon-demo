@@ -11,8 +11,8 @@ import { X } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AttackerText, CopyableValue } from './primitives';
-import { EVENT_TYPE_DESCRIPTION, EVENT_TYPE_LABEL, SENSOR_LABEL } from '../copy';
-import { EVENT_STYLE } from '../lib/eventStyle';
+import { SENSOR_LABEL, eventTypeDescription, eventTypeLabel } from '../copy';
+import { styleOf } from '../lib/eventStyle';
 import { bytes, fullUtc, shortHash } from '../lib/format';
 import type { SocEvent } from '../types/api';
 
@@ -70,7 +70,7 @@ export function RawEventDrawer({ event, onClose }: { event: SocEvent; onClose: (
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose]);
 
-  const style = EVENT_STYLE[event.event_type];
+  const style = styleOf(event.event_type);
   const attributes = Object.entries(event.attributes ?? {});
 
   return (
@@ -85,8 +85,8 @@ export function RawEventDrawer({ event, onClose }: { event: SocEvent; onClose: (
         <header className="evmodal__head">
           <span className={`evmodal__glyph evtype--${style.tone}`}>{style.glyph}</span>
           <div className="evmodal__titles">
-            <h2 className="evmodal__title">{EVENT_TYPE_LABEL[event.event_type]}</h2>
-            <p className="evmodal__desc">{EVENT_TYPE_DESCRIPTION[event.event_type]}</p>
+            <h2 className="evmodal__title">{eventTypeLabel(event.event_type)}</h2>
+            <p className="evmodal__desc">{eventTypeDescription(event.event_type)}</p>
           </div>
           <button
             ref={closeRef}

@@ -35,6 +35,42 @@ def test_cowrie_mapping_types_and_validation():
     assert all(ad.validate(e) is None for e in evs)
     assert all(e["sensor_id"] == "ssh-decoy-01" and e["src_ip"] == "192.168.77.10" for e in evs)
     assert all(set(e) <= ad.TOP_LEVEL_KEYS for e in evs)
+    fixture = FIX.read_text()
+    assert '"password"' not in fixture and "123456" not in fixture and "DemoPass-2026" not in fixture
+
+
+def test_generated_m4_v10_and_v11_records_validate_and_keep_v11_evidence():
+    fixtures = FIX.parent
+    for version in ("1_0", "1_1"):
+        path = fixtures / f"m4_web_events_v{version}.jsonl"
+        mapper = ad.WebMapper("fallback-run", "live", TOKENS)
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+        events = [mapper.map(line) for line in raw_lines]
+        assert len(events) == 20 and all(event is not None for event in events)
+        assert all(ad.validate(event) is None for event in events)
+        assert all(event["schema_version"] == version.replace("_", ".") for event in events)
+
+        if version == "1_1":
+            bait = next(event for event in events if event["event_type"] == "bait_served")
+            assert bait["attributes"]["evidence_role"] == "bait"
+            assert bait["attributes"]["input_features"]
+            assert bait["attributes"]["processing"]
+            replay = {**bait, "capture_mode": "replay", "origin_record_id": "original-web-event-01"}
+            replay = ad.WebMapper("fallback-run", "replay", TOKENS).map(json.dumps(replay))
+            assert ad.validate(replay) is None
+            assert replay["origin_record_id"] == "original-web-event-01"
+            assert replay["attributes"]["input_features"] == bait["attributes"]["input_features"]
+            assert replay["attributes"]["processing"] == bait["attributes"]["processing"]
+
+
+def test_sanitized_web_fixture_maps_request_bait_read_and_block():
+    p = FIX.parent / "web_sample.jsonl"
+    mapper = ad.WebMapper("run-t", "replay", TOKENS)
+    events = [mapper.map(line) for line in p.read_text().splitlines()]
+    assert [e["event_type"] for e in events] == ["http_request", "synthetic_file_access", "blocked_request"]
+    assert all(ad.validate(event) is None for event in events)
+    assert events[1]["attributes"]["outcome"] == "served"
+    assert events[2]["attributes"]["policy_revision"] == 3
 
 
 def test_source_record_id_is_sha256_of_raw_line():
@@ -43,11 +79,13 @@ def test_source_record_id_is_sha256_of_raw_line():
 
 
 def test_password_hashed_and_never_forwarded():
-    evs = map_all(fixture_lines())
+    line = json.dumps({"eventid": "cowrie.login.failed", "username": "dg_demo", "password": "fixture-only-secret",
+                       "timestamp": "2026-11-01T04:30:01Z", "src_ip": "192.168.77.10", "session": "a1b2c3d4"})
+    evs = map_all([line])
     blob = json.dumps(evs)
-    assert "DemoPass-2026" not in blob and "123456" not in blob and '"password"' not in blob
-    fail = evs[1]["attributes"]
-    assert fail["password_sha256"] == hashlib.sha256(b"123456").hexdigest() and fail["username"] == "dg_demo"
+    assert "fixture-only-secret" not in blob and '"password"' not in blob
+    fail = evs[0]["attributes"]
+    assert fail["password_sha256"] == hashlib.sha256(b"fixture-only-secret").hexdigest() and fail["username"] == "dg_demo"
 
 
 def test_client_version_attached_to_next_event_once():
@@ -60,6 +98,17 @@ def test_command_and_timestamps():
     evs = map_all(fixture_lines())
     assert evs[3]["attributes"]["command"] == "ls" and evs[4]["attributes"]["command"] == "cat notes.txt"
     assert evs[0]["occurred_at"] == "2026-11-01T04:30:00.100000Z"
+
+
+def test_only_dispatched_canned_network_handler_marks_denial():
+    mapper = ad.CowrieMapper("run-t", "live", {})
+    line = json.dumps({"eventid": "dgsoc.network.denied", "command": "curl https://example.invalid",
+                       "timestamp": "2026-11-01T04:31:00Z", "src_ip": "192.168.77.10", "session": "s"})
+    event = mapper.map(line)
+    assert event["event_type"] == "command_input"
+    assert event["attributes"]["command"] == "curl https://example.invalid"
+    assert event["attributes"]["network_attempt_outcome"] == "denied"
+    assert event["attributes"]["real_execution"] is False
 
 
 def test_honeytoken_match_and_negative():
@@ -93,6 +142,10 @@ def test_validate_rejects_bad_events():
     assert ad.validate({**ev, "event_type": "nope"}) == "event_type"
     assert ad.validate({**ev, "sensor_id": "x"}) == "sensor_id"
     assert ad.validate({**ev, "src_ip": "999.1.1.1"}) == "src_ip: not an ipv4"
+    bait = next(json.loads(line) for line in (FIX.parent / "m4_web_events_v1_1.jsonl").read_text().splitlines()
+                if json.loads(line)["event_type"] == "bait_served")
+    assert ad.validate({**bait, "schema_version": "1.0"}).startswith("event_type: bait_served")
+    assert ad.validate({**bait, "origin_record_id": "origin", "capture_mode": "live"}).startswith("origin_record_id")
 
 
 def test_read_new_lines_partial_line_and_truncation(tmp_path):
@@ -116,20 +169,31 @@ def test_batching_limits():
 
 
 class FakeBackend:
-    def __init__(self, fail_first=0):
-        self.received, self.fail_first, self.calls = [], fail_first, 0
+    def __init__(self, fail_first=0, reject_indices=()):
+        self.received, self.heartbeats, self.fail_first, self.calls = [], [], fail_first, 0
+        self.reject_indices = list(reject_indices)
         outer = self
 
         class H(BaseHTTPRequestHandler):
             def do_POST(self):
-                outer.calls += 1
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                if self.path.endswith("/heartbeat"):
+                    outer.heartbeats.append(body)
+                    out = json.dumps({"ok": True}).encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(out)))
+                    self.end_headers()
+                    self.wfile.write(out)
+                    return
+                outer.calls += 1
                 if outer.calls <= outer.fail_first:
                     self.send_response(503)
                     self.end_headers()
                     return
-                outer.received.extend(body["events"])
-                out = json.dumps({"accepted": len(body["events"]), "duplicates": 0, "rejected": []}).encode()
+                rejected = [{"index": i, "reason": "synthetic rejection"} for i in outer.reject_indices if i < len(body["events"])]
+                outer.received.extend(ev for i, ev in enumerate(body["events"]) if i not in outer.reject_indices)
+                out = json.dumps({"accepted": len(body["events"]) - len(rejected), "duplicates": 0, "rejected": rejected}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -158,12 +222,17 @@ def run_once(tmp_path, url, extra=()):
     if not cow.exists():
         cow.write_text(FIX.read_text())
     return ad.main(["--once", "--backend", url, "--cowrie-log", str(cow), "--web-log", str(tmp_path / "web.json"),
-                    "--checkpoint", str(tmp_path / "ckpt.json"), "--honeytokens", str(ROOT / "config" / "honeytokens.yaml"), *extra])
+                    "--checkpoint", str(tmp_path / "ckpt.json"), "--quarantine", str(tmp_path / "rejected.jsonl"),
+                    "--health", str(tmp_path / "health.json"), "--honeytokens", str(ROOT / "config" / "honeytokens.yaml"), *extra])
 
 
 def test_end_to_end_delivers_and_restart_does_not_resend(tmp_path, backend):
     assert run_once(tmp_path, backend.url) == 0
     assert len(backend.received) == 6
+    health = json.loads((tmp_path / "health.json").read_text())
+    ssh_heartbeat = next(item for item in health["heartbeats"] if item["sensor_id"] == "ssh-decoy-01")
+    assert ssh_heartbeat["ingest"]["accepted"] == 6
+    assert ssh_heartbeat["ingest"]["duplicate"] == 0
     run_once(tmp_path, backend.url)  # restart: checkpoint must prevent resend
     assert len(backend.received) == 6
     with open(tmp_path / "cowrie.json", "a") as fh:
@@ -171,6 +240,36 @@ def test_end_to_end_delivers_and_restart_does_not_resend(tmp_path, backend):
                              "src_ip": "192.168.77.10", "session": "a1b2c3d4"}) + "\n")
     run_once(tmp_path, backend.url)
     assert len(backend.received) == 7 and backend.received[-1]["attributes"]["command"] == "id"
+
+
+def test_pending_client_version_survives_collector_restart(tmp_path, backend):
+    cow = tmp_path / "cowrie.json"
+    version = {"eventid": "cowrie.client.version", "version": "SSH-2.0-fixture", "timestamp": "2026-11-01T04:30:00Z",
+               "src_ip": "192.168.77.10", "session": "restart-session"}
+    cow.write_text(json.dumps(version) + "\n")
+    assert run_once(tmp_path, backend.url) == 0
+    login = {"eventid": "cowrie.login.failed", "username": "demo", "password": "in-memory-secret",
+             "timestamp": "2026-11-01T04:30:01Z", "src_ip": "192.168.77.10", "session": "restart-session"}
+    with cow.open("a") as stream:
+        stream.write(json.dumps(login) + "\n")
+    assert run_once(tmp_path, backend.url) == 0
+    assert backend.received[0]["attributes"]["client_version"] == "SSH-2.0-fixture"
+    assert "in-memory-secret" not in json.dumps(backend.received)
+
+
+def test_generated_m4_v11_records_reach_backend_without_quarantine(tmp_path, backend):
+    (tmp_path / "cowrie.json").write_text("")
+    (tmp_path / "web.json").write_text((FIX.parent / "m4_web_events_v1_1.jsonl").read_text(encoding="utf-8"))
+    assert run_once(tmp_path, backend.url) == 0
+    assert len(backend.received) == 20
+    assert all(event["schema_version"] == "1.1" for event in backend.received)
+    bait = next(event for event in backend.received if event["event_type"] == "bait_served")
+    assert bait["attributes"]["input_features"] and bait["attributes"]["processing"]
+    assert bait["attributes"]["evidence_role"] == "bait"
+    assert not (tmp_path / "rejected.jsonl").exists()
+    health = json.loads((tmp_path / "health.json").read_text())
+    web_heartbeat = next(item for item in health["heartbeats"] if item["sensor_id"] == "web-decoy-01")
+    assert web_heartbeat["ingest"]["accepted"] == 20 and web_heartbeat["ingest"]["rejected"] == 0
 
 
 def test_retry_then_success(tmp_path, monkeypatch):
@@ -188,9 +287,56 @@ def test_backend_down_keeps_checkpoint(tmp_path, monkeypatch):
     run_once(tmp_path, "http://127.0.0.1:9")  # nothing listens on port 9
     ck = json.loads((tmp_path / "ckpt.json").read_text()) if (tmp_path / "ckpt.json").exists() else {}
     assert ck.get(str(tmp_path / "cowrie.json"), {}).get("offset", 0) == 0
+    assert json.loads((tmp_path / "health.json").read_text())["status"] == "degraded"
     b = FakeBackend()
     try:
         run_once(tmp_path, b.url)
         assert len(b.received) == 6  # nothing was lost
     finally:
         b.stop()
+
+
+def test_backend_rejection_is_sanitized_and_durable_before_checkpoint(tmp_path):
+    b = FakeBackend(reject_indices=(1,))
+    try:
+        assert run_once(tmp_path, b.url) == 0
+        records = [json.loads(line) for line in (tmp_path / "rejected.jsonl").read_text().splitlines()]
+        rejection = next(record for record in records if record["reason"] == "synthetic rejection")
+        assert rejection["event"]["event_type"] == "auth_failure"
+        serialized = json.dumps(records)
+        assert "123456" not in serialized and "DemoPass-2026" not in serialized
+        checkpoint = json.loads((tmp_path / "ckpt.json").read_text())
+        assert checkpoint[str(tmp_path / "cowrie.json")]["offset"] > 0
+    finally:
+        b.stop()
+
+
+def test_collector_health_updates_without_attack_activity(tmp_path):
+    empty = tmp_path / "cowrie.json"
+    empty.write_text("")
+    assert run_once(tmp_path, "http://127.0.0.1:9") == 0
+    health = json.loads((tmp_path / "health.json").read_text())
+    assert health["status"] == "healthy" and health["last_poll_at"]
+    assert health["last_poll_delivered"] == 0
+
+
+def test_heartbeat_matches_proposed_api_and_posts_while_idle(tmp_path, backend):
+    empty = tmp_path / "cowrie.json"
+    empty.write_text("")
+    assert run_once(tmp_path, backend.url) == 0
+    health = json.loads((tmp_path / "health.json").read_text())
+    assert health["heartbeat_api"] == "ok"
+    assert len(backend.heartbeats) == 4
+    assert {item["sensor_id"] for item in backend.heartbeats} == {
+        "ssh-decoy-01", "web-decoy-01", "db-decoy-01", "file-decoy-01"
+    }
+    heartbeat = next(item for item in backend.heartbeats if item["sensor_id"] == "ssh-decoy-01")
+    assert set(heartbeat) == {"collector_id", "sensor_id", "sent_at", "process_state", "last_read_at",
+        "last_ingest_at", "backlog_records", "oldest_backlog_age_s", "error_count", "ingest"}
+    assert heartbeat["collector_id"] == "adapter-laptop-b" and heartbeat["process_state"] == "running"
+    assert heartbeat["backlog_records"] == 0 and heartbeat["error_count"] == 0
+    assert set(heartbeat["ingest"]) == {"accepted", "duplicate", "rejected", "quarantined", "retry"}
+    assert heartbeat["ingest"]["accepted"] == 0 and heartbeat["ingest"]["rejected"] == 0
+    local = next(item for item in health["heartbeats"] if item["sensor_id"] == "ssh-decoy-01")
+    assert health["heartbeat_results"]["ssh-decoy-01"] is True
+    assert local == heartbeat

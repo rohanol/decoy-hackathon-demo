@@ -2,7 +2,37 @@
 # The adapter (M2) and web decoy (M4) hash every presented password and compare against these.
 # Match -> set attributes.honeytoken_id on the event. Never store the raw value anywhere.
 version: 1
+bait_assets:
+  - asset_id: "web:/backup/backup.zip"
+    sensor_id: web-decoy-01
+    path: /backup/backup.zip
+    honeytoken_ids: [tok_db_01, tok_smb_01]
+    fixture_version: "backup-zip@1"
+  - asset_id: "ssh:/home/dg_demo/notes.txt"
+    sensor_id: ssh-decoy-01
+    path: /home/dg_demo/notes.txt
+    honeytoken_ids: [tok_portal_01]
+    fixture_version: "1"
+  - asset_id: "web:/.env"
+    sensor_id: web-decoy-01
+    path: /.env
+    honeytoken_ids: [tok_backup_01]
+    fixture_version: "1"
 tokens:
+  - id: tok_db_01
+    description: MySQL login for svc_reports (backup.zip db_settings.txt)
+    username: svc_reports
+    value_sha256: ad29a75515f959bb0cef542932687bf40d8cb63290593f649dcc366807d5a9af
+    planted_on: web-decoy-01
+    placed_in: "web:/backup/backup.zip db_settings.txt"
+    valid_on: db-decoy-01
+  - id: tok_smb_01
+    description: SMB login for backup_ops (backup.zip share_accounts.csv)
+    username: backup_ops
+    value_sha256: c814e189f2a930dbe22858f0637216cc4d0d885cbe6fc024b596d2717a3b3784
+    planted_on: web-decoy-01
+    placed_in: "web:/backup/backup.zip share_accounts.csv"
+    valid_on: file-decoy-01
   - id: tok_portal_01
     description: Web portal login for svc_portal
     username: svc_portal

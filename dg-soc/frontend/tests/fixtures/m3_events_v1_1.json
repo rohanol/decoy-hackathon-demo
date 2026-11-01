@@ -1,0 +1,470 @@
+{
+ "_provenance": "Copied verbatim from contracts/examples/events_v1_1.json on m3/evidence-boundaries @ 9dde437 (PR #9, not merged). Replace with the merged file once contract v1.1 lands.",
+ "_upstream_note": "Synthetic, sanitised schema v1.1 examples (contract PR m3/evidence-boundaries). Not captured traffic. Password digests are placeholders except where a honeytoken digest from config/honeytokens.yaml is needed to show a token presentation. Scenario A = live run with two SSH users on one IP, multi-session guessing, bait read then token use. Scenario B = orphan token use (no bait served). Scenario C = replay run with origin_record_id.",
+ "events": [
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h1-open",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "connection_open",
+   "occurred_at": "2026-11-01T04:30:00Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50001,
+   "session_id": "h1",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "client_version": "SSH-2.0-libssh_0.10.6",
+    "observation_kind": "network_input",
+    "evidence_role": "request"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h1-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:01Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50001,
+   "session_id": "h1",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "observation_kind": "network_input",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h2-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:03Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50002,
+   "session_id": "h2",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h3-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:05Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50003,
+   "session_id": "h3",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h4-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:07Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50004,
+   "session_id": "h4",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-h5-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:09Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50005,
+   "session_id": "h5",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-open",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "connection_open",
+   "occurred_at": "2026-11-01T04:30:20Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "client_version": "SSH-2.0-OpenSSH_9.6"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-login",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_success",
+   "occurred_at": "2026-11-01T04:30:21Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "outcome": "emulated_success"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-ls",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "command_input",
+   "occurred_at": "2026-11-01T04:30:25Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "command": "ls -la",
+    "observation_kind": "command_input"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-echo",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "command_input",
+   "occurred_at": "2026-11-01T04:30:27Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "command": "echo \"try ls; find /tmp\""
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-cat",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "command_input",
+   "occurred_at": "2026-11-01T04:30:31Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "command": "cat notes.txt"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-bait",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "bait_served",
+   "occurred_at": "2026-11-01T04:30:31Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "asset_id": "ssh:/home/dg_demo/notes.txt",
+    "honeytoken_ids": [
+     "tok_portal_01"
+    ],
+    "issuance_id": "iss_a_notes_sess01",
+    "evidence_basis": "derived_from_command",
+    "derived_from_record_id": "a-ssh-s1-cat",
+    "observation_kind": "emulated_result",
+    "evidence_role": "bait",
+    "outcome": "emulated_success",
+    "fixture_version": "notes@1",
+    "issued_expires_at": null
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s1-close",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "connection_close",
+   "occurred_at": "2026-11-01T04:30:40Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50010,
+   "session_id": "sess01",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {}
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s2-open",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "connection_open",
+   "occurred_at": "2026-11-01T04:30:22Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50020,
+   "session_id": "sess02",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "client_version": "SSH-2.0-PuTTY_Release_0.81"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s2-login",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_success",
+   "occurred_at": "2026-11-01T04:30:23Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50020,
+   "session_id": "sess02",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+    "outcome": "emulated_success"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-s2-uptime",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "command_input",
+   "occurred_at": "2026-11-01T04:30:26Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50020,
+   "session_id": "sess02",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "command": "uptime"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-1",
+   "sensor_id": "web-decoy-01",
+   "event_type": "http_request",
+   "occurred_at": "2026-11-01T04:31:10Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51000,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "method": "POST",
+    "path": "/login",
+    "query_redacted": "username=svc_portal&password=<redacted>",
+    "user_agent": "curl/8.5.0",
+    "status_code": 200,
+    "response_class": "fake_data",
+    "username": "svc_portal",
+    "password_sha256": "084c235fbf6efc6ab082575c6977c6c7cade5e46a982a9692e2c1e9a8af7a443",
+    "honeytoken_id": "tok_portal_01",
+    "request_id": "req_a_login",
+    "observation_kind": "network_input",
+    "evidence_role": "request"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-2",
+   "sensor_id": "web-decoy-01",
+   "event_type": "http_request",
+   "occurred_at": "2026-11-01T04:31:15Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51001,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "method": "GET",
+    "path": "/.env",
+    "query_redacted": "",
+    "user_agent": "curl/8.5.0",
+    "status_code": 200,
+    "response_class": "fake_data",
+    "request_id": "req_a_env"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-2-bait",
+   "sensor_id": "web-decoy-01",
+   "event_type": "bait_served",
+   "occurred_at": "2026-11-01T04:31:15Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51001,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "asset_id": "web:/.env",
+    "honeytoken_ids": [
+     "tok_backup_01"
+    ],
+    "issuance_id": "iss_a_env_req2",
+    "evidence_basis": "sensor_response",
+    "request_id": "req_a_env",
+    "evidence_role": "bait",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "digest_scope": "full_sanitised_response",
+    "fixture_version": "env@1",
+    "outcome": "emulated_success"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-3",
+   "sensor_id": "web-decoy-01",
+   "event_type": "http_request",
+   "occurred_at": "2026-11-01T04:31:20Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51002,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "method": "GET",
+    "path": "/search",
+    "query_redacted": "q=x%27+UNION+SELECT+username%2Cpassword+FROM+users--",
+    "user_agent": "curl/8.5.0",
+    "status_code": 500,
+    "response_class": "fake_error",
+    "request_id": "req_a_search"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-4",
+   "sensor_id": "web-decoy-01",
+   "event_type": "http_request",
+   "occurred_at": "2026-11-01T04:31:25Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51003,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "method": "GET",
+    "path": "/search",
+    "query_redacted": "q=rock+and+roll+--",
+    "user_agent": "Mozilla/5.0",
+    "status_code": 200,
+    "response_class": "normal",
+    "request_id": "req_a_benign"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-web-req-5",
+   "sensor_id": "web-decoy-01",
+   "event_type": "synthetic_file_access",
+   "occurred_at": "2026-11-01T04:31:30Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 51004,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "asset_id": "customer_data.csv",
+    "size_bytes": 3728,
+    "outcome": "served",
+    "request_id": "req_a_csv",
+    "sha256": "9753af0adf6da1ed936eeb50b4df0718eb1cee76e5c3d48bafc015980201f745",
+    "digest_scope": "full_asset",
+    "observation_kind": "emulated_result",
+    "evidence_role": "result"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "a-ssh-backup-login",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:31:40Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50030,
+   "session_id": "sess03",
+   "lab_run_id": "run-2026-11-01-01",
+   "capture_mode": "live",
+   "attributes": {
+    "username": "backup",
+    "password_sha256": "aeed687d56b3778fb5b51158ff6005ac65874f3169360258ef18279a6d9751cd",
+    "honeytoken_id": "tok_backup_01",
+    "outcome": "failed"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "b-web-orphan",
+   "sensor_id": "web-decoy-01",
+   "event_type": "http_request",
+   "occurred_at": "2026-11-01T05:00:00Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 52000,
+   "session_id": null,
+   "lab_run_id": "run-2026-11-01-02",
+   "capture_mode": "live",
+   "attributes": {
+    "method": "POST",
+    "path": "/login",
+    "query_redacted": "username=svc_portal&password=<redacted>",
+    "user_agent": "curl/8.5.0",
+    "status_code": 200,
+    "response_class": "fake_data",
+    "username": "svc_portal",
+    "password_sha256": "084c235fbf6efc6ab082575c6977c6c7cade5e46a982a9692e2c1e9a8af7a443",
+    "honeytoken_id": "tok_portal_01",
+    "request_id": "req_b_login"
+   }
+  },
+  {
+   "schema_version": "1.1",
+   "source_record_id": "replay-a-ssh-h1-fail",
+   "origin_record_id": "a-ssh-h1-fail",
+   "sensor_id": "ssh-decoy-01",
+   "event_type": "auth_failure",
+   "occurred_at": "2026-11-01T04:30:01Z",
+   "src_ip": "192.168.77.10",
+   "src_port": 50001,
+   "session_id": "h1",
+   "lab_run_id": "replay-2026-11-01-a",
+   "capture_mode": "replay",
+   "attributes": {
+    "username": "dg_demo",
+    "password_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "outcome": "failed"
+   }
+  }
+ ]
+}

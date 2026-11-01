@@ -7,9 +7,9 @@
  * live capture.
  */
 
-export const API_BASE: string = import.meta.env['VITE_API_BASE'] ?? 'http://127.0.0.1:8000';
+export const API_BASE: string = import.meta.env.VITE_API_BASE ?? 'http://127.0.0.1:8000';
 
-export const USE_FIXTURES: boolean = import.meta.env['VITE_USE_FIXTURES'] === '1';
+export const USE_FIXTURES: boolean = import.meta.env.VITE_USE_FIXTURES === '1';
 
 /** ws://127.0.0.1:8000/ws/events, derived from API_BASE. */
 export function wsUrl(): string {

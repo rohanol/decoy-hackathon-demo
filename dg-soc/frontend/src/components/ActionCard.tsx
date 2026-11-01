@@ -20,6 +20,7 @@ const PILL_TONE: Record<ActionStatus, string> = {
   verified: 'pill--ok',
   expired: '',
   revoked: '',
+  reconciliation_required: 'pill--warn',
 };
 
 export function ActionStatusPill({ status }: { status: ActionStatus }) {

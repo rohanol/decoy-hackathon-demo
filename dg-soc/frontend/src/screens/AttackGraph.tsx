@@ -1,8 +1,8 @@
 /**
  * Screen 6 — Attack Graph. DESIGN_SPEC.md section 11.
  *
- * Three kinds of node: the attacker IPs on the left, the two decoys on the
- * right. Thin edges are observed traffic. The edge between the two decoys is
+ * Source cases on the left, four decoys on the right. Thin edges are observed
+ * traffic. Edges between decoys are backend-reported relationships. A link's
  * the cross-decoy link, and its dashed-to-solid transition on confirmation is
  * the visual climax of the demo.
  *
@@ -26,7 +26,6 @@ import { number } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { GraphViewToggle } from './GraphViewToggle';
 import {
-  SENSOR_IDS,
   type IncidentSummary,
   type Link,
   type SensorId,
@@ -44,8 +43,11 @@ const ATTACKER_Y0 = 56;
 const SENSOR_X = 640;
 const SENSOR_W = 220;
 const SENSOR_H = 76;
-const SSH_Y = 48;
-const WEB_Y = 268;
+/**
+ * Fixed rows for all four decoys preserve the topology between refreshes.
+ */
+const GRAPH_SENSORS: readonly SensorId[] = ['ssh-decoy-01', 'web-decoy-01', 'db-decoy-01', 'file-decoy-01'];
+
 
 interface GraphData {
   incidents: IncidentSummary[];
@@ -56,7 +58,7 @@ interface GraphData {
 }
 
 function sensorY(sensorId: SensorId): number {
-  return sensorId === 'ssh-decoy-01' ? SSH_Y : WEB_Y;
+  return 48 + Math.max(0, GRAPH_SENSORS.indexOf(sensorId)) * 152;
 }
 
 /** A gentle cubic from the attacker's right edge to a sensor's left edge. */
@@ -70,9 +72,11 @@ function trafficPath(ay: number, sy: number): string {
 }
 
 /** The cross-decoy edge: a vertical run down the right-hand column. */
-function linkPath(offset: number): string {
-  const x = SENSOR_X + SENSOR_W / 2 + offset;
-  return `M ${x} ${SSH_Y + SENSOR_H} L ${x} ${WEB_Y}`;
+function linkPath(offset: number, from: SensorId, to: SensorId): string {
+  const x = SENSOR_X + SENSOR_W;
+  const y1 = sensorY(from) + SENSOR_H / 2;
+  const y2 = sensorY(to) + SENSOR_H / 2;
+  return `M ${x} ${y1} C ${x + 40 + offset} ${y1}, ${x + 40 + offset} ${y2}, ${x} ${y2}`;
 }
 
 function AttackerNode({
@@ -125,12 +129,9 @@ function SensorNode({
   onOpen: () => void;
 }) {
   const y = sensorY(sensorId);
-  const tone =
-    lastSeen === null || lastSeen === undefined
-      ? 'neutral'
-      : (Date.now() - new Date(lastSeen).getTime()) / 1000 < 60
-        ? 'ok'
-        : 'warn';
+  // lastSeen is attacker activity, not sensor health (review F9), so it never
+  // colours the node green. v1.0 reports no collector health to show here.
+  const tone = 'neutral';
 
   return (
     <g
@@ -138,7 +139,7 @@ function SensorNode({
       onClick={onOpen}
       role="button"
       tabIndex={0}
-      aria-label={`${SENSOR_LABEL[sensorId]} ${sensorId}`}
+      aria-label={`${SENSOR_LABEL[sensorId]} ${sensorId}${lastSeen ? `, last event ${lastSeen}` : ''}`}
       onKeyDown={(keyEvent) => {
         if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
           keyEvent.preventDefault();
@@ -183,12 +184,12 @@ export function AttackGraph() {
           const touched = new Set<SensorId>();
           const [detail, ...probes] = await Promise.all([
             fetchEvents({ incident_id: incident.incident_id, limit: 200 }),
-            ...SENSOR_IDS.map((sensorId) =>
+            ...GRAPH_SENSORS.map((sensorId) =>
               fetchEvents({ incident_id: incident.incident_id, sensor_id: sensorId, limit: 1 }),
             ),
           ]);
           probes.forEach((page, index) => {
-            const sensorId = SENSOR_IDS[index];
+            const sensorId = GRAPH_SENSORS[index];
             if (sensorId && page.items.length > 0) touched.add(sensorId);
           });
           presence.set(incident.incident_id, touched);
@@ -229,7 +230,7 @@ export function AttackGraph() {
 
   const canvasHeight = useMemo(() => {
     const attackerCount = Math.max(1, data?.incidents.length ?? 1);
-    return Math.max(400, ATTACKER_Y0 + attackerCount * ATTACKER_GAP + 24);
+    return Math.max(660, ATTACKER_Y0 + attackerCount * ATTACKER_GAP + 24);
   }, [data]);
 
   const openLinks = data?.links.filter((link) => link.status === 'open').length ?? 0;
@@ -283,7 +284,7 @@ export function AttackGraph() {
             {incidents.map((incident, index) => {
               const y = ATTACKER_Y0 + index * ATTACKER_GAP;
               const touched = data?.presence.get(incident.incident_id) ?? new Set<SensorId>();
-              return SENSOR_IDS.filter((sensorId) => touched.has(sensorId)).map((sensorId) => (
+              return GRAPH_SENSORS.filter((sensorId) => touched.has(sensorId)).map((sensorId) => (
                 <path
                   key={`${incident.incident_id}-${sensorId}`}
                   className="gedge gedge--traffic"
@@ -300,10 +301,10 @@ export function AttackGraph() {
               // strong_candidate and a same-IP candidate), and labels drawn at a
               // shared y overlap each other and cover the neighbouring line,
               // which makes that link impossible to click.
-              const offset = (index - (links.length - 1) / 2) * 36;
-              const centreY = (SSH_Y + SENSOR_H + WEB_Y) / 2;
-              const midY = centreY + (index - (links.length - 1) / 2) * 30;
-              const x = SENSOR_X + SENSOR_W / 2 + offset;
+              const offset = (index % 4) * 4;
+              const centreY = (sensorY(link.from_sensor) + sensorY(link.to_sensor) + SENSOR_H) / 2;
+              const midY = centreY + (index % 5 - 2) * 24;
+              const x = 445;
               const label =
                 link.status === 'confirmed'
                   ? 'confirmed'
@@ -312,7 +313,8 @@ export function AttackGraph() {
                     : link.kind === 'strong_candidate'
                       ? `candidate · ${link.basis.replace(/^honeytoken\s+/, '')}`
                       : 'candidate';
-              const labelWidth = label.length * 6.1 + 16;
+              const visibleLabel = label.length > 55 ? label.slice(0, 52) + '…' : label;
+              const labelWidth = visibleLabel.length * 6.1 + 16;
               const interactive = true;
 
               return (
@@ -331,8 +333,9 @@ export function AttackGraph() {
                   }}
                 >
                   {/* Invisible fat path so the edge is easy to hit. */}
-                  <path className="glink__hit" d={linkPath(offset)} />
-                  <path className="glink__line" d={linkPath(offset)} />
+                  <title>{label}</title>
+                  <path className="glink__hit" d={linkPath(offset, link.from_sensor, link.to_sensor)} />
+                  <path className="glink__line" d={linkPath(offset, link.from_sensor, link.to_sensor)} />
                   <rect
                     className="glink__labelbg"
                     x={x - labelWidth / 2}
@@ -342,7 +345,7 @@ export function AttackGraph() {
                     rx={4}
                   />
                   <text className="glink__label" x={x} y={midY + 4}>
-                    {label}
+                    {visibleLabel}
                   </text>
                 </g>
               );
@@ -357,7 +360,7 @@ export function AttackGraph() {
               />
             ))}
 
-            {SENSOR_IDS.map((sensorId) => (
+            {GRAPH_SENSORS.map((sensorId) => (
               <SensorNode
                 key={sensorId}
                 sensorId={sensorId}
@@ -389,6 +392,10 @@ export function AttackGraph() {
         An edge means the API reported traffic from that source on that decoy. A link between
         the decoys is a claim about the same source following our planted trail — it does not
         identify a person.
+      </p>
+      <p className="graph__note">
+        This view shows all four decoys. Relationships come from backend evidence and analyst decisions;
+        a web block covers only the web decoy.
       </p>
 
       {decidingLink && data ? (
