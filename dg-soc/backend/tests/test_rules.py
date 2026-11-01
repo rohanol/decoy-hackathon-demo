@@ -121,14 +121,16 @@ def web(path, query=None, etype="http_request", **attrs):
 def test_r07_finding_shape_and_techniques():
     out = r07.evaluate([web("/search", "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")], CFG)
     assert len(out) == 1 and out[0]["web_attack_class"] == ["xss"]
-    assert out[0]["technique_ids"] == ["T1190", "T1059.007"] and out[0]["stage"] == "exploit_attempt"
+    # map@2: T1190 only; XSS-looking text is not JavaScript execution
+    assert out[0]["technique_ids"] == ["T1190"] and out[0]["stage"] == "exploit_attempt"
+    assert out[0]["mapping"][0]["status"] == "attempted" and out[0]["mapping_version"] == "map@2"
 
 
-def test_r07_multiple_classes_and_rfi_technique():
+def test_r07_multiple_classes_and_rfi_is_t1190_only():
     out = r07.evaluate([web("/ping", "host=127.0.0.1;cat /etc/passwd")], CFG)
     assert out[0]["web_attack_class"] == ["lfi", "cmd_injection"]
     rfi = r07.evaluate([web("/download", "file=http://192.168.77.10/shell.txt")], CFG)
-    assert "T1105" in rfi[0]["technique_ids"]
+    assert rfi[0]["web_attack_class"] == ["rfi"] and rfi[0]["technique_ids"] == ["T1190"]  # no T1105
 
 
 def test_r07_blocked_request_never_fires():
@@ -155,8 +157,18 @@ def _timed(e, at):
 
 
 def test_r08_five_hidden_paths_yes_four_no():
-    assert len(r08.evaluate(probes([0, 1, 2, 3, 4]), CFG)) == 1
-    assert r08.evaluate(probes([0, 1, 2, 3]), CFG) == []
+    def spread(offsets):
+        paths = ["/admin", "/.git/config", "/backup", "/admin/login.php", "/.env"]
+        return [_timed(web(paths[i % len(paths)]), t) for i, t in enumerate(offsets)]
+    assert len(r08.evaluate(spread([0, 1, 2, 3, 4]), CFG)) == 1
+    assert r08.evaluate(spread([0, 1, 2, 3]), CFG) == []
+
+
+def test_r08_reloads_of_one_hidden_path_are_not_scanning():
+    """map@2: five reloads of /admin are not wordlist scanning; 3+ distinct paths are needed."""
+    assert r08.evaluate(probes([0, 1, 2, 3, 4]), CFG) == []
+    two = [_timed(web(p), t) for t, p in enumerate(["/admin", "/backup"] * 3)]
+    assert r08.evaluate(two, CFG) == []
 
 
 def test_r08_spread_over_61s_no():
@@ -243,7 +255,7 @@ def test_fixture_run_produces_expected_rules_once(client):
     assert rules[("ssh_session", "sess01")] == ["R02", "R03"]
     assert sorted(rules[("web_activity", None)]) == ["R04", "R07", "R09"]
     assert all(rules[("ssh_session", f"hyd{i}")] == [] and cases[("ssh_session", f"hyd{i}")]["quiet"] for i in range(6))
-    assert cases[("web_activity", None)]["stages_observed"] == ["exploit_attempt", "data_access"]
+    assert cases[("web_activity", None)]["stages_observed"] == ["exploit_attempt", "lure_access"]  # map@2
     # the blocked_request fixture event is evidence for nothing
     blocked_ids = {i["event_id"] for i in db.list_events()["items"] if i["event_type"] == "blocked_request"}
     cited = {e for c in cases.values() for f in db.list_findings(c["incident_id"]) for e in f["evidence_event_ids"]}
@@ -325,9 +337,10 @@ def test_r01_login_kept_in_evidence_when_capped():
     assert len(out["evidence_event_ids"]) == 50 and out["evidence_event_ids"][-1] == es[-1]["event_id"]
 
 
-def test_changed_rules_carry_version_2():
-    assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@2"
-    assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@2"
-    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@4"  # PR 2: body indicators
+def test_changed_rules_carry_their_version():
+    # PR 4 (map@2): R01 distinct passwords, R02/R04 mapping, R03 quotes, R07 T1190 only, R08 distinct paths
+    assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@3"
+    assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@3"
+    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@5"
     assert r02.evaluate([ev(etype="auth_success"), ev(etype="command_input", at=1, command="id")],
-                        CFG)[0]["rule_version"] == "R02@1"
+                        CFG)[0]["rule_version"] == "R02@2"

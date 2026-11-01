@@ -100,13 +100,17 @@ CREATE TABLE IF NOT EXISTS links (
     rationale        TEXT,
     from_incident_id TEXT NOT NULL,
     to_incident_id   TEXT NOT NULL,
-    created_at       TEXT NOT NULL
+    created_at       TEXT NOT NULL,
+    attribution      TEXT,
+    candidate_issuance_ids TEXT NOT NULL DEFAULT '[]'
 );
 """
 
 # PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (PR 2),
-# 2 = session cases, credential cases and investigations (PR 3).
-DB_VERSION = 2
+# 2 = session cases, credential cases and investigations (PR 3),
+# 3 = token links carry attribution and candidate issuances (PR 4).
+DB_VERSION = 3
+LINK_COLUMNS_V3 = (("attribution", "TEXT"), ("candidate_issuance_ids", "TEXT NOT NULL DEFAULT '[]'"))
 ACTIVE_RUN_MINUTES = 15
 
 # v0 -> v1. SQLite cannot drop the old UNIQUE(sensor_id, source_record_id) in place, so the
@@ -190,9 +194,10 @@ ALTER TABLE incidents_v2 RENAME TO incidents;
 SENSORS = ("ssh-decoy-01", "web-decoy-01")
 SSH = "ssh-decoy-01"
 SESSION_KINDS = ("ssh_session", "ssh_unsessioned", "web_session", "web_activity")
-STAGE_ORDER = ["recon", "credential_attack", "exploit_attempt", "post_access", "data_access"]
+STAGE_ORDER = ["recon", "credential_attack", "exploit_attempt", "post_access", "lure_access", "data_access"]
 LINK_FIELDS = ["link_id", "from_event_id", "to_event_id", "from_sensor", "to_sensor",
-               "kind", "basis", "status", "decided_at", "rationale", "from_incident_id", "to_incident_id"]
+               "kind", "basis", "status", "decided_at", "rationale", "from_incident_id", "to_incident_id",
+               "attribution", "candidate_issuance_ids"]
 TRANSCRIPT_KINDS = {"auth_failure": "login_failed", "auth_success": "login_ok",
                     "command_input": "command", "connection_close": "close"}
 PROFILE_NOTE = ("Everything seen from this address in this run. Several people can share one "
@@ -270,9 +275,16 @@ class Database:
             self._backup("v0")
             c.executescript(MIGRATE_V0_V1)
             version = 1
-        if has_events and version == 1:
-            self._backup("v1")
-            self._migrate_v1_v2()
+        if has_events and version in (1, 2):
+            self._backup(f"v{version}")
+            # Columns first: the v2 step re-derives links, which now carry attribution.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(links)")}
+            for name, decl in LINK_COLUMNS_V3:
+                if name not in have:
+                    c.execute(f"ALTER TABLE links ADD COLUMN {name} {decl}")
+            if version == 1:
+                self._migrate_v1_v2()
+            c.execute(f"PRAGMA user_version = {DB_VERSION}")
         c.executescript(SCHEMA)  # creates whatever is missing; no-op on an up-to-date file
         if not has_events:
             c.execute(f"PRAGMA user_version = {DB_VERSION}")
@@ -300,9 +312,10 @@ class Database:
                       "from_incident_id=(SELECT incident_id FROM events WHERE event_id=links.from_event_id), "
                       "to_incident_id=(SELECT incident_id FROM events WHERE event_id=links.to_event_id)")
             cases |= self._refresh_credential_cases(c, sources)
-            self._refresh_links(c, {inc: self._incident_events(c, inc) for inc in sorted(cases)}, sources)
+            self._refresh_links(c, {inc: self._incident_events(c, inc) for inc in sorted(cases)}, sources,
+                                {(run, mode) for _, run, mode in sources})
             for row in c.execute("SELECT * FROM links WHERE status='confirmed' ORDER BY decided_at, link_id").fetchall():
-                cases |= self._apply_investigation(c, dict(row))
+                cases |= self._apply_investigation(c, self._link_row(row))
             for inc in self._sync_order(c, cases):
                 self._sync_incident(c, inc)
             c.execute(f"PRAGMA user_version = {DB_VERSION}")
@@ -347,7 +360,10 @@ class Database:
             # Load each touched case's events once; links and rules both use them.
             loaded = {inc: self._incident_events(c, inc) for inc in sorted(touched)}
             affected = set(touched) | self._refresh_credential_cases(c, sources)
-            new_links = self._refresh_links(c, loaded, sources)
+            # A serving or bait-read request may arrive after the presentation it explains.
+            token_runs = {(e["lab_run_id"], e["capture_mode"]) for e in stored
+                          if e["event_type"] == "bait_served" or "requested_asset_id" in e["attributes"]}
+            new_links = self._refresh_links(c, loaded, sources, token_runs)
             for l in new_links:
                 affected.update((l["from_incident_id"], l["to_incident_id"]))
             affected |= self._parents(c, affected)  # an investigation re-scores when a child changes
@@ -367,7 +383,7 @@ class Database:
             status = "confirmed" if decision == "confirm" else "rejected"
             c.execute("UPDATE links SET status=?, decided_at=?, rationale=? WHERE link_id=?",
                       (status, _now(), rationale, link_id))
-            link = dict(c.execute("SELECT * FROM links WHERE link_id=?", (link_id,)).fetchone())
+            link = self._link_row(c.execute("SELECT * FROM links WHERE link_id=?", (link_id,)).fetchone())
             affected = {link["from_incident_id"], link["to_incident_id"]} | self._apply_investigation(c, link)
             ordered = self._sync_order(c, affected)
             changed = [f for inc in ordered for f in self._sync_incident(c, inc)]
@@ -517,7 +533,7 @@ class Database:
                     basis += [l for l in json.loads(other["basis_link_ids"]) if l not in basis]
                     c.execute("UPDATE incidents SET status='dissolved', basis_link_ids='[]' WHERE incident_id=?",
                               (other["incident_id"],))
-        confirmed = [dict(r) for r in c.execute(
+        confirmed = [self._link_row(r) for r in c.execute(
             f"SELECT * FROM links WHERE status='confirmed' AND link_id IN ({','.join('?' * len(basis))}) "
             "ORDER BY decided_at, link_id", basis)]
         old_children = json.loads(home["children"])
@@ -557,37 +573,83 @@ class Database:
             "SELECT * FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? ORDER BY seq",
             (src_ip, run, mode))]
 
-    def _refresh_links(self, c, loaded: dict, sources: set) -> list[dict]:
-        """`loaded`: case id -> its events, for the cases this ingest touched;
-        `sources`: (src_ip, run, mode) touched, for candidate links across cases."""
-        def planted_lookup(tok: dict, use: dict) -> Optional[dict]:
-            # Prefer the same src_ip, then a shell command (e.g. reading the bait file), then latest.
-            r = c.execute(
-                "SELECT * FROM events WHERE sensor_id=? AND lab_run_id=? AND capture_mode=? AND occurred_at<=? "
-                "AND event_type != 'blocked_request' "
-                "ORDER BY (src_ip=?) DESC, (event_type='command_input') DESC, occurred_at DESC, seq DESC LIMIT 1",
-                (tok["planted_on"], use["lab_run_id"], use["capture_mode"], use["occurred_at"], use["src_ip"]),
-            ).fetchone()
-            return self._event_dict(r) if r else None
+    def _servings_for(self, c, tok: dict, use: dict) -> list[dict]:
+        """Eligible issuances of a token for one presentation: bait_served records that list it, on the
+        sensor where it was planted, in the same run and mode, not after the presentation, not expired."""
+        out = []
+        for r in c.execute(
+                "SELECT * FROM events WHERE event_type='bait_served' AND sensor_id=? AND lab_run_id=? "
+                "AND capture_mode=? AND occurred_at<=? ORDER BY occurred_at, seq",
+                (tok["planted_on"], use["lab_run_id"], use["capture_mode"], use["occurred_at"])):
+            s = self._event_dict(r)
+            a = s["attributes"]
+            expires = a.get("issued_expires_at")
+            if tok["id"] in a.get("honeytoken_ids", []) and (not expires or _ts(expires) > _ts(use["occurred_at"])):
+                out.append(s)
+        return out
 
+    def _request_for(self, c, tok: dict, use: dict) -> Optional[dict]:
+        """Newest earlier bait-read command naming a registered asset that holds the token. A command
+        is request evidence only; without the bait_assets registry there is nothing to match."""
+        assets = {a["asset_id"] for a in self.cfg.bait_assets.values()
+                  if tok["id"] in a.get("honeytoken_ids", []) and a.get("sensor_id") == tok["planted_on"]}
+        if not assets:
+            return None
+        for r in c.execute(
+                "SELECT * FROM events WHERE event_type='command_input' AND schema_version='1.1' AND sensor_id=? "
+                "AND lab_run_id=? AND capture_mode=? AND occurred_at<=? ORDER BY occurred_at DESC, seq DESC",
+                (tok["planted_on"], use["lab_run_id"], use["capture_mode"], use["occurred_at"])):
+            e = self._event_dict(r)
+            if e["attributes"].get("requested_asset_id") in assets:
+                return e
+        return None
+
+    def _refresh_links(self, c, loaded: dict, sources: set, token_runs: set = frozenset()) -> list[dict]:
+        """`loaded`: case id -> its events, for the cases this ingest touched;
+        `sources`: (src_ip, run, mode) touched, for candidate links across cases;
+        `token_runs`: (run, mode) that received a serving or a bait-read request, whose earlier
+        token presentations are matched again. Returns new or changed links."""
         found = []
         for src_ip, run, mode in sorted(sources):
             logged_in = {r["incident_id"] for r in c.execute(
                 "SELECT DISTINCT incident_id FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? "
                 "AND sensor_id=? AND event_type='auth_success'", (src_ip, run, mode, SSH))}
             found += linking.candidate_links(self._source_events(c, src_ip, run, mode), self.cfg, logged_in)
-        for events in loaded.values():
-            found += linking.strong_links(linking.token_uses(events, self.cfg), planted_lookup, self.cfg)
+        uses = {e["event_id"]: e for events in loaded.values() for e in linking.token_uses(events, self.cfg)}
+        for run, mode in sorted(token_runs):
+            rows = c.execute("SELECT * FROM events WHERE lab_run_id=? AND capture_mode=? "
+                             "AND attributes LIKE '%\"honeytoken_id\"%' ORDER BY seq", (run, mode))
+            uses.update({e["event_id"]: e for e in linking.token_uses([self._event_dict(r) for r in rows], self.cfg)})
+        found += linking.token_links(list(uses.values()), self.cfg,
+                                     lambda tok, use: self._servings_for(c, tok, use),
+                                     lambda tok, use: self._request_for(c, tok, use))
         new = []
         for l in found:
+            issuances = json.dumps(l["candidate_issuance_ids"])
+            if l["attribution"]:
+                # Token links are re-derived: a later serving can turn unique into ambiguous.
+                old = c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()
+                if old and (old["from_event_id"], old["basis"], old["attribution"], old["candidate_issuance_ids"]) \
+                        == (l["from_event_id"], l["basis"], l["attribution"], issuances):
+                    continue
+                c.execute(
+                    "INSERT INTO links (link_id, from_event_id, to_event_id, from_sensor, to_sensor, kind, basis, "
+                    "from_incident_id, to_incident_id, attribution, candidate_issuance_ids, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(link_id) DO UPDATE SET "
+                    "from_event_id=excluded.from_event_id, basis=excluded.basis, attribution=excluded.attribution, "
+                    "candidate_issuance_ids=excluded.candidate_issuance_ids",
+                    (l["link_id"], l["from_event_id"], l["to_event_id"], l["from_sensor"], l["to_sensor"], l["kind"],
+                     l["basis"], l["from_incident_id"], l["to_incident_id"], l["attribution"], issuances, _now()))
+                new.append(self._link_row(c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()))
+                continue
             if c.execute("SELECT 1 FROM links WHERE kind=? AND from_event_id=? AND to_event_id=?",
                          (l["kind"], l["from_event_id"], l["to_event_id"])).fetchone():
                 continue  # same evidence already linked (a pre-migration link keeps its id and decision)
-            if l["kind"] == "candidate" and c.execute(
-                    "SELECT 1 FROM links WHERE kind='candidate' AND ((from_incident_id=? AND to_incident_id=?) "
-                    "OR (from_incident_id=? AND to_incident_id=?))",
+            if c.execute(
+                    "SELECT 1 FROM links WHERE kind='candidate' AND attribution IS NULL "
+                    "AND ((from_incident_id=? AND to_incident_id=?) OR (from_incident_id=? AND to_incident_id=?))",
                     (l["from_incident_id"], l["to_incident_id"], l["to_incident_id"], l["from_incident_id"])).fetchone():
-                continue  # one candidate per pair of cases, whichever key found it first
+                continue  # one IP/time candidate per pair of cases, whichever key found it first
             cur = c.execute(
                 "INSERT OR IGNORE INTO links (link_id, from_event_id, to_event_id, from_sensor, to_sensor, "
                 "kind, basis, from_incident_id, to_incident_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -595,11 +657,17 @@ class Database:
                  l["kind"], l["basis"], l["from_incident_id"], l["to_incident_id"], _now()),
             )
             if cur.rowcount:
-                new.append(dict(c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()))
+                new.append(self._link_row(c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()))
         return new
 
+    @staticmethod
+    def _link_row(r) -> dict:
+        link = dict(r)
+        link["candidate_issuance_ids"] = json.loads(link.get("candidate_issuance_ids") or "[]")
+        return link
+
     def _links_for(self, c, incident_id: str) -> list[dict]:
-        return [dict(r) for r in c.execute(
+        return [self._link_row(r) for r in c.execute(
             "SELECT * FROM links WHERE from_incident_id=? OR to_incident_id=? ORDER BY created_at, link_id",
             (incident_id, incident_id))]
 
@@ -607,7 +675,7 @@ class Database:
         if not ids:
             return []
         marks = ",".join("?" * len(ids))
-        return [dict(r) for r in c.execute(
+        return [self._link_row(r) for r in c.execute(
             f"SELECT * FROM links WHERE from_incident_id IN ({marks}) AND to_incident_id IN ({marks}) "
             "ORDER BY created_at, link_id", list(ids) + list(ids))]
 
@@ -652,7 +720,7 @@ class Database:
             links = self._links_for(c, incident_id)
             if events is None:
                 events = self._incident_events(c, incident_id)
-            fresh = evaluate_incident(case, events, self.cfg, SESSION_RULES)
+            fresh = evaluate_incident(case, events, self.cfg, SESSION_RULES, links)
         # rowid = order first recorded; scoring walks findings in that order (new ones last).
         existing = {r["finding_id"]: json.loads(r["data"]) for r in c.execute(
             "SELECT finding_id, data FROM findings WHERE incident_id=? ORDER BY rowid", (incident_id,))}
@@ -821,7 +889,7 @@ class Database:
         if incident_id:
             rows = self._links_for(self.conn, incident_id)
         else:
-            rows = [dict(r) for r in self.conn.execute("SELECT * FROM links ORDER BY created_at, link_id")]
+            rows = [self._link_row(r) for r in self.conn.execute("SELECT * FROM links ORDER BY created_at, link_id")]
         return [self.public_link(r) for r in rows]
 
     def sessions(self, incident_id: str) -> list[dict]:

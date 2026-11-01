@@ -14,7 +14,7 @@ def evaluate_links(links: list) -> list:
             continue
         out.append(finding(
             "R05", f"link={link['link_id']}",
-            techniques=[], stage="none",
+            mapping=[], stage="none",
             label=f"Analyst-confirmed cross-decoy link {link['link_id']} ({link['from_sensor']} to {link['to_sensor']})",
             limitation="An analyst judgement; does not show that it is the same person.",
             events=[{"event_id": link["from_event_id"]}, {"event_id": link["to_event_id"]}],

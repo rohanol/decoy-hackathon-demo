@@ -59,16 +59,31 @@ def normalize_path(path: str) -> str:
     return p.rstrip("/") or "/"
 
 
-def finding(rule_id: str, key: str, *, techniques: list, stage: str, label: str,
+MAPPING_VERSION = "map@2"
+
+
+def mapped(technique_id: Optional[str], status: str, rationale: str) -> dict:
+    """One ATT&CK interpretation (finding.schema.json `mapping`). status: attempted | emulated | observed."""
+    return {"technique_id": technique_id, "status": status, "rationale": rationale[:300]}
+
+
+def roles(events: list, role: str) -> dict:
+    return {e["event_id"]: role for e in events[:MAX_EVIDENCE]}
+
+
+def finding(rule_id: str, key: str, *, mapping: list, stage: str, label: str,
             limitation: str, events: list, version: int = 1, **extra) -> dict:
     """Finding without finding_id/incident_id/src_ip/created_at: the engine adds those.
     `key` makes the finding_id stable so re-running the rules never duplicates it.
-    Bump `version` whenever a rule's matching logic changes (shown as rule_version)."""
+    Bump `version` whenever a rule's matching logic changes (shown as rule_version).
+    technique_ids is derived from `mapping`, so the two can never disagree."""
     out = {
         "key": key,
         "rule_id": rule_id,
         "rule_version": f"{rule_id}@{version}",
-        "technique_ids": techniques,
+        "technique_ids": [m["technique_id"] for m in mapping if m["technique_id"]],
+        "mapping": mapping,
+        "mapping_version": MAPPING_VERSION,
         "stage": stage,
         "label": label,
         "limitation": limitation,

@@ -183,7 +183,7 @@ def test_r07_classifies_body_indicators(client):
     post(client, ex("a-web-post-search"))
     findings = client.app.state.db.list_findings(events(client)[0]["incident_id"])
     r07 = [f for f in findings if f["rule_id"] == "R07"]
-    assert len(r07) == 1 and r07[0]["web_attack_class"] == ["sqli"] and r07[0]["rule_version"] == "R07@4"
+    assert len(r07) == 1 and r07[0]["web_attack_class"] == ["sqli"] and r07[0]["rule_version"] == "R07@5"
     assert "request body" in r07[0]["label"]
 
 
@@ -284,7 +284,7 @@ def test_migration_from_v10_database(tmp_path):
     rows = make_v0_db(path)
     db = Database(str(path))
     try:
-        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 2   # v0 -> v1 -> v2 in one open
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 3   # v0 -> v1 -> v3 in one open
         assert os.path.exists(f"{path}.v0.bak") and os.path.exists(f"{path}.v1.bak")
         migrated = db._writer.execute(
             "SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at, src_ip, "
@@ -326,7 +326,7 @@ def test_migration_runs_once(tmp_path):
     Database(str(path)).close()
     os.remove(f"{path}.v0.bak")
     os.remove(f"{path}.v1.bak")
-    Database(str(path)).close()                                          # already v2: no new backup, no rebuild
+    Database(str(path)).close()                                          # already v3: no new backup, no rebuild
     assert not os.path.exists(f"{path}.v0.bak") and not os.path.exists(f"{path}.v1.bak")
 
 
@@ -364,7 +364,7 @@ def test_migration_v1_to_v2_derives_cases_and_rebuilds_investigations(tmp_path):
     before.close()
     with TestClient(create_app(str(path))) as c:
         db = c.app.state.db
-        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 3
         assert os.path.exists(f"{path}.v1.bak") and not os.path.exists(f"{path}.v0.bak")
         after = db._writer.execute("SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, "
                                    "src_ip, session_id, attributes FROM events ORDER BY seq").fetchall()

@@ -36,9 +36,13 @@ def _stamp(incident: dict, raw: list) -> list:
     return out
 
 
-def evaluate_incident(incident: dict, events: list, cfg, rule_ids=SESSION_RULES) -> list:
-    """Findings from the event rules in `rule_ids`, with stable ids. `incident` needs incident_id, src_ip."""
-    raw = [f for rule in RULES if rule_id(rule) in rule_ids for f in rule.evaluate(events, cfg)]
+def evaluate_incident(incident: dict, events: list, cfg, rule_ids=SESSION_RULES, links: list = ()) -> list:
+    """Findings from the event rules in `rule_ids`, with stable ids. `incident` needs incident_id, src_ip.
+    R09 also reads the case's token links to say how each presentation relates to a serving."""
+    raw = []
+    for rule in RULES:
+        if rule_id(rule) in rule_ids:
+            raw += rule.evaluate(events, cfg, list(links)) if rule is r09 else rule.evaluate(events, cfg)
     return _stamp(incident, raw)
 
 

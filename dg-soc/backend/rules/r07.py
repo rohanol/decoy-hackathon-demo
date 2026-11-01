@@ -1,9 +1,8 @@
 """R07: URL-decoded path/query matches a web attack class from config/web_patterns.yaml,
 or (schema 1.1) the producer's body indicators imply one (contracts/API.md, input_features)."""
-from ._util import finding, normalize_url
+from ._util import finding, mapped, normalize_url, roles
 
 CLASS_ORDER = ["sqli", "xss", "lfi", "rfi", "cmd_injection"]
-EXTRA_TECHNIQUES = {"xss": "T1059.007", "rfi": "T1105"}
 
 
 def classify(text: str, cfg) -> list:
@@ -56,12 +55,16 @@ def evaluate(events: list, cfg) -> list:
         if not classes:
             continue
         where = "request body" if body_classes and not url_classes else "request"
-        techniques = ["T1190"] + [EXTRA_TECHNIQUES[c] for c in classes if c in EXTRA_TECHNIQUES]
+        # T1190 only: XSS-looking text is not JavaScript execution (T1059.007) and a URL in a
+        # parameter is not a tool transfer (T1105); web_attack_class still names the class.
         out.append(finding(
             "R07", f"event={e['event_id']}",
-            techniques=techniques, stage="exploit_attempt",
+            mapping=[mapped("T1190", "attempted",
+                            f"{', '.join(classes)} pattern in the {where} to {a.get('path', '')[:64]}; "
+                            "the decoy answered with a canned response")],
+            stage="exploit_attempt",
             label=f"Web attack attempt ({', '.join(classes)}) in {where} to {a.get('path', '')[:128]}",
             limitation="Shows an attempt only; does not show successful exploitation.",
-            events=[e], web_attack_class=classes, version=4,
+            events=[e], web_attack_class=classes, version=5, evidence_roles=roles([e], "request"),
         ))
     return out

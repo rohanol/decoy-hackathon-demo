@@ -237,30 +237,26 @@ def test_mixed_live_replay_rejected(client):
     assert r["accepted"] == 1 and r["rejected"] and "lab_run_id" in r["rejected"][0]["reason"]
 
 
-@pytest.mark.xfail(strict=True, reason="gap F3/T05: a token use plus any earlier SSH event yields a strong link (fixed in PR 4)")
-def test_gap_token_use_without_bait_read_has_no_strong_link(client):
+def test_token_use_without_bait_read_has_no_strong_link(client):
     post(client, v10(by_id("a-ssh-h1-open")), v10(by_id("a-web-req-1")))
     kinds = [l["kind"] for l in client.get("/api/links").json()["items"]]
     assert "strong_candidate" not in kinds
 
 
-@pytest.mark.xfail(strict=True, reason="gap F4/T07: web lure download mapped to T1005 (fixed in PR 4)")
-def test_gap_web_lure_not_t1005(client):
+def test_web_lure_not_t1005(client):
     post(client, v10(by_id("a-web-req-5")))
     findings = client.app.state.db.list_findings("inc_01")
     assert all("T1005" not in f["technique_ids"] for f in findings)
 
 
-@pytest.mark.xfail(strict=True, reason="gap F4/T07: XSS-looking text mapped to JavaScript execution (fixed in PR 4)")
-def test_gap_xss_string_not_t1059_007(client):
+def test_xss_string_not_t1059_007(client):
     ev = dict(v10(by_id("a-web-req-4")), source_record_id="xss-1")
     ev["attributes"] = dict(ev["attributes"], query_redacted="q=<script>alert(1)</script>")
     post(client, ev)
     assert all("T1059.007" not in f["technique_ids"] for f in client.app.state.db.list_findings("inc_01"))
 
 
-@pytest.mark.xfail(strict=True, reason="gap F11/T10: quoted echo text counted as discovery (fixed in PR 4)")
-def test_gap_quoted_command_not_discovery(client):
+def test_quoted_command_not_discovery(client):
     post(client, v10(by_id("a-ssh-s1-login")), v10(by_id("a-ssh-s1-echo")))
     assert all(f["rule_id"] != "R03" for f in client.app.state.db.list_findings("inc_01"))
 

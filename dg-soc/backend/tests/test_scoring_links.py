@@ -44,6 +44,16 @@ def score(client, inc="inc_01"):
     return incident(client, inc)["score"]
 
 
+def bait(at, session="sess01", issuance="iss_notes_1", token="tok_portal_01", sensor="ssh-decoy-01",
+         asset="ssh:/home/dg_demo/notes.txt", basis="session_output_log", **over):
+    """Schema 1.1 bait_served: the result record that proves the token was shown (contract v1.1)."""
+    e = raw(sensor, "bait_served", at=at, session=session, asset_id=asset, honeytoken_ids=[token],
+            issuance_id=issuance, evidence_basis=basis, evidence_role="bait")
+    e["schema_version"] = "1.1"
+    e.update(over)
+    return e
+
+
 def strong_link(client):
     return next(l for l in client.get("/api/links").json()["items"] if l["kind"] == "strong_candidate")
 
@@ -85,7 +95,8 @@ def run_demo_until_token(client):
     assert score(client, ssh_case(client)) == 15
     send(client, raw(etype="command_input", at=25, session="sess01", command="ls -la"))
     assert score(client, ssh_case(client)) == 25
-    send(client, raw(etype="command_input", at=30, session="sess01", command="cat notes.txt"))
+    send(client, raw(etype="command_input", at=30, session="sess01", command="cat notes.txt"),
+         bait(at=30))  # the sensor's own record that the bait was shown, not the command
     send(client, webreq(70, "/login", "username=svc_portal&password=<redacted>", method="POST",
                         honeytoken_id="tok_portal_01", username="svc_portal"))
     assert score(client, web_case(client)) == 0  # R09 waits for confirmation
@@ -205,10 +216,10 @@ def test_strong_link_from_planted_sensor(client):
     run_demo_until_token(client)
     link = strong_link(client)
     assert link["from_sensor"] == "ssh-decoy-01" and link["to_sensor"] == "web-decoy-01"
-    assert link["basis"] == "honeytoken tok_portal_01" and link["status"] == "open"
-    cat = [e for e in client.get("/api/events").json()["items"]
-           if e["attributes"].get("command") == "cat notes.txt"][0]
-    assert link["from_event_id"] == cat["event_id"]  # the shell command that read the bait file
+    assert link["basis"] == "honeytoken tok_portal_01 served by ssh:/home/dg_demo/notes.txt (session output log)"
+    assert link["status"] == "open" and link["attribution"] == "unique" and link["candidate_issuance_ids"] == []
+    served = [e for e in client.get("/api/events").json()["items"] if e["event_type"] == "bait_served"][0]
+    assert link["from_event_id"] == served["event_id"]  # the bait record, never the shell command
 
 
 def test_token_on_planting_sensor_is_not_r09(client):
@@ -288,7 +299,7 @@ def test_stats_overview(client):
     send(client, raw(at=0, username="x", src_ip="192.168.77.12"))
     s = client.get("/api/stats/overview").json()
     # 5 Hydra sessions, credential, sess01, web, the .12 session; only sess01 and credential reach 25
-    assert s["raw_events"] == 11 and s["incidents"] == 9 and s["low_priority_incidents"] == 7
+    assert s["raw_events"] == 12 and s["incidents"] == 9 and s["low_priority_incidents"] == 7  # incl. bait record
     assert s["findings_by_rule"] == {"R01": 1, "R02": 1, "R03": 1, "R09": 1}
     assert isinstance(s["first_alert_seconds"], float) and s["first_alert_seconds"] >= 0
 
@@ -308,7 +319,7 @@ def test_export_has_no_password_hashes(client):
     body = r.json()
     assert len(body["events"]) == 1 and "Simulated lab data" in body["note"]
     assert "password_sha256" not in r.text and "00" * 32 not in r.text
-    assert len(client.get(f"/api/incidents/{ssh_case(client)}/export").json()["events"]) == 4
+    assert len(client.get(f"/api/incidents/{ssh_case(client)}/export").json()["events"]) == 5  # + bait_served
 
 
 # ---- task 7: response hooks ----

@@ -242,21 +242,29 @@ So `John's quarterly report--` sets `sql_quote` and `sql_comment` and no class, 
 
 Links gain `attribution` (`unique`, `ambiguous`, `request_only` or null for IP/time candidates) and `candidate_issuance_ids` (empty unless ambiguous).
 
+Runtime notes (PR 4):
+
+- One token link per token, source case and presenting case. The first presentation of a token in a case stands for that case.
+- Token links are re-derived when a serving or a bait-read request arrives, even after the presentation it explains (ingest order is not event order). A later eligible serving can turn a `unique` link into `ambiguous`. A decision already made on the link is kept.
+- Step 5 needs M4's `bait_assets` registry in `config/honeytokens.yaml`. Until it is there, a bait-read command matches nothing and the use stays an orphan. Only schema 1.1 commands carry `requested_asset_id`.
+- R09 lists the serving (role `bait`) or the request (role `request`) and the presentations (role `presentation`) in `evidence_event_ids` and `evidence_roles`. An orphan R09 has `points: 0`, `pending_confirmation: false` and the breakdown reason "R09 orphan: no record of the token being served; shown, never scored".
+- Strong links made before PR 4 (by IP and time, not by a serving) are kept with their decisions as history, `attribution` null. They no longer make R09 count; a confirmed one still stands for its investigation and R05.
+
 `candidate` links keep their v1.0 meaning (same `src_ip`, both sensors, within 300 s), now also requiring the same run and mode. They are possible evidence only, never proof.
 
 ### Corrected mappings (finding v1.1)
 
 | Rule | v1.1 behaviour |
 |---|---|
-| R01 | T1110.001, status `attempted`. Counts **distinct** `password_sha256` values in the window, so 5 identical retries are not guessing. Spans sessions as above |
+| R01 | T1110.001, status `attempted`. Counts **distinct** `password_sha256` values in the window, so 5 identical retries are not guessing. A failure without a hash cannot be shown to repeat another, so it counts as distinct. Spans sessions as above |
 | R02 | T1059.004, status `emulated` (input to an emulated shell) |
 | R03 | T1083, status `attempted`. Words inside quotes or after `echo` or `printf` do not count (`echo "ls"`, `printf 'find'`) |
-| R04 | A web download of a synthetic lure: stage `lure_access`, `technique_id: null`, rationale "synthetic lure retrieved over HTTP; not collection from a local system". T1005 is kept only for a future SSH fake-filesystem read with result evidence |
+| R04 | A web download of a synthetic lure: stage `lure_access`, `technique_id: null`, status `emulated`, rationale "synthetic lure retrieved over HTTP; not collection from a local system". A `synthetic_file_access` from the SSH decoy keeps T1005, status `emulated`, stage `data_access` |
 | R07 | T1190, status `attempted`, only. No T1059.007 for XSS-looking text and no T1105 for a URL in a parameter; `web_attack_class` still says xss or rfi. A trailing `--` on its own is not SQLi |
 | R08 | T1595.003, status `attempted`. The hidden-path trigger needs **at least 3 distinct paths** among the 5 requests, because 5 reloads of `/admin` are not wordlist scanning |
 | R05, R09 | custom analytics, `mapping: []` |
 
-`mapping_version` starts at `map@2`. Findings created before migration keep their `rule_version` and mapping. Re-running rules on old events creates findings under the new version. Nothing is rewritten in place.
+Every finding carries `mapping`, `mapping_version` and `evidence_roles`; `technique_ids` is derived from `mapping`, so the two never disagree. Rule versions after PR 4: R01@3, R02@2, R03@3, R04@2, R07@5, R08@3, R09@2. `mapping_version` starts at `map@2`. Findings created before migration keep their `rule_version` and mapping. Re-running rules on old events creates findings under the new version. Nothing is rewritten in place.
 
 ### Response eligibility and verification
 
@@ -364,7 +372,7 @@ The order follows review section 12. Each step is its own PR with real test outp
 1. **This PR**: contract, examples, schema tests, and the gaps reproduced as expected-failure tests.
 2. Ingest accepts 1.1 (version-gated validation, `input_features` and `processing` bounded, R07 consuming the indicators), derives `observation_kind`, enforces one mode per run, and adds the dedup namespace and `/api/runs`. DB migration 1 adds columns and a `runs` table. It rebuilds the `events` table once, copying every row unchanged including `seq`, because SQLite cannot drop the old unique key in place. The file is backed up first.
 3. Case model: cases, credential window, profiles, investigations and dissolve. DB migration 2 rebuilds the `incidents` table once (SQLite cannot drop the old `UNIQUE(src_ip, lab_run_id)` in place) with the case columns. Old rows are kept unchanged as `legacy_ip_run` cases with status `superseded`, findings included, and stay readable by id. Each event is then assigned to its derived case in `seq` order: only `events.incident_id` changes; every observed field stays as stored. Link endpoints are re-pointed from their events, credential cases are derived, and every confirmed link rebuilds its investigation.
-4. Causal token matching, orphan R09, corrected mappings and rule versions.
+4. Causal token matching, orphan R09, corrected mappings and rule versions. DB migration 3 adds `links.attribution` and `links.candidate_issuance_ids` (`ALTER TABLE ... ADD COLUMN`; the file is backed up first).
 5. Eligibility route, health and heartbeat. M2 then wires preview, apply and verification. M4 and M2 emit `bait_served`.
 
 The database records its schema in `PRAGMA user_version`: 0 = v1.0, then 1, 2 and so on. An observation's fields are never edited: migration 1 copies rows unchanged, and migration 2 changes only the derived `incident_id`.
