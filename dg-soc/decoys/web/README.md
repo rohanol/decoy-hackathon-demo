@@ -88,29 +88,36 @@ IMPORTANT INTEGRATION LIMITS:
 
 - Issuance observations do not mint different credentials. Existing synthetic
   credentials remain shared fixtures; they cannot distinguish every NAT client.
-- M3 must consume actual bait evidence for causal matching and isolate replay;
-  the old planted_lookup still chooses generic prior events.
+- M3 PRs #14–#16 implement cases, causal matching, mapping corrections,
+  eligibility and health. These branches are not merged into main yet.
 - M2 must instrument the SSH note read and integrate denied channel evidence.
 - M3 PR #11 consumes the fixed body indicators for R07. Main's old R07 only
   reads path/query. The decoy does not copy body values into a query string.
-- M3 must correct R04/R07 mappings. Existing R04 currently labels every served
-  synthetic file T1005, including the new explicit public bait result.
+- Main still has the old mappings/grouping; do not infer corrected semantics
+  merely from this producer's richer metadata.
 - The web bridge now supplies `policy_revision` with its action from one validated
   atomic snapshot and fails closed even if an optional M2 checker fails open.
-  Preserve this guard when integrating PR #8. M2 at 715b278 has strict preview/
-  apply wiring and canonical fail-closed enforcement. The backend eligibility
-  endpoint is still pending; response remains unavailable until it exists.
-- Shared input names match PR #9 at 20041a9 and PR #11 at a61867c. M2's adapter
-  at 715b278 still rejects schema 1.1. Backend acceptance alone is insufficient
-  to enable the producer. Heartbeat and verification-field alignment also remain.
+  Preserve this guard when integrating PR #8. The actual current M2/M3 loopback
+  response flow passed preview, apply, denial, strict verification and revoke.
+- Input hints now match PR #9 at b67c6e6: 14 original names plus five structural
+  SQL names. The five lexical hints never establish a class, even in combination.
+  Each structure is extracted within one field; fragments from different fields
+  cannot manufacture SQL structure. M3 still owns classification and mappings.
+- M2 at 29096cf accepts schema 1.1 but its hint allowlist lacks the five structural
+  SQL names. Seven of the 27 real producer/API vectors are rejected by its adapter.
+  Keep production mode 1.0 until M2 updates the allowlist. M2 heartbeat names also
+  differ from M3 ab01a6f: the actual latest heartbeat gets HTTP 400. M1 reads both
+  refusal names while M2 currently sends mismatches and M3 documents rejects.
 
 ## Input and secret handling
 
 The unchanged 16 KiB request cap is enforced for body-bearing routes, including
 unsupported routes and methods. Form parsing is bounded; JSON depth is capped at
 4; at most 16 scalar values and a 4 KiB inspection budget are held in memory.
-Body values never leave the observation object: only the fixed 14-indicator
-vocabulary and bounded names/counts/length are emitted. Query capture is capped
+Body values never leave the observation object: only the fixed 19-indicator
+vocabulary and bounded names/counts/length are emitted. Payloads still allow at
+most 16 hints: overflow is explicitly marked truncated and suppresses free text
+and hints. Query capture is capped
 at 4 KiB/256 fields. Inspected values and emitted
 strings are bounded by ASCII JSON size to remain within backend attribute limits.
 

@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from decoys.web.app import ASSET, COOKIE, create_app
 from decoys.web.sessions import SessionStore
+from decoys.web.input_indicators import extract_indicators
+
+INDICATOR_VECTORS = json.loads((Path(__file__).parent / "fixtures/input_indicator_vectors_b67c6e6.json").read_text())["vectors"]
 
 
 @pytest.fixture
@@ -393,7 +396,7 @@ def test_opt_in_v11_bait_record_is_separate_from_legacy_default(tmp_path):
 @pytest.mark.parametrize("field,value,indicator", [
     ("q", "'", "sql_quote"), ("q", "UNION SELECT", "sql_keyword"),
     ("q", "report--", "sql_comment"), ("q", "<script>example</script>", "script_tag"),
-    ("q", "onerror=example", "event_handler"), ("q", "javascript:example", "js_scheme"),
+    ("q", "<img onerror=example>", "event_handler"), ("q", "javascript:example", "js_scheme"),
     ("q", "../../example", "path_traversal"), ("q", "/etc/passwd", "sensitive_file_path"),
     ("q", "php://filter", "php_wrapper"), ("page", "https://example.invalid/bait", "remote_url_in_param"),
     ("q", "; whoami", "shell_metachar_command"), ("q", "$(id)", "command_substitution"),
@@ -434,3 +437,41 @@ def test_processing_distinguishes_absent_malformed_and_unread_body(portal):
             assert processing["body_consumed"] is True and processing["body_bytes"] == len(data)
     client.get("/search?q=private-get", data=b"private-get", content_type="text/plain")
     assert "private-get" not in log.read_text()
+
+
+@pytest.mark.parametrize("vector", INDICATOR_VECTORS, ids=lambda v: v["value"][:35])
+def test_structural_hints_match_m3_authored_vectors(vector):
+    # These expected labels are supplied by M3, not derived from this module.
+    assert extract_indicators(vector["value"]) == set(vector["indicators"])
+
+
+@pytest.mark.parametrize("vector", [v for v in INDICATOR_VECTORS if v["value"] != "%2527"], ids=lambda v: v["value"][:35])
+def test_json_producer_emits_vector_hints_without_body_values(portal, vector):
+    _, client, log, _, _ = portal
+    client.post("/search", json={"q": vector["value"]})
+    features = events(log)[-1]["attributes"]["input_features"]
+    assert set(features["indicators"]) == set(vector["indicators"])
+    assert "value" not in features
+
+
+def test_structural_hints_are_not_combined_across_fields(portal):
+    _, client, log, _, _ = portal
+    client.post("/search", json={"q": "John's", "other": "UNION", "last": "SELECT name FROM users--"})
+    indicators = set(events(log)[-1]["attributes"]["input_features"]["indicators"])
+    assert {"sql_quote", "sql_keyword", "sql_comment"} <= indicators
+    assert not indicators & {"sql_quote_breakout", "sql_union_select", "sql_tautology", "sql_stacked_query", "sql_time_function"}
+
+
+def test_indicator_overflow_is_explicit_and_never_breaks_ingest_bound(portal):
+    _, client, log, _, _ = portal
+    client.post("/search", json={
+        "q": "x' UNION SELECT name FROM users; DROP TABLE x OR 1=1; SLEEP(1)--",
+        "xss": "<script onload=1 href='javascript:example'>",
+        "path": "../etc/passwd php://filter", "url": "https://example.invalid/",
+        "cmd": "a; id $(whoami) \x00", "encoded": "%2527",
+    })
+    attrs = events(log)[-1]["attributes"]
+    assert attrs["input_features"]["truncated"] is True
+    assert attrs["input_features"]["indicators"] == []
+    assert attrs["input_features"]["field_names"] == []
+    assert attrs["path"] == "<not retained>"

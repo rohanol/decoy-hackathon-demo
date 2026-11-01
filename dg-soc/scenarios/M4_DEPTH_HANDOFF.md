@@ -2,8 +2,47 @@
 
 Date: 1 November 2026. Branch: `m4/stateful-web-evidence`.
 Base: `d1adbaab41b73295ed05768fe6b1456498d52f96` (integrated main,
-including the frontend redesign). Changes are prepared locally for owner review;
-no GitHub push, PR, VM deployment or new physical-lab verification is implied.
+including the frontend redesign). Published for owner review in draft PR #12.
+No VM deployment or new physical-lab verification is implied.
+
+## Latest coordination update: M1 e8eef3d, M2 29096cf, M3 ab01a6f
+
+M4 now emits all 19 agreed hint names, including sql_quote_breakout,
+sql_union_select, sql_tautology, sql_stacked_query and sql_time_function.
+The original lexical SQL hints remain truthful supporting evidence. Each
+structural hint is derived within one field, never by joining separate fields.
+The fixed 16-hint payload limit still holds: overflow is explicitly truncated.
+No body values are logged. Producer version is m4-web@4.
+
+Checks actually run on Windows Python 3.12 / Node 24.16.0:
+
+- Own M4 plus main: 357 passed, one deprecation warning (21.93 seconds).
+- Combined current M1/M2/M3/M4: 611 passed, one warning (45.47 seconds).
+  Only local integration overlap resolutions and promotion of M4's already-fixed
+  trailing-dashes xfail were needed; no expected failures remain in that run.
+- All 27 M3-authored vectors match the pure hint extractor. The actual producer
+  -> real loopback ingest -> rule engine matches all 27 expected class results.
+  The literal encoded vector is decoded by the request pipeline, while the
+  standalone extractor vectors describe already-decoded values; neither produces
+  a class merely from encoding/quotes.
+- M1 npm test now runs all 30 tests on Windows. Independent launcher checks from
+  another directory pass; empty and deliberately failing suites both exit 1.
+- Actual M4 log -> M2 mapper/sender/checkpoint -> real backend, authoritative
+  eligibility -> preview/apply -> M4 denied request -> post-commit verified action
+  -> revoke -> allowed request passed. A wrong source stayed pending with
+  wrong_source, and replay preview returned 409. This was local test-client
+  traffic with temporary policy/database and a loopback backend, not a VM run.
+
+Remaining blockers are now specific compatibility issues, not missing endpoints:
+M2's allowlist omits the five structural names (7/27 producer vectors rejected),
+and its current process_state/nested-ingest heartbeat is rejected by M3's older
+sensor_process/flat-counter model with HTTP 400. Refusal naming crossed again:
+M2 emits verification_mismatches while M3 now documents verification_rejects.
+Keep WEB_EVENT_SCHEMA_VERSION=1.0 and M1's dual reader until owners align them.
+The bait_assets registry is already present in PR #12; no extra registry addition
+is needed. M1 still needs to consume authoritative case/health/provenance reads.
+
+The following sections preserve the earlier implementation and test history.
 
 ## Coordination update after PRs 8, 9, 10 and 11
 

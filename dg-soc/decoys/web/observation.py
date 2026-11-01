@@ -11,24 +11,10 @@ from urllib.parse import parse_qsl, unquote, urlencode
 
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge
 
+from .input_indicators import extract_indicators
+
 SENSITIVE = re.compile(r"pass|token|secret|authorization|api.?key|cookie|credential", re.I)
 PLANTED = re.compile(r"DGLAB-[A-Za-z0-9_-]+")
-# Lexical hints only; M3 owns the attack-class mapping. No value is emitted.
-INDICATORS = {
-    "sql_quote": r"['\"]",
-    "sql_keyword": r"\b(?:union\s+select|select\b.{0,80}\bfrom|or\s+['\"\d]|and\s+['\"\d]|sleep\s*\(|benchmark\s*\(|pg_sleep\s*\(|drop\s+table)",
-    "sql_comment": r"--|/\*",
-    "script_tag": r"<\s*script\b",
-    "event_handler": r"\bon(?:error|load|mouseover|focus)\s*=",
-    "js_scheme": r"javascript\s*:",
-    "path_traversal": r"(?:\.\./|\.\.\\){2,}",
-    "sensitive_file_path": r"/etc/(?:passwd|shadow|hosts)\b|\b(?:c:\\windows|boot\.ini|win\.ini)\b",
-    "php_wrapper": r"php://(?:filter|input)",
-    "shell_metachar_command": r"[;&|]\s*(?:cat|ls|id|whoami|uname|wget|curl|nc|bash|sh)\b",
-    "command_substitution": r"`[^`]+`|\$\([^)]+\)",
-    "null_byte": "\x00",
-}
-INDICATORS = {name: re.compile(pattern, re.I) for name, pattern in INDICATORS.items()}
 
 
 def decode(value):
@@ -190,16 +176,20 @@ class RequestObservation:
         suppressed = self.body_status in {"unsupported", "invalid_json", "invalid_body", "oversized"} or self.truncated
         inspected = [] if suppressed else [(self.clean(name, 64), self.clean(value, 512))
                                            for _, name, value in self.scalars]
-        indicators = {name for _, value in inspected for name, pattern in INDICATORS.items() if pattern.search(value)}
+        # Each structural hint is extracted within one field, so a quote in one
+        # field and a keyword in another cannot manufacture a SQL structure.
+        indicators = set().union(*(extract_indicators(value) for _, value in inspected))
         if not suppressed and self.encoded:
             indicators.add("encoded_payload")
-        if any(re.search(r"(?:^|\.)(?:file|page|include|url|path)$", name, re.I)
-               and re.match(r"\s*(?:https?|ftp)://", value, re.I) for name, value in inspected):
-            indicators.add("remote_url_in_param")
+        if len(indicators) > 16:
+            # Preserve the frozen payload bound. An over-budget inspection is
+            # incomplete, never evidence that no attack-shaped input existed.
+            suppressed = self.truncated = True
+            indicators, inspected = set(), []
         parse_status = {"absent": "no_body", "empty": "no_body", "oversized": "rejected_too_large",
                         "unsupported": "unsupported_type", "invalid_json": "malformed", "invalid_body": "malformed"}.get(self.body_status, "parsed")
         processing = {"parse_status": parse_status, "body_consumed": self.body_consumed,
-                      "redaction_version": "2", "producer_version": "m4-web@3"}
+                      "redaction_version": "2", "producer_version": "m4-web@4"}
         if self.body_bytes is not None:
             processing["body_bytes"] = self.body_bytes
         return {
