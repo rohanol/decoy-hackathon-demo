@@ -71,3 +71,5 @@ bash deployment/preflight.sh
 ```
 
 Then follow `scenarios/demo_p3.md`.
+
+**ATT&CK coverage:** [Honest decoy coverage and Sweep/Seek intent map](docs/demo/ATTACK_COVERAGE.md). It reports only techniques represented by current rules and lists important non-coverage.
