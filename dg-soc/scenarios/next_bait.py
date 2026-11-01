@@ -10,16 +10,17 @@ from urllib.request import HTTPCookieProcessor, ProxyHandler, build_opener
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("target")
-    parser.add_argument("--gateway-port", type=int, default=8081)
+    parser.add_argument("--web-port", type=int, default=8080)
     parser.add_argument("--mysql-port", type=int, default=3306)
+    parser.add_argument("--smb-port", type=int, default=445)
     parser.add_argument("--exercise-failures", action="store_true", help="five synthetic failed database logins for R11")
     args = parser.parse_args()
     if args.target != "192.168.77.20":
         parser.error("Refusing: only isolated lab target 192.168.77.20 is allowed")
-    if not (1 <= args.gateway_port <= 65535 and 1 <= args.mysql_port <= 65535):
+    if not all(1 <= port <= 65535 for port in (args.web_port, args.mysql_port, args.smb_port)):
         parser.error("Invalid port")
     import pymysql  # dev dependency; never downloaded automatically by this probe
-    base = f"http://192.168.77.20:{args.gateway_port}"
+    base = f"http://192.168.77.20:{args.web_port}"
     browser = build_opener(ProxyHandler({}), HTTPCookieProcessor(CookieJar()))
     with browser.open(base + "/", timeout=5) as response:
         assert response.status == 200
@@ -42,6 +43,12 @@ def main():
         password = settings.get("PASSWORD", "")
         if not password.startswith("DGLAB-") or len(password) > 128:
             raise ValueError("Expected synthetic lab credential")
+        import csv
+        share = next(csv.DictReader(io.StringIO(archive.read("share_accounts.csv").decode())))
+        if share.get("host") != "192.168.77.20" or share.get("share") != "backups" or share.get("username") != "backup_ops":
+            raise ValueError("Unexpected file-service destination")
+        if not share.get("password", "").startswith("DGLAB-"):
+            raise ValueError("Expected synthetic file-service credential")
     def connect(value):
         return pymysql.connect(host="192.168.77.20", port=args.mysql_port, user="svc_reports", password=value,
                                connect_timeout=3, read_timeout=3, write_timeout=3)
@@ -69,9 +76,20 @@ def main():
                 raise AssertionError("Data query unexpectedly accepted")
     finally:
         connection.close()
+    from impacket.smbconnection import SMBConnection
+    smb = SMBConnection("FILES-SRV-02", "192.168.77.20", sess_port=args.smb_port, preferredDialect=0x202, timeout=3)
+    try:
+        smb.login(share["username"], share["password"], domain="WORKGROUP")
+        received = io.BytesIO()
+        smb.getFile("backups", "README.txt", received.write)
+        smb.putFile("backups", "demo-report.txt", io.BytesIO(b"Harmless synthetic lab report.\n").read)
+        smb.logoff()
+    finally:
+        smb.close()
     print(json.dumps({"archive_response": 200, "archive_bytes": len(data), "inert_entries": len(expected),
                       "database_handshake": "emulated_success", "sql_command": "refused_1142",
                       "synthetic_failed_logins": failures,
+                      "file_service": "SMB2 authenticated read and inert upload completed",
                       "note": "Inspect actual SOC evidence; this probe does not prove identity, extraction, or malware."}))
 
 

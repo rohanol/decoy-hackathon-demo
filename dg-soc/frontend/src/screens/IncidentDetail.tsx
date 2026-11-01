@@ -21,7 +21,8 @@ import { ActionCard } from '../components/ActionCard';
 import { BlockFlowModal } from '../components/BlockFlowModal';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
-import { ArchivePanel, RoutingPanel, ScopeNote } from '../v12/components';
+import { ArchivePanel, ScopeNote, ProtocolFacts } from '../v12/components';
+import { PROTOCOL_COPY } from '../copy';
 import { archiveEvidence, hasTranscript, responseScope } from '../v12/views';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
@@ -296,8 +297,9 @@ export function IncidentDetail() {
     })) : []),
     [incident, events, backendContext],
   );
-  const hasWebTraffic = events.some((event) => event.sensor_id === 'web-decoy-01');
   const scope = useMemo(() => responseScope(backendContext?.eligibility ?? null), [backendContext]);
+  const protocolEvents = useMemo(() => events.filter((event) =>
+    event.attributes?.credential || event.attributes?.db || event.attributes?.file).slice(0, 50), [events]);
 
   const visibleFindings = useMemo(() => {
     if (!incident) return [];
@@ -629,6 +631,19 @@ export function IncidentDetail() {
         )}
       </section>
 
+      {protocolEvents.length > 0 ? (
+        <section className="incsec" aria-label={PROTOCOL_COPY.title}>
+          <h2 className="incsec__title">{PROTOCOL_COPY.title}</h2>
+          <div className="panel">
+            {protocolEvents.map((event) => (
+              <p key={event.event_id}>
+                <button className="chip" type="button" onClick={() => setOpenEvent(event)}>{event.event_id}</button>
+                {' '}<ProtocolFacts event={event} />
+              </p>
+            ))}
+          </div>
+        </section>
+      ) : null}
       {archives.length > 0 ? (
         <section className="incsec" aria-label="Archive bait">
           <h2 className="incsec__title">
@@ -638,12 +653,6 @@ export function IncidentDetail() {
         </section>
       ) : null}
 
-      {hasWebTraffic ? (
-        <section className="incsec" aria-label="Gateway routing">
-          <h2 className="incsec__title">Gateway routing</h2>
-          <RoutingPanel incidentId={incident.incident_id} onOpenEvent={evidenceHandlers.onOpenEvent} />
-        </section>
-      ) : null}
 
       <section className="incsec">
         <h2 className="incsec__title">Score breakdown</h2>

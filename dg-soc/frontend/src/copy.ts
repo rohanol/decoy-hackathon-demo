@@ -410,6 +410,8 @@ export const DB_COPY = {
   noStatementText: 'Statement text is not recorded; the emulator executes nothing.',
 } as const;
 
+export const PROTOCOL_COPY = { title: 'Protocol observations' } as const;
+
 export const FILE_COPY = {
   inert: 'stored inert',
   discarded: 'discarded',

@@ -22,9 +22,9 @@ from decoys.web.backup import DB_PASSWORD as LAB_PASSWORD
 
 
 @contextmanager
-def running_decoy(tmp_path, **bounds):
+def running_decoy(tmp_path, run_id="mysql-client-test", **bounds):
     path = tmp_path / "mysql.jsonl"
-    events = EventWriter(path, "mysql-client-test")
+    events = EventWriter(path, run_id)
     decoy = MySQLDecoy(events, timeout=.4, lifetime=3, **bounds)
     loop, ready = asyncio.new_event_loop(), threading.Event()
     state = {}

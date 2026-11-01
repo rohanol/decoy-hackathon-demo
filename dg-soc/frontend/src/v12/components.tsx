@@ -160,7 +160,7 @@ export function SourcesPanel({
           ))}
         </ul>
       </section>
-      <section aria-label="Telemetry sources">
+      {telemetry.length > 0 ? <section aria-label="Telemetry sources">
         <h3 className="v12sources__title">Telemetry sources · not honeypots</h3>
         <p className="v12note">{ROUTING_COPY.telemetryNotHoneypot}</p>
         <ul className="v12sources__list">
@@ -178,7 +178,7 @@ export function SourcesPanel({
             </li>
           ))}
         </ul>
-      </section>
+      </section> : null}
     </div>
   );
 }

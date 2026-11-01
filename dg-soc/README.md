@@ -1,6 +1,17 @@
 # DeceptionGraph SOC
 
-D3COY 1.0, PS 04: deception-driven threat detection and response. Two laptops, fake SSH and web services, a SOC dashboard that turns attacker traffic into scored, evidence-linked incidents, and a manual block with undo.
+D3COY 1.0, PS 04: deception-driven threat detection and response. Two laptops, emulated services, a dark SOC dashboard, scored evidence-linked incidents, and a manual web block with undo.
+
+**Current Kali release:** [four-honeypot runbook](deployment/KALI_FOUR_RUNBOOK.md).
+It preserves the original dashboard and web portal, and adds inert ZIP bait,
+MySQL authentication deception and a bounded SMB2 file service. The original
+two-service Compose file still works; four-service mode is an explicit override.
+Use `bash deployment/kali_lab.sh start|status|stop|logs` after preparing the
+native Kali VM. No public hosting or new normal-app/gateway flow is deployed.
+Native Docker, physical source-IP and egress acceptance remain required on Kali.
+
+The role prompts and bootstrap checklist below are retained as project history;
+the current implementation and operating instructions are in the runbook.
 
 Start here: `AGENTS.md` (rules), then your file in `prompts/`.
 

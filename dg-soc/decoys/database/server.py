@@ -103,20 +103,24 @@ def parse_auth(data):
 
 class EventWriter:
     """Bounded JSONL with four files total. Single process; producer metadata only."""
-    def __init__(self, path, run_id, capture_mode="live", max_bytes=1048576):
+    def __init__(self, path, run_id, capture_mode="live", max_bytes=1048576,
+                 sensor_id="db-decoy-01", protocol="mysql"):
         if not run_id or len(run_id) > 128 or capture_mode not in {"live", "replay"}:
             raise ValueError("Invalid run/mode")
         self.path, self.run_id, self.mode = Path(path), run_id, capture_mode
         self.max_bytes, self.lock = max_bytes, threading.Lock()
+        if (sensor_id, protocol) not in {("db-decoy-01", "mysql"), ("file-decoy-01", "smb")}:
+            raise ValueError("Invalid producer identity")
+        self.sensor_id, self.protocol = sensor_id, protocol
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def emit(self, kind, peer, session, **attrs):
         event = {"schema_version": "1.2", "source_record_id": "db_" + uuid.uuid4().hex,
-                 "sensor_id": "db-decoy-01", "event_type": kind,
+                 "sensor_id": self.sensor_id, "event_type": kind,
                  "occurred_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                  "src_ip": peer[0], "src_port": peer[1], "session_id": session,
                  "lab_run_id": self.run_id, "capture_mode": self.mode,
-                 "attributes": {"protocol": "mysql", **attrs}}
+                 "attributes": {"protocol": self.protocol, **attrs}}
         data = (json.dumps(event, ensure_ascii=True, separators=(",", ":")) + "\n").encode()
         with self.lock:
             if self.path.exists() and self.path.stat().st_size + len(data) > self.max_bytes:

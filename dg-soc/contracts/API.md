@@ -1,6 +1,12 @@
 # API contract v1.2 (v1.0 and v1.1 compatible)
 
-v1.2 adds two honeypots, the HTTP gateway and the normal demo app: see **Four honeypots, gateway and telemetry (v1.2)** at the end. The integrated prototype implements v1.1. The rules are in **Evidence boundaries (v1.1)** below; the Migration section records the staged implementation history.
+The integrated backend and adapter accept v1.2. The direct Kali release uses
+four honeypots with the original SOC and web portal: see
+`deployment/KALI_FOUR_RUNBOOK.md`. Gateway/demo-app contracts below remain
+compatible interfaces, but those sources are disabled and no gateway or normal
+app is deployed. Base Compose keeps web producer 1.1; the optional four-service
+override selects 1.2 and enables inert ZIP bait. The rules are in **Evidence
+boundaries (v1.1)** below; Migration records staged implementation history.
 
 Compatibility, precisely:
 - `schema_version` selects the validation rules. A `"1.0"` event is checked exactly as before; the frozen copy is `contracts/history/event.schema.v1.0.json`, and `backend/tests/test_contracts.py` runs edge cases through both. Every new or stricter rule applies only to `"1.1"` events.

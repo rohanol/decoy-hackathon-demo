@@ -19,7 +19,6 @@ import ipaddress
 import json
 import logging
 import os
-import os
 import sys
 import time
 import urllib.error
@@ -30,10 +29,10 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 log = logging.getLogger("adapter")
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SENSOR_IDS = {"ssh-decoy-01", "web-decoy-01"}
+SENSOR_IDS = {"ssh-decoy-01", "web-decoy-01", "db-decoy-01", "file-decoy-01"}
 EVENT_TYPES = {
     "connection_open", "auth_failure", "auth_success", "command_input", "connection_close",
-    "http_request", "synthetic_file_access", "blocked_request", "bait_served",
+    "http_request", "synthetic_file_access", "blocked_request", "bait_served", "db_request", "file_operation",
 }
 TOP_LEVEL_KEYS = {
     "schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip",
@@ -208,13 +207,58 @@ class WebMapper:
         return ev
 
 
+class NativeMapper:
+    """Validate native producers without relabelling their provenance.
+
+    Invalid/sensitive records quarantine their digest only, never their payload.
+    """
+    rotating = True
+
+    def __init__(self, sensor_id):
+        if sensor_id not in {"db-decoy-01", "file-decoy-01"}:
+            raise ValueError("Invalid native sensor")
+        self.sensor_id = sensor_id
+
+    def map(self, raw_line):
+        try:
+            event = json.loads(raw_line)
+            if (not isinstance(event, dict) or event.get("sensor_id") != self.sensor_id
+                    or event.get("schema_version") != "1.2" or set(event) - TOP_LEVEL_KEYS):
+                return None
+            def sensitive(value):
+                if isinstance(value, dict):
+                    return any(str(k).lower() in FORBIDDEN_ATTRS or sensitive(v) for k, v in value.items())
+                if isinstance(value, list):
+                    return any(sensitive(v) for v in value)
+                return isinstance(value, str) and "DGLAB-" in value
+            if sensitive(event.get("attributes")) or validate(event):
+                return None
+            return event
+        except (ValueError, TypeError, RecursionError):
+            return None
+
+
 def validate(ev: Dict[str, Any]) -> Optional[str]:
     """Return a reason string if the event would be rejected by the backend, else None."""
     version = ev.get("schema_version")
+    if version == "1.2":
+        if ROOT not in sys.path:
+            sys.path.insert(0, ROOT)
+        from backend.models import IngestEvent
+        from pydantic import ValidationError
+        try:
+            IngestEvent.model_validate(ev)
+        except ValidationError as error:
+            return "schema1.2:" + ".".join(str(x) for x in error.errors(include_input=False)[0]["loc"])
+        return None
     if version not in ("1.0", "1.1"):
         return "schema_version"
     if ev.get("sensor_id") not in SENSOR_IDS:
         return "sensor_id"
+    if ev.get("sensor_id") not in {"ssh-decoy-01", "web-decoy-01"}:
+        return "sensor_id: needs schema_version 1.2"
+    if ev.get("event_type") in {"db_request", "file_operation"}:
+        return "event_type: needs schema_version 1.2"
     if ev.get("event_type") not in EVENT_TYPES:
         return "event_type"
     if not isinstance(ev.get("source_record_id"), str) or not 0 < len(ev["source_record_id"]) <= 128:
@@ -397,11 +441,23 @@ class Sender:
         self.heartbeat_url = self.url.rsplit("/", 1)[0] + "/heartbeat"
 
     def _totals(self, sensor_id: str) -> Dict[str, Any]:
-        return self.sensor_totals.setdefault(sensor_id, {"error_count": 0,
+        return self.sensor_totals.setdefault(sensor_id, {"error_count": 0, "last_ingest_at": None,
             "ingest": {"accepted": 0, "duplicate": 0, "rejected": 0, "quarantined": 0, "retry": 0}})
 
     def post(self, events: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
         """Return backend rejections; None means retries ran out and checkpoint must not advance."""
+        # Backend counts are aggregate; single-sensor requests keep counters
+        # truthful when a caller supplies a mixed batch.
+        identities = {event.get("sensor_id") for event in events}
+        if len(identities) > 1:
+            rejected = []
+            for sensor in sorted(identities, key=str):
+                indices = [i for i, event in enumerate(events) if event.get("sensor_id") == sensor]
+                result = self.post([events[i] for i in indices])
+                if result is None:
+                    return None
+                rejected.extend({**item, "index": indices[item["index"]]} for item in result)
+            return rejected
         body = json.dumps({"events": events}).encode()
         sensors = {ev.get("sensor_id") for ev in events if ev.get("sensor_id") in SENSOR_IDS}
         delay = 0.5
@@ -420,6 +476,8 @@ class Sender:
                     counts = self._totals(sensor)["ingest"]
                     counts["accepted"] += accepted_count
                     counts["duplicate"] += duplicate_count
+                    if accepted_count + duplicate_count > 0:
+                        self._totals(sensor)["last_ingest_at"] = self.last_successful_ingest_at
                 if rejected:
                     log.warning("backend rejected %d events", len(rejected))
                     self.rejected_count += len(rejected)
@@ -551,6 +609,11 @@ def process_source(path: str, mapper, ckpt: Checkpoint, sender: Sender, quaranti
     return delivered
 
 
+def process_rotating_source(path, mapper, ckpt, sender, quarantine_path=None):
+    paths = [path + "." + str(i) for i in (3, 2, 1)] + [path] if getattr(mapper, "rotating", False) else [path]
+    return sum(process_source(item, mapper, ckpt, sender, quarantine_path) for item in paths)
+
+
 def parse_env_file(path: str) -> Dict[str, str]:
     out: Dict[str, str] = {}
     try:
@@ -593,10 +656,14 @@ def _heartbeat_payloads(sources, ckpt, sender, collector_id, now_text):
     for path, mapper in sources:
         sensor = mapper.sensor_id
         totals = sender._totals(sensor)
-        backlog, oldest_age = _pending_lines(path, ckpt)
+        paths = [path + "." + str(i) for i in (3, 2, 1)] + [path] if getattr(mapper, "rotating", False) else [path]
+        pending = [_pending_lines(item, ckpt) for item in paths]
+        backlog = sum(count for count, _ in pending)
+        ages = [age for _, age in pending if age is not None]
+        oldest_age = max(ages) if ages else (None if backlog else 0)
         payloads.append({"collector_id": collector_id, "sensor_id": sensor, "sent_at": now_text,
             "process_state": "running", "last_read_at": now_text if os.path.isfile(path) else None,
-            "last_ingest_at": sender.last_successful_ingest_at, "backlog_records": backlog,
+            "last_ingest_at": totals.get("last_ingest_at"), "backlog_records": backlog,
             "oldest_backlog_age_s": oldest_age, "error_count": totals["error_count"],
             "ingest": dict(totals["ingest"])})
     return payloads
@@ -611,6 +678,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--capture-mode", choices=["live", "replay"], default="live")
     ap.add_argument("--cowrie-log", default=os.path.join(state, "cowrie-log", "cowrie.json"))
     ap.add_argument("--web-log", default=os.path.join(state, "web-log", "web.json"))
+    ap.add_argument("--db-log", default=os.path.join(state, "db-log", "db.json"))
+    ap.add_argument("--file-log", default=os.path.join(state, "file-log", "file.json"))
     ap.add_argument("--checkpoint", default=os.path.join(state, "adapter-checkpoint.json"))
     ap.add_argument("--quarantine", default=os.path.join(state, "rejected-events.jsonl"))
     ap.add_argument("--health", default=os.path.join(state, "collector-health.json"))
@@ -625,6 +694,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     sources = [
         (args.cowrie_log, CowrieMapper(args.lab_run_id, args.capture_mode, tokens)),
         (args.web_log, WebMapper(args.lab_run_id, args.capture_mode, tokens)),
+        (args.db_log, NativeMapper("db-decoy-01")),
+        (args.file_log, NativeMapper("file-decoy-01")),
     ]
     ckpt, sender = Checkpoint(args.checkpoint), Sender(args.backend)
     last_heartbeat = 0.0
@@ -636,7 +707,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         errors_before = sender.error_count
         counters_before = (sender.accepted_count, sender.duplicate_count, sender.rejected_count,
                            sender.quarantine_count, sender.retry_count)
-        total = sum(process_source(path, mapper, ckpt, sender, args.quarantine) for path, mapper in sources)
+        total = sum(process_rotating_source(path, mapper, ckpt, sender, args.quarantine) for path, mapper in sources)
         counters_after = (sender.accepted_count, sender.duplicate_count, sender.rejected_count,
                           sender.quarantine_count, sender.retry_count)
         accepted, duplicates, rejected, quarantined, retries = (a - b for a, b in zip(counters_after, counters_before))

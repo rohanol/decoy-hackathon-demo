@@ -1,8 +1,8 @@
 /**
  * Screen 6 — Attack Graph. DESIGN_SPEC.md section 11.
  *
- * Three kinds of node: the attacker IPs on the left, the two decoys on the
- * right. Thin edges are observed traffic. The edge between the two decoys is
+ * Source cases on the left, four decoys on the right. Thin edges are observed
+ * traffic. Edges between decoys are backend-reported relationships. A link's
  * the cross-decoy link, and its dashed-to-solid transition on confirmation is
  * the visual climax of the demo.
  *
@@ -44,14 +44,10 @@ const SENSOR_X = 640;
 const SENSOR_W = 220;
 const SENSOR_H = 76;
 /**
- * This fallback view's fixed geometry draws the SSH and web decoys and the
- * link between them. MySQL and SMB decoys (v1.2) are not drawn here; the note
- * under the graph says so, and the incident pages show their evidence.
+ * Fixed rows for all four decoys preserve the topology between refreshes.
  */
-const GRAPH_SENSORS: readonly SensorId[] = ['ssh-decoy-01', 'web-decoy-01'];
+const GRAPH_SENSORS: readonly SensorId[] = ['ssh-decoy-01', 'web-decoy-01', 'db-decoy-01', 'file-decoy-01'];
 
-const SSH_Y = 48;
-const WEB_Y = 268;
 
 interface GraphData {
   incidents: IncidentSummary[];
@@ -62,7 +58,7 @@ interface GraphData {
 }
 
 function sensorY(sensorId: SensorId): number {
-  return sensorId === 'ssh-decoy-01' ? SSH_Y : WEB_Y;
+  return 48 + Math.max(0, GRAPH_SENSORS.indexOf(sensorId)) * 152;
 }
 
 /** A gentle cubic from the attacker's right edge to a sensor's left edge. */
@@ -76,9 +72,11 @@ function trafficPath(ay: number, sy: number): string {
 }
 
 /** The cross-decoy edge: a vertical run down the right-hand column. */
-function linkPath(offset: number): string {
-  const x = SENSOR_X + SENSOR_W / 2 + offset;
-  return `M ${x} ${SSH_Y + SENSOR_H} L ${x} ${WEB_Y}`;
+function linkPath(offset: number, from: SensorId, to: SensorId): string {
+  const x = SENSOR_X + SENSOR_W;
+  const y1 = sensorY(from) + SENSOR_H / 2;
+  const y2 = sensorY(to) + SENSOR_H / 2;
+  return `M ${x} ${y1} C ${x + 40 + offset} ${y1}, ${x + 40 + offset} ${y2}, ${x} ${y2}`;
 }
 
 function AttackerNode({
@@ -232,7 +230,7 @@ export function AttackGraph() {
 
   const canvasHeight = useMemo(() => {
     const attackerCount = Math.max(1, data?.incidents.length ?? 1);
-    return Math.max(400, ATTACKER_Y0 + attackerCount * ATTACKER_GAP + 24);
+    return Math.max(660, ATTACKER_Y0 + attackerCount * ATTACKER_GAP + 24);
   }, [data]);
 
   const openLinks = data?.links.filter((link) => link.status === 'open').length ?? 0;
@@ -303,10 +301,10 @@ export function AttackGraph() {
               // strong_candidate and a same-IP candidate), and labels drawn at a
               // shared y overlap each other and cover the neighbouring line,
               // which makes that link impossible to click.
-              const offset = (index - (links.length - 1) / 2) * 36;
-              const centreY = (SSH_Y + SENSOR_H + WEB_Y) / 2;
-              const midY = centreY + (index - (links.length - 1) / 2) * 30;
-              const x = SENSOR_X + SENSOR_W / 2 + offset;
+              const offset = (index % 4) * 4;
+              const centreY = (sensorY(link.from_sensor) + sensorY(link.to_sensor) + SENSOR_H) / 2;
+              const midY = centreY + (index % 5 - 2) * 24;
+              const x = 445;
               const label =
                 link.status === 'confirmed'
                   ? 'confirmed'
@@ -315,7 +313,8 @@ export function AttackGraph() {
                     : link.kind === 'strong_candidate'
                       ? `candidate · ${link.basis.replace(/^honeytoken\s+/, '')}`
                       : 'candidate';
-              const labelWidth = label.length * 6.1 + 16;
+              const visibleLabel = label.length > 55 ? label.slice(0, 52) + '…' : label;
+              const labelWidth = visibleLabel.length * 6.1 + 16;
               const interactive = true;
 
               return (
@@ -334,8 +333,9 @@ export function AttackGraph() {
                   }}
                 >
                   {/* Invisible fat path so the edge is easy to hit. */}
-                  <path className="glink__hit" d={linkPath(offset)} />
-                  <path className="glink__line" d={linkPath(offset)} />
+                  <title>{label}</title>
+                  <path className="glink__hit" d={linkPath(offset, link.from_sensor, link.to_sensor)} />
+                  <path className="glink__line" d={linkPath(offset, link.from_sensor, link.to_sensor)} />
                   <rect
                     className="glink__labelbg"
                     x={x - labelWidth / 2}
@@ -345,7 +345,7 @@ export function AttackGraph() {
                     rx={4}
                   />
                   <text className="glink__label" x={x} y={midY + 4}>
-                    {label}
+                    {visibleLabel}
                   </text>
                 </g>
               );
@@ -394,8 +394,8 @@ export function AttackGraph() {
         identify a person.
       </p>
       <p className="graph__note">
-        This view draws the SSH and web decoys only. MySQL and SMB decoy evidence is on the incident
-        pages and in the Live Feed; a web block never covers them.
+        This view shows all four decoys. Relationships come from backend evidence and analyst decisions;
+        a web block covers only the web decoy.
       </p>
 
       {decidingLink && data ? (

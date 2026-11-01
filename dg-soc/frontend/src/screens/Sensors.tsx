@@ -121,7 +121,7 @@ export function Sensors() {
         ) : (
           <SourcesPanel
             honeypots={rows.honeypots}
-            telemetry={rows.telemetry}
+            telemetry={[]}
             honeypotCount={rows.honeypot_count}
             registryServed={registryState === 'served'}
             now={now}

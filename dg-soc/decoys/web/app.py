@@ -17,8 +17,6 @@ from .observation import RequestObservation, decode
 from .policy_bridge import resolve_enforcer
 from .sessions import SessionStore
 from .backup import ASSET_ID, DB_PASSWORD, SMB_PASSWORD, TOKEN_IDS, build_backup
-from .gateway_context import HEADER, verify
-from .presentation import SHELL, HOME, REPORTS
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSET = Path(__file__).parent / "assets/customer_data.csv"
@@ -48,9 +46,7 @@ def create_app(config=None, *, policy_check=None):
         ATTACKER_IPS=os.environ.get("ATTACKER_IPS", "192.168.77.10"),
         DECOY_SESSION_TTL=900, DECOY_SESSION_CAPACITY=512, UPLOAD_FILE_LIMIT=8192,
         WEB_EVENT_SCHEMA_VERSION=os.environ.get("WEB_EVENT_SCHEMA_VERSION", "1.0"),
-        DG_GATEWAY_CONTEXT_KEY=os.environ.get("DG_GATEWAY_CONTEXT_KEY"),
         CAPTURE_MODE=os.environ.get("CAPTURE_MODE", "live"),
-        WEB_PORTAL_THEME=os.environ.get("WEB_PORTAL_THEME"),
     )
     app.config.update(config or {})
     tokens = yaml.safe_load(Path(app.config["HONEYTOKENS_PATH"]).read_text())["tokens"]
@@ -58,10 +54,6 @@ def create_app(config=None, *, policy_check=None):
         raise ValueError("Unsupported web event schema version")
     if app.config["CAPTURE_MODE"] not in {"live", "replay"}:
         raise ValueError("Unsupported capture mode")
-    version12 = app.config["WEB_EVENT_SCHEMA_VERSION"] == "1.2"
-    research_theme = app.config["WEB_PORTAL_THEME"] == "research" or (
-        version12 and app.config["WEB_PORTAL_THEME"] is None
-    )
     backup_data, backup_manifest = build_backup(ASSET.read_bytes())
     checker = policy_check or resolve_enforcer(
         app.config["BLOCKLIST_PATH"], app.config["ATTACKER_IPS"].replace(",", " ").split()
@@ -74,7 +66,7 @@ def create_app(config=None, *, policy_check=None):
     lock = threading.Lock()
 
     def page(body, status=200):
-        return Response((SHELL if research_theme else PAGE).format(body), status=status, mimetype="text/html")
+        return Response(PAGE.format(body), status=status, mimetype="text/html")
 
     def semantic(kind, **attrs):
         g.semantic_type = kind
@@ -101,15 +93,6 @@ def create_app(config=None, *, policy_check=None):
         g.semantic_type, g.semantic_attrs = None, {}
         g.response_class, g.cookie = "normal", None
         g.src_ip = request.remote_addr
-        raw_port = request.environ.get("REMOTE_PORT")
-        g.src_port = int(raw_port) if str(raw_port).isdigit() and 0 <= int(raw_port) <= 65535 else None
-        g.ingress = {"gateway_context": "absent"}
-        if version12:
-            g.ingress, client_ip, client_port = verify(
-                request.headers.get(HEADER), app.config["DG_GATEWAY_CONTEXT_KEY"], app.config["LAB_RUN_ID"]
-            )
-            if client_ip is not None:
-                g.src_ip, g.src_port = client_ip, client_port
         g.observation = RequestObservation(request, seeded_secrets=(BAIT_TOKEN, DB_PASSWORD, SMB_PASSWORD))
         g.session = sessions.get(request.cookies.get(COOKIE), app.config["LAB_RUN_ID"])
         try:
@@ -127,8 +110,6 @@ def create_app(config=None, *, policy_check=None):
             if type(revision) is int:
                 g.semantic_attrs["policy_revision"] = revision
             return page("<h2>Access denied</h2>", 403)
-        if g.ingress["gateway_context"] == "invalid":
-            return page("<h2>Request unavailable</h2>", 400)
         if not g.session:
             g.cookie, g.session = sessions.create(app.config["LAB_RUN_ID"])
         g.observation.capture()
@@ -153,8 +134,8 @@ def create_app(config=None, *, policy_check=None):
             evidence_role="request",
             session_state="authenticated" if g.session and g.session.authenticated else "anonymous",
         )
-        if version12:
-            metadata.update(protocol="http", ingress=g.ingress)
+        if app.config["WEB_EVENT_SCHEMA_VERSION"] == "1.2":
+            metadata["protocol"] = "http"
         if response.status_code >= 400 and not g.semantic_type:
             metadata["outcome"] = "denied"
         if not g.semantic_type:
@@ -187,8 +168,6 @@ def create_app(config=None, *, policy_check=None):
                 "src_ip": g.src_ip or "0.0.0.0", "session_id": g.session.reference if g.session else None,
                 "lab_run_id": app.config["LAB_RUN_ID"], "capture_mode": app.config["CAPTURE_MODE"], "attributes": attrs,
             })
-            if version12:
-                rows[-1]["src_port"] = g.src_port
             try:
                 ipaddress.IPv4Address(rows[-1]["src_ip"])
             except (ipaddress.AddressValueError, TypeError):
@@ -216,39 +195,11 @@ def create_app(config=None, *, policy_check=None):
 
     @app.get("/")
     def home():
-        if research_theme:
-            return page(HOME)
         return page("<h2>Staff resources</h2><p>Quarterly customer export is ready. Please use the portal login.</p><small>Maintenance ticket #1042 still open.</small>")
-
-    @app.get("/reports")
-    def reports():
-        return page(REPORTS)
-
-    @app.get("/reports/<slug>")
-    def report(slug):
-        titles = {"coastal-sensor-calibration": "Coastal sensor calibration",
-                  "campus-energy-baseline": "Campus energy baseline"}
-        title = titles.get(slug)
-        if title is None:
-            return page('<h2>Page not found</h2><a href="/">Back to home</a>', 404)
-        return page('<span class="eyebrow">Research report</span><h2>' + title +
-                    '</h2><h3>Abstract</h3><p>Reference measurements from the research programme.</p>'
-                    '<p>Full text is available to group members on request.</p>')
-
-    @app.get("/resources")
-    def resources():
-        return page('<h2>Dataset catalogue</h2><table><tr><th>Dataset</th><th>Access</th></tr>'
-                    '<tr><td>Quarterly customer export</td><td><a href="/download?file=customer_data.csv">Staff access</a></td></tr>'
-                    '<tr><td>Operations backup</td><td><a href="/backup/backup.zip">Backup archive</a></td></tr></table>')
 
     @app.route("/login", methods=["GET", "POST"])
     def login():
         if request.method == "GET":
-            if research_theme:
-                return page('<form class="login" method="post"><h2>Sign in</h2><p>Use your research account.</p>'
-                            '<label>Account<input name="username" autocomplete="username" maxlength="128"></label>'
-                            '<label>Password<input name="password" type="password" autocomplete="current-password"></label>'
-                            '<button>Sign in</button></form>')
             return page('<h2>Staff login</h2><form method="post"><input name="username" placeholder="Username" maxlength="128"><input name="password" type="password" placeholder="Password"><button>Sign in</button></form>')
         if request.mimetype != "application/x-www-form-urlencoded":
             return page("<h2>Form login required</h2>", 415)
@@ -262,7 +213,7 @@ def create_app(config=None, *, policy_check=None):
             g.semantic_attrs["honeytoken_id"] = matched["id"]
         if valid:
             return dashboard_page()
-        return page("<h2>The email or password is incorrect.</h2>" if research_theme else "<h2>Invalid credentials</h2>", 401)
+        return page("<h2>Invalid credentials</h2>", 401)
 
     def dashboard_page():
         return page('<h2>Staff dashboard</h2><p>Signed in to the synthetic internal portal.</p><a href="/download?file=customer_data.csv">Download customer export</a><form action="/logout" method="post"><button>Logout</button></form>')
@@ -357,8 +308,7 @@ def create_app(config=None, *, policy_check=None):
 
     @app.get("/backup/backup.zip")
     def backup():
-        # Opt-in alongside v1.2; old deployments continue using the old contract.
-        if not version12:
+        if app.config["WEB_EVENT_SCHEMA_VERSION"] != "1.2":
             return page("<h2>Request unavailable</h2>", 404)
         if request.method == "GET":
             g.response_class = "fake_data"
@@ -368,8 +318,6 @@ def create_app(config=None, *, policy_check=None):
                      size_bytes=len(backup_data), sha256=hashlib.sha256(backup_data).hexdigest(),
                      digest_scope="full_asset", archive=backup_manifest,
                      transfer={"response_status": 200, "content_length": len(backup_data), "completion": "unknown"})
-        # Flask's after_request runs before the server writes to the socket.
-        # Do not claim bytes_written/body_written or client download completion.
         return Response(backup_data, mimetype="application/zip", headers={
             "Content-Disposition": 'attachment; filename="backup.zip"'
         })

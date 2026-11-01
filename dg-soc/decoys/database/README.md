@@ -26,7 +26,7 @@ and [HandshakeV10](https://dev.mysql.com/doc/dev/mysql-server/8.0.46/page_protoc
   pre-4.1 authentication are unsupported; no cleartext auth switch is requested.
   Do not assume compatibility with every modern MySQL CLI/plugin combination.
 
-## Run and deployment contract for M2
+## Run and deployment
 
 From `dg-soc`, after the network-isolation check:
 
@@ -44,15 +44,16 @@ Environment: `LAB_RUN_ID`, `CAPTURE_MODE` (`live`/`replay`), `DB_BIND_IP`,
 
 Docker build context is `decoys/database/`. The image runs uid/gid 1000 and
 binds `0.0.0.0:3306` **inside the container**, explicitly enabled with its
-`DB_CONTAINER_BIND=1`. M2 must publish only `192.168.77.20:3306:3306`, provision
+`DB_CONTAINER_BIND=1`. The four-service Compose override publishes only `192.168.77.20:3306:3306`, provisions
 the writable `/logs` mount for uid 1000, use read-only root, cap-drop ALL,
 no-new-privileges and an isolated network, and verify no unintended egress.
 No privileged mode, host filesystem mount or Docker socket is needed.
 
 There is no HTTP readiness route. The process prints one fixed ready message
 after the listener binds. A TCP readiness connection generates a connection
-event, not proof of a login or collector health. M2 owns service/collector
-heartbeats and adapter shipping. No native container build/run is claimed here.
+event, not proof of a login or collector health. The integrated adapter ships
+the native records and per-sensor collector heartbeats. Native container/network
+acceptance is still required on Kali.
 
 ## Metadata, privacy and bounds
 
@@ -74,23 +75,24 @@ or access logger. Query records have command kind, bounded verb, input length,
 Bounds: 16 KiB packet; 32 active connections; 3 s read/write idle timeout;
 30 s connection lifetime; 32 post-auth packets. Oversized, partial, out-of-order
 and timed-out packets close the connection without retaining their payload.
-Logger rotates at 1 MiB to `.1`, `.2`, `.3`, four files total; M2 must account
-for rotation and potential collection lag. Log failure closes before accepting
+Logger rotates at 1 MiB to `.1`, `.2`, `.3`, four files total; the adapter reads
+all retained generations using stable source IDs. Collection must keep up with
+this finite retention. Log failure closes before accepting
 further activity. These are producer limits, not an Internet-scale load claim.
 
 ## Tests
 
 ```bash
 python -m pip install -r decoys/database/requirements-dev.txt
-python -m pytest decoys/database/test_server.py tests/e2e/test_next_bait.py -q
+python -m pytest decoys/database/test_server.py tests/e2e/test_kali_zip.py -q
 ```
 
 The tests use actual PyMySQL protocol traffic over ephemeral loopback ports,
 malformed-wire checks, schema validation, inert ZIP verification and privacy
 checks. They do not contact `192.168.77.20`.
 
-## Integration dependency
+## Integrated Kali mode
 
-M2's published adapter at `c214ff8` still rejects `schema_version=1.2` before
-ingest. Do not enable this producer in a deployed run until M3 runtime and the
-updated adapter are integrated. Existing web block is not MySQL enforcement.
+The backend, source registry and adapter in this release accept schema 1.2.
+Use deployment/KALI_FOUR_RUNBOOK.md rather than the superseded teammate handoff.
+Existing web block is not MySQL enforcement.

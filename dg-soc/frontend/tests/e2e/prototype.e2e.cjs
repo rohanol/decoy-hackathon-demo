@@ -34,8 +34,10 @@ async function get(route) { return (await fetch(API + route)).json(); }
     assert.equal(ingested.accepted, 2);
     await page.goto(UI + '/sensors?dev=1', { waitUntil: 'networkidle' });
     await page.waitForSelector('.collector');
-    assert.equal(await page.locator('.collector').count(), 2);
-    assert.equal(await page.locator('.collector .healthdim__val').filter({ hasText: /^running$/ }).count(), 2);
+    const actualHealth = await get('/api/health');
+    assert.equal(await page.locator('.collector').count(), Object.keys(actualHealth.sensor_health ?? actualHealth.sensors).length);
+    assert.equal(await page.locator('.collector .healthdim__val').filter({ hasText: /^running$/ }).count(),
+      Object.values(actualHealth.sensor_health ?? {}).filter(row => row.process_state === 'running').length);
     check('actual collector heartbeats reach the Sensors screen');
     await page.screenshot({ path: path.join(SHOTS, '01-health.png') });
 

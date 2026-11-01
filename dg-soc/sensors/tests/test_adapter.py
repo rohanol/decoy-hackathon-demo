@@ -326,7 +326,10 @@ def test_heartbeat_matches_proposed_api_and_posts_while_idle(tmp_path, backend):
     assert run_once(tmp_path, backend.url) == 0
     health = json.loads((tmp_path / "health.json").read_text())
     assert health["heartbeat_api"] == "ok"
-    assert len(backend.heartbeats) == 2
+    assert len(backend.heartbeats) == 4
+    assert {item["sensor_id"] for item in backend.heartbeats} == {
+        "ssh-decoy-01", "web-decoy-01", "db-decoy-01", "file-decoy-01"
+    }
     heartbeat = next(item for item in backend.heartbeats if item["sensor_id"] == "ssh-decoy-01")
     assert set(heartbeat) == {"collector_id", "sensor_id", "sent_at", "process_state", "last_read_at",
         "last_ingest_at", "backlog_records", "oldest_backlog_age_s", "error_count", "ingest"}
