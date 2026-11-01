@@ -121,7 +121,7 @@ ready() {
 }
 launch backend "$python" -m backend.main
 ready http://127.0.0.1:8000/api/health backend
-export VITE_USE_FIXTURES=0 VITE_API_BASE=http://127.0.0.1:8000 VITE_SUPABASE_URL='' VITE_SUPABASE_ANON_KEY='' VITE_AUTH_DEV_BYPASS=1
+export VITE_USE_FIXTURES=0 VITE_API_BASE=http://127.0.0.1:8000 VITE_SUPABASE_URL='' VITE_SUPABASE_ANON_KEY='' VITE_AUTH_DEV_BYPASS=1 VITE_AUTH_LOCAL=1
 launch frontend node "$root/frontend/node_modules/vite/bin/vite.js" "$root/frontend" --host 127.0.0.1 --port 5173 --strictPort
 ready http://127.0.0.1:5173 frontend
 containers_started=1
