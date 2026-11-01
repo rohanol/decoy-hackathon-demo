@@ -9,3 +9,5 @@ mkdir -p state/cowrie-log state/web-log
 chmod 644 state/blocklist.json
 chmod 777 state/cowrie-log state/web-log   # state/ is git-ignored; lab-only machine
 echo "state ready:"; ls -la state
+mkdir -p state/gateway
+chmod 777 state/gateway   # only the gateway signing key lives here; the key itself is mode 0600

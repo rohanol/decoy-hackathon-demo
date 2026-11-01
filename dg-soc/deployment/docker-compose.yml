@@ -52,6 +52,30 @@ services:
     cap_drop: [ALL]
     networks: [decoys]
 
+  gateway:
+    build:
+      context: ..
+      dockerfile: gateway/Dockerfile
+    container_name: dg-http-gateway
+    profiles: ["gateway"]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      GATEWAY_BIND_IP: ${LAB_HOST_IP}
+      GATEWAY_PORT: 8081
+      GATEWAY_KEY_PATH: /state/gateway.key
+      GATEWAY_SESSION_TTL: ${GATEWAY_SESSION_TTL:-900}
+      GATEWAY_SESSION_CAPACITY: ${GATEWAY_SESSION_CAPACITY:-4096}
+      NORMAL_UPSTREAM: ${NORMAL_APP_UPSTREAM:-http://192.168.77.20:8082}
+      DECOY_UPSTREAM: http://192.168.77.20:8080
+    volumes:
+      - ./state/gateway:/state
+    user: "1000:1000"
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
 networks:
   decoys:
     internal: false   # needed for published ports; host has no default route during runs, so no egress
