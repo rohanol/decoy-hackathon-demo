@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dg-soc/telemetry.schema.json",
+  "title": "Gateway and normal-app telemetry record (collector -> backend)",
+  "description": "PROVISIONAL until the gateway and demo app producers exist (contracts/API.md, 'Four honeypots, gateway and telemetry (v1.2)'). POST /api/ingest/telemetry takes {\"records\": [ ... ]}, max 100 per request. These sources are not honeypots: their records are never events, never enter rules or scores, never count as a honeypot, and never verify a response action. Unknown telemetry_version values are rejected per record.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["telemetry_version", "record_id", "source_id", "record_type", "occurred_at", "lab_run_id", "capture_mode", "attributes"],
+  "properties": {
+    "telemetry_version": { "const": "1.0" },
+    "record_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Stable per producer record. Dedup key is (ingest namespace, source_id, record_id); the namespace is 'live' or 'replay:<lab_run_id>', as for events." },
+    "origin_record_id": { "type": ["string", "null"], "maxLength": 128, "description": "Replay only: record_id of the captured original. Null or absent on live records." },
+    "source_id": { "enum": ["gateway-01", "demo-app-01"], "description": "Telemetry source identity (contracts/sources.json). Never a sensor_id." },
+    "record_type": { "enum": ["route_decision", "upstream_result", "app_request"] },
+    "occurred_at": { "type": "string", "format": "date-time", "description": "UTC, from the producer's clock" },
+    "lab_run_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Same run namespace as events: one capture_mode per run." },
+    "capture_mode": { "enum": ["live", "replay"] },
+    "attributes": { "type": "object" }
+  },
+  "allOf": [
+    { "if": { "properties": { "capture_mode": { "const": "live" } } }, "then": { "properties": { "origin_record_id": { "type": "null" } } } },
+    { "if": { "properties": { "source_id": { "const": "gateway-01" } } }, "then": { "properties": { "record_type": { "enum": ["route_decision", "upstream_result"] } } } },
+    { "if": { "properties": { "source_id": { "const": "demo-app-01" } } }, "then": { "properties": { "record_type": { "const": "app_request" } } } },
+    { "if": { "properties": { "record_type": { "const": "route_decision" } } }, "then": { "properties": { "attributes": { "$ref": "#/$defs/route_decision" } } } },
+    { "if": { "properties": { "record_type": { "const": "upstream_result" } } }, "then": { "properties": { "attributes": { "$ref": "#/$defs/upstream_result" } } } },
+    { "if": { "properties": { "record_type": { "const": "app_request" } } }, "then": { "properties": { "attributes": { "$ref": "#/$defs/app_request" } } } }
+  ],
+  "$defs": {
+    "gateway_request_id": { "type": "string", "pattern": "^gw_[A-Za-z0-9_-]{8,64}$", "description": "Issued by the gateway per request; travels to the upstream only inside the signed context header." },
+    "gateway_session_ref": { "type": ["string", "null"], "pattern": "^gws_[0-9a-f]{16,64}$", "description": "Keyed digest of the gateway's own session cookie (per-run key). Never the cookie, never reusable as a credential. Null when the client presented no gateway cookie and none was issued." },
+    "http_path": { "type": "string", "maxLength": 2048, "pattern": "^/[^?#]*$", "description": "Path only; the query goes in query_redacted." },
+    "query_redacted": { "type": "string", "maxLength": 2048, "description": "Query with every value that could be a secret (password, token, honeytoken, cookie) replaced by <redacted> before the producer writes any log." },
+    "route_decision": {
+      "description": "The gateway's routing decision for one request, taken before any upstream handles it. A decision is a request for routing, not proof of how the upstream handled it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_request_id", "client_ip", "gateway_session_ref", "method", "path", "decision", "upstream_id",
+                   "reasons", "routing_policy_id", "routing_policy_revision", "pin", "decided_before_upstream"],
+      "properties": {
+        "gateway_request_id": { "$ref": "#/$defs/gateway_request_id" },
+        "client_ip": { "type": "string", "format": "ipv4", "description": "TCP peer at the gateway. Never taken from X-Forwarded-For or any client header." },
+        "client_port": { "type": ["integer", "null"], "minimum": 0, "maximum": 65535 },
+        "gateway_session_ref": { "$ref": "#/$defs/gateway_session_ref" },
+        "method": { "type": "string", "maxLength": 16 },
+        "path": { "$ref": "#/$defs/http_path" },
+        "query_redacted": { "$ref": "#/$defs/query_redacted" },
+        "decision": { "enum": ["normal_app", "decoy"] },
+        "upstream_id": { "enum": ["demo-app-01", "web-decoy-01"], "description": "Fixed upstream for the decision. The gateway never proxies MySQL or SMB." },
+        "reasons": {
+          "type": "array", "minItems": 1, "maxItems": 8, "uniqueItems": true,
+          "items": { "enum": ["no_trigger", "session_pinned", "source_pinned", "web_attack_indicator", "hidden_path_probe",
+                              "bait_path_requested", "honeytoken_presented", "manual_lab_rule"] }
+        },
+        "indicator_classes": {
+          "type": "array", "maxItems": 5, "uniqueItems": true,
+          "items": { "enum": ["sqli", "xss", "lfi", "rfi", "cmd_injection"] },
+          "description": "With web_attack_indicator: classes from the shared structural indicator vocabulary (API.md, Indicator semantics). Lexical indicators alone never divert."
+        },
+        "routing_policy_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "routing_policy_revision": { "type": "integer", "minimum": 0 },
+        "pin": {
+          "type": "object", "additionalProperties": false, "required": ["scope"],
+          "properties": {
+            "scope": { "enum": ["none", "session", "source_ip"], "description": "What keeps later traffic of this run on the decoy after this decision." },
+            "pinned_at": { "type": ["string", "null"], "format": "date-time" },
+            "expires_at": { "type": ["string", "null"], "format": "date-time", "description": "Null: until the run ends." }
+          }
+        },
+        "decided_before_upstream": { "const": true }
+      },
+      "allOf": [
+        { "if": { "properties": { "decision": { "const": "normal_app" } } },
+          "then": { "properties": { "upstream_id": { "const": "demo-app-01" }, "reasons": { "const": ["no_trigger"] }, "pin": { "properties": { "scope": { "const": "none" } } } } } },
+        { "if": { "properties": { "decision": { "const": "decoy" } } },
+          "then": { "properties": { "upstream_id": { "const": "web-decoy-01" }, "reasons": { "not": { "contains": { "const": "no_trigger" } } } } } },
+        { "if": { "properties": { "reasons": { "contains": { "const": "web_attack_indicator" } } }, "required": ["reasons"] },
+          "then": { "required": ["indicator_classes"], "properties": { "indicator_classes": { "minItems": 1 } } } }
+      ]
+    },
+    "upstream_result": {
+      "description": "What the gateway itself observed of the upstream's response. It is the gateway's view, not the upstream's own handling record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gateway_request_id", "upstream_id", "outcome"],
+      "properties": {
+        "gateway_request_id": { "$ref": "#/$defs/gateway_request_id" },
+        "upstream_id": { "enum": ["demo-app-01", "web-decoy-01"] },
+        "outcome": { "enum": ["response_received", "connect_error", "timeout", "aborted"] },
+        "status_code": { "type": ["integer", "null"], "minimum": 100, "maximum": 599 },
+        "response_bytes": { "type": ["integer", "null"], "minimum": 0 },
+        "elapsed_ms": { "type": ["integer", "null"], "minimum": 0 }
+      },
+      "allOf": [
+        { "if": { "properties": { "outcome": { "const": "response_received" } } }, "then": { "required": ["status_code"], "properties": { "status_code": { "type": "integer" } } } }
+      ]
+    },
+    "app_request": {
+      "description": "The normal synthetic demo app's own record of handling one request. No honeytokens, real credentials or real data live in the app.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["app_request_id", "gateway_context", "src_ip", "method", "path", "status_code", "route_class"],
+      "properties": {
+        "app_request_id": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "gateway_context": { "enum": ["verified", "absent", "invalid"], "description": "The app's own verification of the signed context header (API.md, Gateway trust boundary)." },
+        "gateway_request_id": { "$ref": "#/$defs/gateway_request_id" },
+        "gateway_session_ref": { "$ref": "#/$defs/gateway_session_ref" },
+        "invalid_reason": { "enum": ["bad_signature", "expired", "wrong_run", "wrong_upstream", "malformed"] },
+        "src_ip": { "type": "string", "format": "ipv4", "description": "Client address from the verified context; otherwise the TCP peer." },
+        "method": { "type": "string", "maxLength": 16 },
+        "path": { "$ref": "#/$defs/http_path" },
+        "query_redacted": { "$ref": "#/$defs/query_redacted" },
+        "status_code": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "route_class": { "enum": ["page", "static", "api", "login", "not_found", "error"] },
+        "login": {
+          "type": "object", "additionalProperties": false, "required": ["outcome"],
+          "properties": {
+            "username": { "type": "string", "maxLength": 64 },
+            "outcome": { "enum": ["failed", "emulated_success"] }
+          },
+          "description": "Login form outcome only. No password, hash or session cookie is ever logged."
+        }
+      },
+      "allOf": [
+        { "if": { "properties": { "gateway_context": { "const": "verified" } } }, "then": { "required": ["gateway_request_id"] },
+          "else": { "properties": { "gateway_request_id": false, "gateway_session_ref": false } } }
+      ]
+    }
+  }
+}

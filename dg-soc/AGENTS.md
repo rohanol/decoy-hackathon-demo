@@ -7,7 +7,7 @@ Claude Code reads `CLAUDE.md`, which imports this file. Other assistants (Codex,
 ## 1. The project in six lines
 
 - Laptop A (Kali, 192.168.77.10) attacks. Laptop B (192.168.77.20) runs the decoys and the SOC. One ethernet cable, no internet on the lab link.
-- Decoys: Cowrie SSH on 2222 (`ssh-decoy-01`), Flask web decoy on 8080 (`web-decoy-01`). No third decoy.
+- Decoys: Cowrie SSH on 2222 (`ssh-decoy-01`), Flask web decoy on 8080 (`web-decoy-01`). Next milestone (authorised 2 Nov 2026, contract v1.2): MySQL authentication deception (`db-decoy-01`) and an SMB/file honeypot (`file-decoy-01`), plus an HTTP gateway (`gateway-01`, proposed 8081) that routes ordinary sessions to a normal synthetic demo app (`demo-app-01`, "DeceptionGraph Research Portal") and suspicious ones to `web-decoy-01`. Four honeypots; the gateway and demo app are telemetry sources, not honeypots. Nothing else beyond these.
 - Flow: decoy log → adapter → `POST /api/ingest/events` → FastAPI + SQLite → rules → incidents → REST and `/ws/events` → React.
 - First milestone (H4): one real SSH login from Kali visible on the dashboard with its event ID.
 - The only response is a manual, previewed, 120 s block of one IP on the web decoy, with undo.
@@ -24,6 +24,8 @@ Demo story: SSH brute force → login → `ls` → `cat notes.txt` finds a porta
 | `sensors/`, `deployment/`, `decoys/ssh/`, `decoys/policy/`, `response/` | Vedant (M2) | Network, Cowrie, log adapter, compose, preflight, blocklist and the whole block flow |
 | `decoys/web/`, `analyst/`, `scenarios/`, `tests/e2e/`, `config/web_patterns.yaml`, `config/honeytokens.yaml`, `contracts/examples/payloads.json` | Prajwal (M4) | Web bait, fake data, token plants, attack patterns, rule summary, attack scripts, end-to-end runs |
 
+v1.2 components (proposed; confirm by PR): the gateway, its routing policy, Compose services and one-command start/status/stop/logs belong to M2 (`deployment/`, `sensors/`); the MySQL and SMB decoys, the demo app and `backup.zip` belong to M4 (bait surfaces). M3 owns their wire contracts and fixtures (`contracts/`) and the backend. M1 consumes `GET /api/sources`, `telemetry_health` and the routing views. Gateway, demo-app, MySQL and SMB components must redact secrets before any persistent write, including their own native logs.
+
 Other people's folders are read-only for you. Need a change there? Tell the owner, or open a PR they review. Never resolve a merge conflict by deleting someone else's change.
 
 ## 3. Frozen interfaces (change by PR plus Rohan's OK)
@@ -37,7 +39,8 @@ Other people's folders are read-only for you. Need a change there? Tell the owne
 | Score weights and thresholds | `config/scoring.yaml` |
 | Honeytokens (hashes only) | `config/honeytokens.yaml` |
 | Web attack regexes and hidden paths | `config/web_patterns.yaml` |
-| Ports | 2222 and 8080 bound to 192.168.77.20. Backend 8000 and Vite 5173 bound to 127.0.0.1 |
+| Ports | 2222 and 8080 bound to 192.168.77.20. Backend 8000 and Vite 5173 bound to 127.0.0.1. Proposed for v1.2 (M2 confirms conflicts and records the final bindings): gateway 8081, MySQL 3306, SMB 445 |
+| Telemetry schema, source registry | `contracts/telemetry.schema.json`, `contracts/sources.json` (v1.2) |
 
 A contract PR changes the file and its example in the same PR and says in one line what breaks. No decision documents needed.
 
@@ -69,7 +72,7 @@ Must ship, in this order:
 6. Rule-based incident summary.
 7. H20 feature freeze. Demo runs clean from a fresh start using `scenarios/demo_p3.md`.
 
-Do not build: OpenCanary, a third decoy, LLM decoy responses, native TTY replay, HASSH, STIX, Navigator export, Detection Strategy refs, bot-vs-human, isolation panel, latency or precision/recall reports, login/CSRF for the SOC, outbox tables, Kafka, Elastic, Postgres, Redis, Kubernetes.
+Do not build: OpenCanary, any decoy beyond the four named in section 1, LLM decoy responses, native TTY replay, HASSH, STIX, Navigator export, Detection Strategy refs, bot-vs-human, isolation panel, latency or precision/recall reports, login/CSRF for the SOC, outbox tables, Kafka, Elastic, Postgres, Redis, Kubernetes.
 
 If ahead at H16, ask the team first, then maybe: R10 (wget/crontab/useradd labels), ATT&CK heatmap, LLM summary (needs API credit; Claude Pro does not include API).
 
@@ -83,6 +86,9 @@ If ahead at H16, ask the team first, then maybe: R10 (wget/crontab/useradd label
 - Fake secrets use the `DGLAB-` prefix. Fake people use `example.com` emails.
 - Escape all attacker text in the UI (React default; never `dangerouslySetInnerHTML`).
 - Block exact lab IPs only. Never 192.168.77.20, 127.0.0.1 or a range.
+- v1.2 components follow the same rules: no privileged containers or Docker socket, no attacker-selected execution or fetches, no malware execution, no executable or auto-run bait (`backup.zip` holds fixed `.txt`/`.csv` only), no external tracking beacons. Uploads to the SMB decoy are stored inert or discarded, never executed or given a verdict. The MySQL decoy never executes queries.
+- Gateway, demo app, MySQL and SMB redact secrets before any persistent write, including their own native logs; adapter-only redaction is not enough. Challenge-response decoys hold protocol verifiers for planted `DGLAB-` credentials only, never values.
+- Build and download dependencies only in the preparation phase, with decoys stopped. No Wi-Fi or default route during lab runs.
 
 ## 7. Labels must match evidence
 

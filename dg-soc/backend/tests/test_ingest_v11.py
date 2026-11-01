@@ -284,7 +284,7 @@ def test_migration_from_v10_database(tmp_path):
     rows = make_v0_db(path)
     db = Database(str(path))
     try:
-        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 3   # v0 -> v1 -> v3 in one open
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 4   # v0 -> v1 -> v4 in one open (v4: telemetry tables)
         assert os.path.exists(f"{path}.v0.bak") and os.path.exists(f"{path}.v1.bak")
         migrated = db._writer.execute(
             "SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at, src_ip, "
@@ -364,7 +364,7 @@ def test_migration_v1_to_v2_derives_cases_and_rebuilds_investigations(tmp_path):
     before.close()
     with TestClient(create_app(str(path))) as c:
         db = c.app.state.db
-        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 3
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 4
         assert os.path.exists(f"{path}.v1.bak") and not os.path.exists(f"{path}.v0.bak")
         after = db._writer.execute("SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, "
                                    "src_ip, session_id, attributes FROM events ORDER BY seq").fetchall()

@@ -3,16 +3,18 @@ R05 reads links instead (evaluate_links(links)).
 
 Which rules run where (contract v1.1, Session cases versus source profiles):
 - session cases run every event rule except R01;
-- a credential_attempts case runs R01 over all SSH sessions of one source, user, run and mode;
+- a credential_attempts case runs R01 over all SSH sessions of one source, user, run and mode,
+  or R11 over all connections to one MySQL/SMB decoy (v1.2);
 - an investigation holds R05, one per confirmed link that joins its children.
 """
 import hashlib
 
-from . import r01, r02, r03, r04, r05, r07, r08, r09
+from . import r01, r02, r03, r04, r05, r07, r08, r09, r11, r12
 
-RULES = [r01, r02, r03, r04, r07, r08, r09]
-SESSION_RULES = ("R02", "R03", "R04", "R07", "R08", "R09")
+RULES = [r01, r02, r03, r04, r07, r08, r09, r11, r12]
+SESSION_RULES = ("R02", "R03", "R04", "R07", "R08", "R09", "R12")
 CREDENTIAL_RULES = ("R01",)
+CHALLENGE_CREDENTIAL_RULES = ("R11",)
 
 
 def rule_id(module) -> str:

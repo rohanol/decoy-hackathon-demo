@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "dg-soc/event.schema.json",
   "title": "Ingest event (adapter -> backend)",
-  "description": "One normalised sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at. schema_version selects the rules: \"1.0\" events are checked exactly as contracts/history/event.schema.v1.0.json did (backend/tests/test_contracts.py proves this on edge cases), and every stricter or new rule applies only to \"1.1\" events. See contracts/API.md 'Evidence boundaries (v1.1)'.",
+  "description": "One normalised honeypot sensor record. POST /api/ingest/events takes {\"events\": [ ... ]}, max 100 per request. Backend adds event_id and ingested_at. schema_version selects the rules: \"1.0\" events are checked exactly as contracts/history/event.schema.v1.0.json did, \"1.1\" exactly as contracts/history/event.schema.v1.1.json did, and every new rule applies only to \"1.2\" events. Only 1.2 may name db-decoy-01, file-decoy-01, db_request or file_operation. Gateway and normal-app records are not events: see contracts/telemetry.schema.json. See contracts/API.md 'Evidence boundaries (v1.1)' and 'Four honeypots, gateway and telemetry (v1.2)'.",
   "type": "object",
   "required": ["schema_version", "source_record_id", "sensor_id", "event_type", "occurred_at", "src_ip", "lab_run_id", "capture_mode"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": { "enum": ["1.0", "1.1"] },
+    "schema_version": { "enum": ["1.0", "1.1", "1.2"] },
     "source_record_id": {
       "type": "string",
       "maxLength": 128,
@@ -18,7 +18,15 @@
       "maxLength": 128,
       "description": "1.1 only. Replay: source_record_id of the original captured record this replay copies. Must be null or absent on live events."
     },
-    "sensor_id": { "enum": ["ssh-decoy-01", "web-decoy-01"] },
+    "sensor_id": {
+      "enum": [
+        "ssh-decoy-01",
+        "web-decoy-01",
+        "db-decoy-01",
+        "file-decoy-01"
+      ],
+      "description": "Honeypot identity (contracts/sources.json). db-decoy-01 (MySQL authentication deception) and file-decoy-01 (SMB/file service) need schema_version 1.2. The gateway and the normal demo app are never sensors here."
+    },
     "event_type": {
       "enum": [
         "connection_open",
@@ -29,16 +37,18 @@
         "http_request",
         "synthetic_file_access",
         "blocked_request",
-        "bait_served"
+        "bait_served",
+        "db_request",
+        "file_operation"
       ],
-      "description": "bait_served is 1.1 only: the sensor's own result record shows it returned content containing honeytokens."
+      "description": "bait_served is 1.1+ only: the sensor's own result record shows it returned content containing honeytokens. db_request and file_operation are 1.2 only and belong to db-decoy-01 and file-decoy-01 respectively."
     },
     "occurred_at": { "type": "string", "format": "date-time", "description": "UTC, from the sensor log" },
     "src_ip": { "type": "string", "format": "ipv4" },
     "src_port": { "type": ["integer", "null"] },
     "session_id": {
       "type": ["string", "null"],
-      "description": "Sensor session reference. Cowrie: its session id. Web (1.1): a non-reusable reference derived by the decoy (for example a keyed digest of the session cookie with a per-run key), never the bearer cookie itself; null when the decoy has no session."
+      "description": "Sensor session reference. Cowrie: its session id. Web (1.1): a non-reusable reference derived by the decoy (for example a keyed digest of the session cookie with a per-run key), never the bearer cookie itself; null when the decoy has no session. MySQL (1.2): the decoy's connection id. SMB (1.2): a reference derived from the SMB session id, never a session key or ticket."
     },
     "lab_run_id": {
       "type": "string",
@@ -53,7 +63,8 @@
       "then": {
         "properties": {
           "origin_record_id": false,
-          "event_type": { "not": { "const": "bait_served" } },
+          "sensor_id": { "enum": ["ssh-decoy-01", "web-decoy-01"] },
+          "event_type": { "not": { "enum": ["bait_served", "db_request", "file_operation"] } },
           "attributes": { "$ref": "#/$defs/attributes_v1_0" }
         }
       }
@@ -66,7 +77,42 @@
           "src_port": { "minimum": 0, "maximum": 65535 },
           "session_id": { "maxLength": 128 },
           "lab_run_id": { "minLength": 1, "maxLength": 128 },
+          "sensor_id": { "enum": ["ssh-decoy-01", "web-decoy-01"] },
+          "event_type": { "not": { "enum": ["db_request", "file_operation"] } },
           "attributes": { "$ref": "#/$defs/attributes_v1_1" }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": "1.2"
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "source_record_id": {
+            "minLength": 1
+          },
+          "src_port": {
+            "minimum": 0,
+            "maximum": 65535
+          },
+          "session_id": {
+            "maxLength": 128
+          },
+          "lab_run_id": {
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "attributes": {
+            "$ref": "#/$defs/attributes_v1_2"
+          }
         }
       }
     },
@@ -85,6 +131,178 @@
     {
       "if": { "properties": { "capture_mode": { "const": "live" } }, "required": ["capture_mode"] },
       "then": { "properties": { "origin_record_id": { "type": "null" } } }
+    }
+,
+    {
+      "if": {
+        "properties": {
+          "sensor_id": {
+            "const": "db-decoy-01"
+          }
+        },
+        "required": [
+          "sensor_id"
+        ]
+      },
+      "then": {
+        "required": [
+          "attributes"
+        ],
+        "properties": {
+          "event_type": {
+            "enum": [
+              "connection_open",
+              "auth_failure",
+              "auth_success",
+              "db_request",
+              "connection_close"
+            ]
+          },
+          "attributes": {
+            "required": [
+              "protocol"
+            ],
+            "properties": {
+              "protocol": {
+                "const": "mysql"
+              },
+              "password_sha256": false,
+              "ingress": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "sensor_id": {
+            "const": "file-decoy-01"
+          }
+        },
+        "required": [
+          "sensor_id"
+        ]
+      },
+      "then": {
+        "required": [
+          "attributes"
+        ],
+        "properties": {
+          "event_type": {
+            "enum": [
+              "connection_open",
+              "auth_failure",
+              "auth_success",
+              "file_operation",
+              "synthetic_file_access",
+              "bait_served",
+              "connection_close"
+            ]
+          },
+          "attributes": {
+            "required": [
+              "protocol"
+            ],
+            "properties": {
+              "protocol": {
+                "const": "smb"
+              },
+              "password_sha256": false,
+              "ingress": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "db_request"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "attributes"
+        ],
+        "properties": {
+          "sensor_id": {
+            "const": "db-decoy-01"
+          },
+          "attributes": {
+            "required": [
+              "db"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "event_type": {
+            "const": "file_operation"
+          }
+        },
+        "required": [
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "attributes"
+        ],
+        "properties": {
+          "sensor_id": {
+            "const": "file-decoy-01"
+          },
+          "attributes": {
+            "required": [
+              "file"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "description": "Authentication on a challenge-response decoy carries a credential proof record instead of a password hash.",
+      "if": {
+        "properties": {
+          "sensor_id": {
+            "enum": [
+              "db-decoy-01",
+              "file-decoy-01"
+            ]
+          },
+          "event_type": {
+            "enum": [
+              "auth_failure",
+              "auth_success"
+            ]
+          }
+        },
+        "required": [
+          "sensor_id",
+          "event_type"
+        ]
+      },
+      "then": {
+        "required": [
+          "attributes"
+        ],
+        "properties": {
+          "attributes": {
+            "required": [
+              "credential"
+            ]
+          }
+        }
+      }
     }
   ],
   "$defs": {
@@ -157,6 +375,433 @@
         "digest_scope": { "enum": ["full_response", "full_sanitised_response", "full_asset", "partial"], "description": "What sha256 covers. 'partial' digests must never be presented as whole-content proof." },
         "input_features": { "$ref": "#/$defs/input_features" },
         "processing": { "$ref": "#/$defs/processing" }
+      }
+    },
+    "attributes_v1_2": {
+      "description": "1.2 = every 1.1 attribute rule plus the fields below. Unknown keys still pass (bounded by the backend), except that no key may claim a malware verdict.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/attributes_v1_1"
+        },
+        {
+          "description": "honeytoken_id on a challenge-response login only when the decoy verified the proof against a planted credential.",
+          "if": {
+            "required": [
+              "credential"
+            ]
+          },
+          "then": {
+            "if": {
+              "properties": {
+                "credential": {
+                  "properties": {
+                    "proof_check": {
+                      "const": "matched_honeytoken"
+                    }
+                  }
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "honeytoken_id"
+              ]
+            },
+            "else": {
+              "not": {
+                "required": [
+                  "honeytoken_id"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "description": "Only a verified gateway context may name a gateway request or session.",
+          "if": {
+            "required": [
+              "ingress"
+            ],
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "gateway_context": {
+                    "enum": [
+                      "absent",
+                      "invalid"
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "gateway_request_id": false,
+                  "gateway_session_ref": false
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "ingress"
+            ],
+            "properties": {
+              "ingress": {
+                "properties": {
+                  "gateway_context": {
+                    "const": "verified"
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "ingress": {
+                "required": [
+                  "gateway_request_id"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "(?i)(verdict|malware|malicious)"
+        }
+      },
+      "properties": {
+        "protocol": {
+          "enum": [
+            "ssh",
+            "http",
+            "mysql",
+            "smb"
+          ],
+          "description": "Wire protocol the sensor spoke. Required on db-decoy-01 and file-decoy-01."
+        },
+        "ingress": {
+          "$ref": "#/$defs/ingress"
+        },
+        "credential": {
+          "$ref": "#/$defs/credential"
+        },
+        "db": {
+          "$ref": "#/$defs/db_request"
+        },
+        "file": {
+          "$ref": "#/$defs/file_operation"
+        },
+        "archive": {
+          "$ref": "#/$defs/archive"
+        },
+        "transfer": {
+          "$ref": "#/$defs/transfer"
+        }
+      }
+    },
+    "ingress": {
+      "description": "1.2, web-decoy-01 only: how the request reached the decoy. Set by the decoy from its own check of the gateway's signed context header (API.md, Gateway trust boundary). A client header can never set these fields. 'verified': src_ip is the client address from the signed context. 'absent' (direct 8080 traffic) and 'invalid' (a context that failed verification): src_ip is the TCP peer.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gateway_context"
+      ],
+      "properties": {
+        "gateway_context": {
+          "enum": [
+            "verified",
+            "absent",
+            "invalid"
+          ]
+        },
+        "gateway_request_id": {
+          "type": "string",
+          "pattern": "^gw_[A-Za-z0-9_-]{8,64}$"
+        },
+        "gateway_session_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^gws_[0-9a-f]{16,64}$"
+        },
+        "invalid_reason": {
+          "enum": [
+            "bad_signature",
+            "expired",
+            "wrong_run",
+            "wrong_upstream",
+            "malformed"
+          ],
+          "description": "Only with gateway_context 'invalid'."
+        }
+      }
+    },
+    "credential": {
+      "description": "1.2: what a challenge-response decoy can truthfully say about a presented credential. MySQL and NTLM send a salted proof, never the password, so there is no password hash and no cross-attempt password fingerprint. The decoy can only check the proof against planted lab credentials it was configured with.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheme",
+        "proof_check"
+      ],
+      "properties": {
+        "scheme": {
+          "enum": [
+            "mysql_native_password",
+            "caching_sha2_password",
+            "ntlmv2",
+            "ntlmv1",
+            "smb_anonymous",
+            "smb_guest",
+            "other"
+          ]
+        },
+        "proof_check": {
+          "enum": [
+            "matched_honeytoken",
+            "not_matched",
+            "not_checked",
+            "unsupported_scheme",
+            "malformed"
+          ],
+          "description": "matched_honeytoken: the proof verifies against a planted credential (honeytoken_id names it). not_matched: checked against every planted credential for that user, none verified. not_checked / unsupported_scheme / malformed: nothing is known about the password."
+        },
+        "verifier_version": {
+          "type": "string",
+          "maxLength": 32
+        }
+      }
+    },
+    "db_request": {
+      "description": "1.2, db_request: a MySQL command packet received by the emulator. The emulator does not execute queries; execution is always 'not_supported'. Metadata only: no statement text.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "execution"
+      ],
+      "properties": {
+        "command": {
+          "enum": [
+            "COM_QUERY",
+            "COM_INIT_DB",
+            "COM_PING",
+            "COM_QUIT",
+            "COM_FIELD_LIST",
+            "COM_STMT_PREPARE",
+            "COM_STMT_EXECUTE",
+            "other"
+          ]
+        },
+        "statement_verb": {
+          "enum": [
+            "select",
+            "show",
+            "insert",
+            "update",
+            "delete",
+            "drop",
+            "create",
+            "use",
+            "set",
+            "load",
+            "other",
+            "none"
+          ]
+        },
+        "length_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777215
+        },
+        "schema_name": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "execution": {
+          "const": "not_supported"
+        },
+        "error_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      }
+    },
+    "file_operation": {
+      "description": "1.2, file_operation: one SMB/file-service operation as the emulator handled it. Uploaded content is stored inert for review or discarded; it is never executed, opened by a parser, or scanned into a verdict.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "operation",
+        "share"
+      ],
+      "properties": {
+        "operation": {
+          "enum": [
+            "tree_connect",
+            "list",
+            "open",
+            "read",
+            "write",
+            "create",
+            "delete",
+            "rename",
+            "close"
+          ]
+        },
+        "share": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "digest_scope": {
+          "enum": [
+            "full_content",
+            "partial",
+            "none"
+          ],
+          "description": "full_content only when every byte written was hashed."
+        },
+        "storage": {
+          "enum": [
+            "quarantined_inert",
+            "discarded",
+            "not_applicable"
+          ]
+        },
+        "magic_type_hint": {
+          "enum": [
+            "text",
+            "csv",
+            "zip",
+            "pe",
+            "elf",
+            "script",
+            "office",
+            "pdf",
+            "unknown"
+          ],
+          "description": "From the first bytes only. A file-type hint, not a verdict."
+        }
+      }
+    },
+    "archive": {
+      "description": "1.2, on bait_served / synthetic_file_access of an archive lure (for example web:/backup/backup.zip): the fixed, inert contents. Plain-text and CSV entries only; no executable, script, shortcut or auto-run entry, no nested archive, no path components.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "format",
+        "entries",
+        "contains_executable",
+        "auto_run"
+      ],
+      "properties": {
+        "format": {
+          "const": "zip"
+        },
+        "compression": {
+          "enum": [
+            "stored",
+            "deflate"
+          ]
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "size_bytes",
+              "sha256"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\\.(txt|csv)$"
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1048576
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "honeytoken_ids": {
+                "type": "array",
+                "maxItems": 16,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "maxLength": 128
+                }
+              }
+            }
+          }
+        },
+        "contains_executable": {
+          "const": false
+        },
+        "auto_run": {
+          "const": false
+        }
+      }
+    },
+    "transfer": {
+      "description": "1.2: what the serving sensor observed of its own response. 'body_written' means the server finished writing the body to its socket; it is not evidence the client received, saved, opened or extracted it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "completion"
+      ],
+      "properties": {
+        "response_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "content_length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes_written": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "completion": {
+          "enum": [
+            "body_written",
+            "aborted",
+            "headers_only",
+            "unknown"
+          ]
+        }
       }
     },
     "input_features": {

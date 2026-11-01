@@ -32,8 +32,8 @@ def classify_indicators(indicators) -> list:
 
 
 def _body_indicators(e: dict) -> list:
-    # Only 1.1 events have validated input_features; a 1.0 event may carry anything there.
-    if e.get("schema_version") != "1.1":
+    # Only 1.1+ events have validated input_features; a 1.0 event may carry anything there.
+    if e.get("schema_version") not in ("1.1", "1.2"):
         return []
     features = e["attributes"].get("input_features")
     return features.get("indicators", []) if isinstance(features, dict) else []
