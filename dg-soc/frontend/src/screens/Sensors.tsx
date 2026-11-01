@@ -20,7 +20,6 @@ interface SensorDef {
   decoy: string;
   port: string;
   what: string;
-  planned?: boolean;
 }
 
 const SENSORS: SensorDef[] = [
@@ -37,14 +36,6 @@ const SENSORS: SensorDef[] = [
     decoy: 'D2 · Flask bait portal',
     port: '8080',
     what: 'Staff portal, hidden paths, a fake .env and a synthetic customer export.',
-  },
-  {
-    id: 'api-decoy-01',
-    name: 'API decoy',
-    decoy: 'D3 · optional',
-    port: '8081',
-    what: 'Planned. Only deployed if the team keeps D3.',
-    planned: true,
   },
 ];
 
@@ -78,18 +69,13 @@ export function Sensors() {
 
       <div className="sensorgrid">
         {SENSORS.map((sensor) => {
-          const state = sensor.planned
-            ? { tone: 'neutral' as const, text: 'not deployed', lastSeen: null }
-            : sensorState(health, sensor.id, now);
+          const state = sensorState(health, sensor.id, now);
           const stats = bySensor.get(sensor.id);
           const types = stats ? [...stats.types.entries()].sort((a, b) => b[1] - a[1]) : [];
           const max = Math.max(1, ...types.map(([, count]) => count));
 
           return (
-            <section
-              key={sensor.id}
-              className={sensor.planned ? 'sensorcard sensorcard--planned' : 'sensorcard'}
-            >
+            <section key={sensor.id} className="sensorcard">
               <header className="sensorcard__head">
                 <Dot tone={state.tone} animate={state.tone === 'ok' ? 'pulse' : undefined} />
                 <div>
@@ -105,8 +91,7 @@ export function Sensors() {
                 <strong>{sensor.decoy}.</strong> {sensor.what}
               </p>
 
-              {sensor.planned ? null : (
-                <>
+              <>
                   <div className="sensorcard__stat">
                     <span className="sensorcard__num">{number(stats?.total ?? 0)}</span>
                     <span className="sensorcard__unit">events in this window</span>
@@ -141,8 +126,7 @@ export function Sensors() {
                       Live feed <ArrowRight size={14} />
                     </Link>
                   </footer>
-                </>
-              )}
+              </>
             </section>
           );
         })}
