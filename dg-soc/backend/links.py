@@ -19,19 +19,27 @@ def _link(key, frm, to, kind, basis):
     }
 
 
-def candidate_links(incident_id: str, events: list, cfg) -> list:
-    """Same src_ip (= same incident) seen on both sensors within the window: one candidate,
-    from the earliest qualifying pair."""
+def candidate_links(events: list, cfg, logged_in_cases: set) -> list:
+    """`events`: everything one src_ip did in one run and mode, across cases. One candidate per
+    (SSH case, web case) pair, from the earliest pair of their events within the window.
+    SSH sessions that never logged in (one Hydra attempt each) are not linked: they hold no
+    activity to compare."""
     secs = cfg.windows["link_candidate_seconds"]
-    last: dict = {}
-    for e in in_order([e for e in events if e["event_type"] != "blocked_request"]):
-        other = SENSOR_PAIR[1] if e["sensor_id"] == SENSOR_PAIR[0] else SENSOR_PAIR[0]
-        prev = last.get(other)
-        if prev and (ts(e) - ts(prev)).total_seconds() <= secs:
-            return [_link(f"candidate|{incident_id}", prev, e, "candidate",
-                          f"same src_ip within {secs // 60} min")]
-        last[e["sensor_id"]] = e
-    return []
+    usable = [e for e in events if e["event_type"] != "blocked_request" and e["sensor_id"] in SENSOR_PAIR
+              and (e["sensor_id"] != SENSOR_PAIR[0] or e["incident_id"] in logged_in_cases)]
+    last: dict = {}  # case id -> its latest event so far
+    out, seen = [], set()
+    for e in in_order(usable):
+        for case, prev in last.items():
+            if prev["sensor_id"] == e["sensor_id"] or (ts(e) - ts(prev)).total_seconds() > secs:
+                continue
+            pair = tuple(sorted((case, e["incident_id"])))
+            if pair not in seen:
+                seen.add(pair)
+                out.append(_link(f"candidate|{pair[0]}|{pair[1]}", prev, e, "candidate",
+                                 f"same src_ip within {secs // 60} min"))
+        last[e["incident_id"]] = e
+    return out
 
 
 def strong_links(uses: list, planted_lookup, cfg) -> list:

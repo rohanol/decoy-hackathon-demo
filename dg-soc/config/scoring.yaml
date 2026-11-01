@@ -24,3 +24,4 @@ windows:
   r08_hidden_threshold: 5
   r08_404_threshold: 10
   link_candidate_seconds: 300
+  case_inactivity_seconds: 300   # web_activity / ssh_unsessioned: a new case after 5 min of quiet

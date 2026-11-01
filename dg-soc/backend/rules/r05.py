@@ -1,16 +1,16 @@
-"""R05: the analyst confirmed a cross-decoy link that touches this incident.
+"""R05: the analyst confirmed a cross-decoy link between two cases.
 
-Unlike the other rules this one reads links, not events. Rejecting the link removes it.
+Unlike the other rules this one reads links, not events. It belongs to the investigation the
+link creates, never to either child case, so a confirmation cannot raise a child's own score.
+Rejecting the link removes it.
 """
 from ._util import finding
 
 
-def evaluate(incident_id: str, links: list) -> list:
+def evaluate_links(links: list) -> list:
     out = []
     for link in links:
         if link["status"] != "confirmed":
-            continue
-        if incident_id not in (link["from_incident_id"], link["to_incident_id"]):
             continue
         out.append(finding(
             "R05", f"link={link['link_id']}",

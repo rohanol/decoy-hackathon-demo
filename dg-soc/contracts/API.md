@@ -138,10 +138,11 @@ Each event belongs to exactly one case, assigned by these rules in order:
 
 | Case kind | Key | `grouping_basis` | Gets |
 |---|---|---|---|
-| `ssh_session` | `sensor_id + session_id + lab_run_id + capture_mode` | `sensor_session` | every SSH event that has a `session_id` |
+| `ssh_session` | `sensor_id + session_id + src_ip + lab_run_id + capture_mode` | `sensor_session` | every SSH event that has a `session_id` |
 | `ssh_unsessioned` | `src_ip + lab_run_id + capture_mode`, a new bucket after 5 min without events | `inactivity_5min` | SSH events with no `session_id`; this should be rare |
-| `web_session` | `session_id + lab_run_id + capture_mode` once the web decoy issues a session cookie | `sensor_session` | web events with a `session_id` |
-| `web_activity` | `src_ip + lab_run_id + capture_mode`, a new bucket after 5 min without events | `inactivity_5min` | web events with no `session_id` (all of them today) |
+| `web_session` | `sensor_id + session_id + src_ip + lab_run_id + capture_mode` once the web decoy derives a session reference | `sensor_session` | web events with a `session_id`; no time split inside a session |
+| `web_activity` | `sensor_id + src_ip + lab_run_id + capture_mode`, a new bucket after 5 min without events | `inactivity_5min` | web events with no `session_id` (all of them today) |
+| `credential_attempts` | `src_ip + username + lab_run_id + capture_mode` | `credential_window` | no events of its own; holds R01 only |
 | `investigation` | created by confirming a link | `analyst_confirmed_link` | no events of its own; it groups two or more child cases |
 
 Rules:
@@ -149,10 +150,14 @@ Rules:
 - Two SSH sessions from one IP are two cases. Their scores are separate, and neither becomes critical because of the other (review T01).
 - **Password guessing across sessions stays detected.** Hydra opens one session per attempt, so R01 looks at all SSH sessions of one `src_ip + username + lab_run_id + capture_mode` (5+ distinct failures in 60 s). It produces one finding in a `credential_attempts` case. That case has `grouping_basis: "credential_window"`. Its evidence points at the failing sessions' events, but it does not take over those cases or any web activity.
 - Sessions that only connected and failed to log in still get their own `ssh_session` case. The case is marked `"quiet": true` while it has no findings. `GET /api/incidents?include_quiet=false` hides quiet cases. The default is `true`, which is the v1.0 behaviour of listing everything.
-- An investigation's score is computed over the union of its children's findings: each rule once, R05 and R09 per the existing rules, cap 100. Children keep their own scores. Rejecting or reversing the confirming link dissolves the investigation. Its status becomes `dissolved`, children keep all their events and findings, scores are recomputed, and `summary.stale` becomes `true` until regenerated.
+- `src_ip` is part of the session key only as a guard: a session never changes address, so a reused id from another address is another case. The 5-minute gap is `windows.case_inactivity_seconds` in `config/scoring.yaml`.
+- R01 runs only in `credential_attempts` cases, never in a session case, so one guessing burst is counted once.
+- Candidate links (same `src_ip`, both sensors, within 300 s) now join two cases: at most one candidate per pair of cases, from their earliest qualifying pair of events. An SSH session that never logged in is not linked, because a one-attempt Hydra session holds no activity to compare.
+- R05 belongs to the investigation, never to a child, so confirming a link cannot raise a child's own score. A child's R09 still counts once its strong link is confirmed.
+- An investigation's score is computed over the union of its children's findings plus its own R05 findings: each rule once, R05 and R09 per the existing rules, cap 100. Children keep their own scores. A second confirmed link that shares a child joins the same investigation (two open investigations that come to share a child are merged into the older one). An investigation stands while at least one of its links is confirmed; its children are the cases those links join. Rejecting or reversing the confirming link dissolves the investigation. Its status becomes `dissolved`, its score 0, `children` keeps the last membership for the audit trail, children lose `parent_id` and keep all their events and findings, and scores are recomputed. Confirming a link again re-opens the same investigation. `summary.stale` is reserved for a cached summary; today the summary is regenerated on every read, so it is always `false`.
 - `GET /api/profiles?lab_run_id=` returns `{ "items": [SourceProfile] }`, and `GET /api/profiles/{src_ip}?lab_run_id=` returns one profile (example in `examples/api_v1_1.json`). A profile is a view. It holds no score and says plainly that one address can be several people (NAT).
 
-New IncidentSummary fields (all v1.1, present on every case): `case_kind`, `grouping_basis`, `sensor_id`, `session_id`, `capture_mode`, `parent_id`, `children`, `status` (`open` or `dissolved`) and `quiet`. `sensor_id` and `session_id` are null for `credential_attempts` and `investigation`. `children` lists case ids for an investigation and is empty for every other kind.
+New IncidentSummary fields (all v1.1, present on every case): `case_kind`, `grouping_basis`, `sensor_id`, `session_id`, `capture_mode`, `parent_id`, `children`, `status` (`open` or `dissolved`; `superseded` only on pre-migration rows, which the list hides) and `quiet`. For an investigation, `first_seen`, `last_seen` and `event_count` cover its children; `GET /api/events?incident_id=`, `sessions`, the transcript and the export read the children's events. `sensor_id` and `session_id` are null for `credential_attempts` and `investigation`. `children` lists case ids for an investigation and is empty for every other kind.
 
 Links now name the cases they join (additive): `from_incident_id` and `to_incident_id`.
 
@@ -358,11 +363,11 @@ The order follows review section 12. Each step is its own PR with real test outp
 
 1. **This PR**: contract, examples, schema tests, and the gaps reproduced as expected-failure tests.
 2. Ingest accepts 1.1 (version-gated validation, `input_features` and `processing` bounded, R07 consuming the indicators), derives `observation_kind`, enforces one mode per run, and adds the dedup namespace and `/api/runs`. DB migration 1 adds columns and a `runs` table. It rebuilds the `events` table once, copying every row unchanged including `seq`, because SQLite cannot drop the old unique key in place. The file is backed up first.
-3. Case model: cases, credential window, profiles, investigations and dissolve. DB migration 2 adds `cases`, `case_events` and `investigations`. Cases are **derived**: they are rebuilt from the untouched `events` table.
+3. Case model: cases, credential window, profiles, investigations and dissolve. DB migration 2 rebuilds the `incidents` table once (SQLite cannot drop the old `UNIQUE(src_ip, lab_run_id)` in place) with the case columns. Old rows are kept unchanged as `legacy_ip_run` cases with status `superseded`, findings included, and stay readable by id. Each event is then assigned to its derived case in `seq` order: only `events.incident_id` changes; every observed field stays as stored. Link endpoints are re-pointed from their events, credential cases are derived, and every confirmed link rebuilds its investigation.
 4. Causal token matching, orphan R09, corrected mappings and rule versions.
 5. Eligibility route, health and heartbeat. M2 then wires preview, apply and verification. M4 and M2 emit `bait_served`.
 
-The database records its schema in `PRAGMA user_version`: 0 = v1.0, then 1, 2 and so on. Migrations only add tables and columns. The `events` table is never rewritten.
+The database records its schema in `PRAGMA user_version`: 0 = v1.0, then 1, 2 and so on. An observation's fields are never edited: migration 1 copies rows unchanged, and migration 2 changes only the derived `incident_id`.
 
 Before upgrading, the backend copies the file to `backend/data/dg.db.v<old>.bak`.
 

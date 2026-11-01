@@ -284,12 +284,16 @@ def test_migration_from_v10_database(tmp_path):
     rows = make_v0_db(path)
     db = Database(str(path))
     try:
-        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 1
-        assert os.path.exists(f"{path}.v0.bak")
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 2   # v0 -> v1 -> v2 in one open
+        assert os.path.exists(f"{path}.v0.bak") and os.path.exists(f"{path}.v1.bak")
         migrated = db._writer.execute(
             "SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, ingested_at, src_ip, "
             "src_port, session_id, lab_run_id, capture_mode, attributes, incident_id FROM events ORDER BY seq").fetchall()
-        assert [tuple(r) for r in migrated] == rows                       # every row copied unchanged, seq included
+        # every observation copied unchanged, seq included; only the derived case assignment moves
+        assert [tuple(r)[:13] for r in migrated] == [r[:13] for r in rows]
+        assert [r[13] for r in migrated] == ["inc_02", "inc_02", "inc_03"]  # s1 session case, replay web case
+        legacy = dict(db._writer.execute("SELECT * FROM incidents WHERE incident_id='inc_01'").fetchone())
+        assert legacy["status"] == "superseded" and legacy["case_kind"] == "legacy_ip_run" and legacy["score"] == 25
         kinds = [r[0] for r in db._writer.execute("SELECT observation_kind FROM events ORDER BY seq")]
         assert kinds == ["network_input", "command_input", "policy_result"]
         run = dict(db._writer.execute("SELECT * FROM runs").fetchone())
@@ -321,5 +325,63 @@ def test_migration_runs_once(tmp_path):
     make_v0_db(path)
     Database(str(path)).close()
     os.remove(f"{path}.v0.bak")
-    Database(str(path)).close()                                          # already v1: no new backup, no rebuild
-    assert not os.path.exists(f"{path}.v0.bak")
+    os.remove(f"{path}.v1.bak")
+    Database(str(path)).close()                                          # already v2: no new backup, no rebuild
+    assert not os.path.exists(f"{path}.v0.bak") and not os.path.exists(f"{path}.v1.bak")
+
+
+def make_v1_db_with_confirmed_link(path: Path) -> None:
+    """A v1 file as PR 2 leaves it: one IP+run incident holding an SSH session and web activity,
+    an old R01 finding, and a link the analyst already confirmed."""
+    make_v0_db(path)
+    conn = sqlite3.connect(path)
+    from backend.db import MIGRATE_V0_V1
+    conn.executescript(MIGRATE_V0_V1)
+    conn.execute("UPDATE events SET event_type='auth_success', capture_mode='live', ingest_namespace='live' "
+                 "WHERE event_id='evt_a'")
+    conn.execute("UPDATE events SET event_type='http_request', capture_mode='live', ingest_namespace='live', "
+                 "attributes='{\"method\": \"GET\", \"path\": \"/login\"}' WHERE event_id='evt_c'")
+    old = {"finding_id": "fnd_old", "rule_id": "R01", "rule_version": "R01@2", "incident_id": "inc_01",
+           "src_ip": "192.168.77.10", "technique_ids": ["T1110.001"], "stage": "credential_attack",
+           "label": "Repeated SSH password guessing", "limitation": "Does not show that the account was compromised.",
+           "evidence_event_ids": ["evt_a"], "points": 25, "pending_confirmation": False,
+           "created_at": "2026-10-31T10:00:02.000Z"}
+    conn.execute("INSERT INTO findings VALUES ('fnd_old','inc_01','R01',?,'2026-10-31T10:00:02.000Z')",
+                 (json.dumps(old),))
+    conn.execute("INSERT INTO links VALUES ('lnk_old','evt_b','evt_c','ssh-decoy-01','web-decoy-01','candidate',"
+                 "'same src_ip within 5 min','confirmed','2026-10-31T10:01:00.000Z','analyst checked',"
+                 "'inc_01','inc_01','2026-10-31T10:00:10.000Z')")
+    conn.commit()
+    conn.close()
+
+
+def test_migration_v1_to_v2_derives_cases_and_rebuilds_investigations(tmp_path):
+    path = tmp_path / "v1.db"
+    make_v1_db_with_confirmed_link(path)
+    before = sqlite3.connect(path)
+    observed = before.execute("SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, "
+                              "src_ip, session_id, attributes FROM events ORDER BY seq").fetchall()
+    before.close()
+    with TestClient(create_app(str(path))) as c:
+        db = c.app.state.db
+        assert db._writer.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert os.path.exists(f"{path}.v1.bak") and not os.path.exists(f"{path}.v0.bak")
+        after = db._writer.execute("SELECT seq, event_id, sensor_id, source_record_id, event_type, occurred_at, "
+                                   "src_ip, session_id, attributes FROM events ORDER BY seq").fetchall()
+        assert [tuple(r) for r in after] == observed                       # observations untouched
+        cases = {i["case_kind"]: i for i in c.get("/api/incidents").json()["items"]}
+        assert set(cases) == {"ssh_session", "web_activity", "investigation"}  # the superseded row is hidden
+        inv = cases["investigation"]
+        assert sorted(inv["children"]) == sorted([cases["ssh_session"]["incident_id"],
+                                                   cases["web_activity"]["incident_id"]])
+        all_links = c.get("/api/links").json()["items"]
+        assert [l["link_id"] for l in all_links] == ["lnk_old"]           # re-pointed, never duplicated
+        link = all_links[0]
+        assert link["status"] == "confirmed" and link["from_incident_id"] == cases["ssh_session"]["incident_id"]
+        assert [f["rule_id"] for f in db.list_findings(inv["incident_id"])] == ["R05"]
+        old = c.get("/api/incidents/inc_01").json()                         # still readable for the audit trail
+        assert old["status"] == "superseded" and [f["finding_id"] for f in old["findings"]] == ["fnd_old"]
+    rollback = sqlite3.connect(f"{path}.v1.bak")                            # the v1 file, as it was
+    assert rollback.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert rollback.execute("SELECT COUNT(*) FROM incidents").fetchone()[0] == 1
+    rollback.close()

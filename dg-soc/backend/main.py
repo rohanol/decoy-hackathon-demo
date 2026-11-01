@@ -114,7 +114,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
 
     def full_incident(incident_id: str) -> dict:
         inc = db.incident_detail(incident_id)
-        inc["summary"] = hooks.summary(inc)
+        # Regenerated on every read, so never stale; the flag is for a future cached summary.
+        inc["summary"] = {**hooks.summary(inc), "stale": False}
         inc["active_block"] = hooks.active_block(inc["src_ip"])
         return inc
 
@@ -187,8 +188,8 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
         return {"items": db.list_runs()}
 
     @app.get("/api/incidents")
-    def incidents():
-        return {"items": db.list_incidents()}
+    def incidents(include_quiet: bool = True):
+        return {"items": db.list_incidents(include_quiet)}
 
     @app.get("/api/incidents/{incident_id}")
     def incident(incident_id: str):
@@ -215,6 +216,17 @@ def create_app(db_path: Optional[str] = None) -> FastAPI:
     @app.get("/api/links")
     def links():
         return {"items": db.list_links()}
+
+    @app.get("/api/profiles")
+    def profiles(lab_run_id: Optional[str] = Query(None, max_length=128)):
+        return {"items": db.list_profiles(lab_run_id)}
+
+    @app.get("/api/profiles/{src_ip}")
+    def profile(src_ip: str, lab_run_id: str = Query(..., min_length=1, max_length=128)):
+        out = db.profile(src_ip, lab_run_id)
+        if out is None:
+            raise HTTPException(404, f"no events from {src_ip} in run {lab_run_id}")
+        return out
 
     @app.post("/api/links/{link_id}/decision")
     async def decide(link_id: str, body: LinkDecision):

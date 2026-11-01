@@ -194,18 +194,39 @@ def test_backend_accepts_every_v11_example(client):
     assert r["rejected"] == [] and r["accepted"] == len(EVENTS_V11["events"])
 
 
-@pytest.mark.xfail(strict=True, reason="gap F1/T01: two SSH sessions on one IP share one incident (fixed in PR 3)")
-def test_gap_two_sessions_one_ip_stay_separate(client):
+def test_two_sessions_one_ip_stay_separate(client):
+    """Review F1/T01. Was a strict xfail in PR 1; fixed by PR 3 (session cases)."""
     post(client, *[v10(by_id(r)) for r in ("a-ssh-s1-login", "a-ssh-s1-ls", "a-ssh-s2-login", "a-ssh-s2-uptime")])
     incidents = {e["session_id"]: e["incident_id"] for e in client.get("/api/events").json()["items"]}
     assert incidents["sess01"] != incidents["sess02"]
+    cases = {c["session_id"]: c for c in client.get("/api/incidents").json()["items"]}
+    assert cases["sess01"]["case_kind"] == cases["sess02"]["case_kind"] == "ssh_session"
+    assert cases["sess01"]["src_ip"] == cases["sess02"]["src_ip"]  # same address, still two cases
 
 
-@pytest.mark.xfail(strict=True, reason="gap F1: web activity joins the SSH incident before any confirmation (fixed in PR 3)")
-def test_gap_web_not_absorbed_before_confirmation(client):
+def test_web_not_absorbed_before_confirmation(client):
+    """Review F1. Was a strict xfail in PR 1; fixed by PR 3 (session cases)."""
     post(client, v10(by_id("a-ssh-s1-login")), v10(by_id("a-ssh-s1-ls")), v10(by_id("a-web-req-3")))
     ids = {e["sensor_id"]: e["incident_id"] for e in client.get("/api/events").json()["items"]}
     assert ids["ssh-decoy-01"] != ids["web-decoy-01"]
+    assert all(c["parent_id"] is None for c in client.get("/api/incidents").json()["items"])
+
+
+def test_password_guessing_across_sessions_without_absorbing_web(client):
+    """Hydra's one-session-per-attempt guessing is still R01, in its own case, citing only SSH evidence."""
+    hydra = [v10(by_id(f"a-ssh-h{i}-fail")) for i in range(1, 6)]
+    web = v10(by_id("a-web-req-3"))
+    post(client, *hydra, web)
+    cases = client.get("/api/incidents").json()["items"]
+    cred = [c for c in cases if c["case_kind"] == "credential_attempts"]
+    assert len(cred) == 1 and cred[0]["event_count"] == 0 and cred[0]["sensor_id"] is None
+    r01 = client.app.state.db.list_findings(cred[0]["incident_id"])
+    assert [f["rule_id"] for f in r01] == ["R01"]
+    events = {e["event_id"]: e for e in client.get("/api/events").json()["items"]}
+    assert {events[i]["sensor_id"] for i in r01[0]["evidence_event_ids"]} == {"ssh-decoy-01"}
+    web_case = next(c for c in cases if c["case_kind"] == "web_activity")
+    assert web_case["parent_id"] is None
+    assert all(e["incident_id"] != cred[0]["incident_id"] for e in events.values())  # it takes no events
 
 
 def test_mixed_live_replay_rejected(client):
@@ -251,12 +272,16 @@ def test_gap_benign_trailing_dashes_not_sqli(client):
 
 
 def test_link_reversal_keeps_every_event(client):
-    """Already true today and must stay true: confirm then reject removes R05 but no event."""
-    post(client, v10(by_id("a-ssh-h1-open")), v10(by_id("a-web-req-3")))
+    """Must stay true: confirm then reject dissolves the investigation and removes R05, but no event."""
+    post(client, v10(by_id("a-ssh-s1-login")), v10(by_id("a-web-req-3")))
     before = client.get("/api/events").json()["items"]
     link = client.get("/api/links").json()["items"][0]["link_id"]
     for decision in ("confirm", "reject"):
         r = client.post(f"/api/links/{link}/decision", json={"decision": decision, "rationale": "checking reversal"})
         assert r.status_code == 200
     assert client.get("/api/events").json()["items"] == before
-    assert all(f["rule_id"] != "R05" for f in client.app.state.db.list_findings("inc_01"))
+    cases = client.get("/api/incidents").json()["items"]
+    inv = next(c for c in cases if c["case_kind"] == "investigation")
+    assert inv["status"] == "dissolved" and inv["score"] == 0
+    db = client.app.state.db
+    assert all(f["rule_id"] != "R05" for c in cases for f in db.list_findings(c["incident_id"]))

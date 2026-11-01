@@ -6,30 +6,46 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from . import links as linking
 from .config import Config, load_config
 from .models import IngestEvent, evidence_role, observation_kind, to_rfc3339
-from .rules import evaluate_incident
+from .rules import CREDENTIAL_RULES, SESSION_RULES, evaluate_incident, evaluate_investigation, r01
 from .scoring import score_incident
 
 DEFAULT_DB = Path(__file__).parent / "data" / "dg.db"
 
-SCHEMA = """
+# A case (contract v1.1) is a row of `incidents`; the route name is kept. case_key makes
+# assignment idempotent. Rows from before the case model stay as status 'superseded'.
+INCIDENTS_TABLE = """
 CREATE TABLE IF NOT EXISTS incidents (
-    incident_id TEXT PRIMARY KEY,
-    src_ip      TEXT NOT NULL,
-    lab_run_id  TEXT NOT NULL,
-    score       INTEGER NOT NULL DEFAULT 0,
-    severity    TEXT NOT NULL DEFAULT 'low',
-    first_seen  TEXT NOT NULL,
-    last_seen   TEXT NOT NULL,
-    event_count INTEGER NOT NULL DEFAULT 0,
-    UNIQUE (src_ip, lab_run_id)
+    incident_id    TEXT PRIMARY KEY,
+    src_ip         TEXT NOT NULL,
+    lab_run_id     TEXT NOT NULL,
+    score          INTEGER NOT NULL DEFAULT 0,
+    severity       TEXT NOT NULL DEFAULT 'low',
+    first_seen     TEXT NOT NULL,
+    last_seen      TEXT NOT NULL,
+    event_count    INTEGER NOT NULL DEFAULT 0,
+    case_kind      TEXT NOT NULL DEFAULT 'legacy_ip_run',
+    grouping_basis TEXT NOT NULL DEFAULT 'ip_run_v1',
+    sensor_id      TEXT,
+    session_id     TEXT,
+    capture_mode   TEXT NOT NULL DEFAULT 'live',
+    username       TEXT,
+    parent_id      TEXT,
+    children       TEXT NOT NULL DEFAULT '[]',
+    basis_link_ids TEXT NOT NULL DEFAULT '[]',
+    status         TEXT NOT NULL DEFAULT 'open',
+    case_key       TEXT UNIQUE
 );
+CREATE INDEX IF NOT EXISTS idx_incidents_source ON incidents(src_ip, lab_run_id, capture_mode, case_kind);
+"""
+
+SCHEMA = INCIDENTS_TABLE + """
 CREATE TABLE IF NOT EXISTS events (
     seq              INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id         TEXT NOT NULL UNIQUE,
@@ -53,6 +69,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_incident ON events(incident_id, seq);
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(lab_run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_events_source ON events(src_ip, lab_run_id, capture_mode, seq);
 CREATE TABLE IF NOT EXISTS runs (
     lab_run_id       TEXT PRIMARY KEY,
     capture_mode     TEXT NOT NULL,
@@ -87,8 +104,9 @@ CREATE TABLE IF NOT EXISTS links (
 );
 """
 
-# PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (contract v1.1, PR 2).
-DB_VERSION = 1
+# PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (PR 2),
+# 2 = session cases, credential cases and investigations (PR 3).
+DB_VERSION = 2
 ACTIVE_RUN_MINUTES = 15
 
 # v0 -> v1. SQLite cannot drop the old UNIQUE(sensor_id, source_record_id) in place, so the
@@ -153,12 +171,32 @@ PRAGMA user_version = 1;
 COMMIT;
 """
 
+# v1 -> v2, step 1 (SQL): the old UNIQUE(src_ip, lab_run_id) must go, so `incidents` is rebuilt.
+# Old rows are kept, unchanged, as superseded legacy_ip_run cases with their findings. Step 2
+# (Python, Database._migrate_v1_v2) moves each event to its derived case; the event's own
+# fields are never touched.
+MIGRATE_V1_V2_TABLE = INCIDENTS_TABLE.split(";")[0].replace(
+    "CREATE TABLE IF NOT EXISTS incidents", "CREATE TABLE incidents_v2") + """;
+INSERT INTO incidents_v2 (incident_id, src_ip, lab_run_id, score, severity, first_seen, last_seen, event_count,
+                          capture_mode, status, case_key)
+SELECT i.incident_id, i.src_ip, i.lab_run_id, i.score, i.severity, i.first_seen, i.last_seen, i.event_count,
+       COALESCE((SELECT r.capture_mode FROM runs r WHERE r.lab_run_id = i.lab_run_id), 'live'),
+       'superseded', 'legacy|' || i.incident_id
+FROM incidents i ORDER BY i.rowid;
+DROP TABLE incidents;
+ALTER TABLE incidents_v2 RENAME TO incidents;
+"""
+
 SENSORS = ("ssh-decoy-01", "web-decoy-01")
+SSH = "ssh-decoy-01"
+SESSION_KINDS = ("ssh_session", "ssh_unsessioned", "web_session", "web_activity")
 STAGE_ORDER = ["recon", "credential_attack", "exploit_attempt", "post_access", "data_access"]
 LINK_FIELDS = ["link_id", "from_event_id", "to_event_id", "from_sensor", "to_sensor",
-               "kind", "basis", "status", "decided_at", "rationale"]
+               "kind", "basis", "status", "decided_at", "rationale", "from_incident_id", "to_incident_id"]
 TRANSCRIPT_KINDS = {"auth_failure": "login_failed", "auth_success": "login_ok",
                     "command_input": "command", "connection_close": "close"}
+PROFILE_NOTE = ("Everything seen from this address in this run. Several people can share one "
+                "address (NAT); this is not a person.")
 
 
 def _now() -> str:
@@ -168,6 +206,13 @@ def _now() -> str:
 
 def _ts(s: str) -> datetime:
     return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+
+def case_kind_for(sensor_id: str, session_id: Optional[str]) -> tuple:
+    """(case_kind, grouping_basis) for an event, per the table in contracts/API.md."""
+    if sensor_id == SSH:
+        return ("ssh_session", "sensor_session") if session_id else ("ssh_unsessioned", "inactivity_5min")
+    return ("web_session", "sensor_session") if session_id else ("web_activity", "inactivity_5min")
 
 
 class Database:
@@ -209,21 +254,64 @@ class Database:
                 self._readers.append(conn)
         return conn
 
+    def _backup(self, suffix: str) -> None:
+        self._writer.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # the copy must hold everything
+        backup = f"{self.path}.{suffix}.bak"
+        if not os.path.exists(backup):
+            shutil.copy2(self.path, backup)
+
     def _migrate(self) -> None:
-        """Bring the file to DB_VERSION. Back up a v0 file before touching it."""
+        """Bring the file to DB_VERSION. Back up the file before each step."""
         c = self._writer
         has_events = c.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='events'").fetchone() is not None
         version = c.execute("PRAGMA user_version").fetchone()[0]
         if has_events and version == 0:
-            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # the .bak must hold everything
-            backup = f"{self.path}.v0.bak"
-            if not os.path.exists(backup):
-                shutil.copy2(self.path, backup)
+            self._backup("v0")
             c.executescript(MIGRATE_V0_V1)
+            version = 1
+        if has_events and version == 1:
+            self._backup("v1")
+            self._migrate_v1_v2()
         c.executescript(SCHEMA)  # creates whatever is missing; no-op on an up-to-date file
         if not has_events:
             c.execute(f"PRAGMA user_version = {DB_VERSION}")
+
+    def _migrate_v1_v2(self) -> None:
+        c = self._writer
+        c.execute("PRAGMA foreign_keys=OFF")  # events point at incidents while it is rebuilt
+        c.execute("BEGIN IMMEDIATE")
+        try:
+            for stmt in MIGRATE_V1_V2_TABLE.split(";"):
+                if stmt.strip():
+                    c.execute(stmt)
+            # executescript would commit, so the statements run one by one inside this transaction
+            for stmt in SCHEMA.split(";"):
+                if stmt.strip():
+                    c.execute(stmt)
+            cases, sources = set(), set()
+            for r in c.execute("SELECT * FROM events ORDER BY seq").fetchall():
+                inc = self._assign_case(c, r["sensor_id"], r["session_id"], r["src_ip"], r["lab_run_id"],
+                                        r["capture_mode"], r["occurred_at"])
+                c.execute("UPDATE events SET incident_id=? WHERE seq=?", (inc, r["seq"]))
+                cases.add(inc)
+                sources.add((r["src_ip"], r["lab_run_id"], r["capture_mode"]))
+            c.execute("UPDATE links SET "
+                      "from_incident_id=(SELECT incident_id FROM events WHERE event_id=links.from_event_id), "
+                      "to_incident_id=(SELECT incident_id FROM events WHERE event_id=links.to_event_id)")
+            cases |= self._refresh_credential_cases(c, sources)
+            self._refresh_links(c, {inc: self._incident_events(c, inc) for inc in sorted(cases)}, sources)
+            for row in c.execute("SELECT * FROM links WHERE status='confirmed' ORDER BY decided_at, link_id").fetchall():
+                cases |= self._apply_investigation(c, dict(row))
+            for inc in self._sync_order(c, cases):
+                self._sync_incident(c, inc)
+            c.execute(f"PRAGMA user_version = {DB_VERSION}")
+            c.execute("COMMIT")
+        except Exception:
+            c.execute("ROLLBACK")
+            raise
+        finally:
+            c.execute("PRAGMA foreign_keys=ON")
 
     def close(self) -> None:
         with self._readers_lock:
@@ -253,21 +341,25 @@ class Database:
         The caller broadcasts afterwards."""
         def work(c):
             touched: set[str] = set()
-            outcomes = [self._insert_one(c, ev, touched) for ev in events]
+            sources: set[tuple] = set()
+            outcomes = [self._insert_one(c, ev, touched, sources) for ev in events]
             stored = [payload for status, payload in outcomes if status == "stored"]
-            # Load each touched incident's events once; links and rules both use them.
+            # Load each touched case's events once; links and rules both use them.
             loaded = {inc: self._incident_events(c, inc) for inc in sorted(touched)}
-            new_links = self._refresh_links(c, loaded)
-            affected = set(touched)
+            affected = set(touched) | self._refresh_credential_cases(c, sources)
+            new_links = self._refresh_links(c, loaded, sources)
             for l in new_links:
                 affected.update((l["from_incident_id"], l["to_incident_id"]))
-            changed = [f for inc in sorted(affected) for f in self._sync_incident(c, inc, loaded.get(inc))]
+            affected |= self._parents(c, affected)  # an investigation re-scores when a child changes
+            changed =[f for inc in self._sync_order(c, affected) for f in self._sync_incident(c, inc, loaded.get(inc))]
+            ordered = self._sync_order(c, affected)
             return {"outcomes": outcomes, "links": new_links, "findings": changed,
-                    "incidents": sorted(affected) if stored or new_links else []}
+                    "incidents": ordered if stored or new_links else []}
         return self._write(work)
 
     def decide_link(self, link_id: str, decision: str, rationale: str) -> Optional[dict]:
-        """Analyst decision. Re-runs rules and scores for both linked incidents."""
+        """Analyst decision. Creates, extends or dissolves the investigation the link stands
+        for, then re-runs rules and scores for the cases involved."""
         def work(c):
             row = c.execute("SELECT * FROM links WHERE link_id=?", (link_id,)).fetchone()
             if not row:
@@ -275,13 +367,14 @@ class Database:
             status = "confirmed" if decision == "confirm" else "rejected"
             c.execute("UPDATE links SET status=?, decided_at=?, rationale=? WHERE link_id=?",
                       (status, _now(), rationale, link_id))
-            affected = sorted({row["from_incident_id"], row["to_incident_id"]})
-            changed = [f for inc in affected for f in self._sync_incident(c, inc)]
             link = dict(c.execute("SELECT * FROM links WHERE link_id=?", (link_id,)).fetchone())
-            return {"link": link, "findings": changed, "incidents": affected}
+            affected = {link["from_incident_id"], link["to_incident_id"]} | self._apply_investigation(c, link)
+            ordered = self._sync_order(c, affected)
+            changed = [f for inc in ordered for f in self._sync_incident(c, inc)]
+            return {"link": link, "findings": changed, "incidents": ordered}
         return self._write(work)
 
-    def _insert_one(self, c: sqlite3.Connection, ev: IngestEvent, touched: set[str]) -> tuple:
+    def _insert_one(self, c: sqlite3.Connection, ev: IngestEvent, touched: set, sources: set) -> tuple:
         run = c.execute("SELECT capture_mode FROM runs WHERE lab_run_id=?", (ev.lab_run_id,)).fetchone()
         if run and run["capture_mode"] != ev.capture_mode:
             return ("rejected", f"lab_run_id: run {ev.lab_run_id} is {run['capture_mode']}; "
@@ -302,26 +395,10 @@ class Database:
             "last_ingested_at=excluded.last_ingested_at, events=events+1",
             (ev.lab_run_id, ev.capture_mode, occurred, occurred, ingested),
         )
-        row = c.execute(
-            "SELECT incident_id FROM incidents WHERE src_ip=? AND lab_run_id=?",
-            (ev.src_ip, ev.lab_run_id),
-        ).fetchone()
-        if row:
-            incident_id = row["incident_id"]
-            c.execute(
-                "UPDATE incidents SET event_count=event_count+1, "
-                "first_seen=MIN(first_seen, ?), last_seen=MAX(last_seen, ?) WHERE incident_id=?",
-                (occurred, occurred, incident_id),
-            )
-        else:
-            cur = c.execute(
-                "INSERT INTO incidents (incident_id, src_ip, lab_run_id, first_seen, last_seen, event_count) "
-                "VALUES ('pending', ?, ?, ?, ?, 1)",
-                (ev.src_ip, ev.lab_run_id, occurred, occurred),
-            )
-            incident_id = f"inc_{cur.lastrowid:02d}"
-            c.execute("UPDATE incidents SET incident_id=? WHERE rowid=?", (incident_id, cur.lastrowid))
+        incident_id = self._assign_case(c, ev.sensor_id, ev.session_id, ev.src_ip, ev.lab_run_id,
+                                        ev.capture_mode, occurred)
         touched.add(incident_id)
+        sources.add((ev.src_ip, ev.lab_run_id, ev.capture_mode))
         event_id = "evt_" + uuid.uuid4().hex[:12]
         attrs = ev.attributes.model_dump(mode="json", exclude_none=True)
         cur = c.execute(
@@ -336,35 +413,189 @@ class Database:
         )
         return ("stored", self._event_dict(c.execute("SELECT * FROM events WHERE seq=?", (cur.lastrowid,)).fetchone()))
 
+    # ---- cases ----
+    @staticmethod
+    def _new_case(c, prefix: str, **fields) -> str:
+        """Insert a case row and give it a readable id from its rowid (inc_07, inv_08)."""
+        cols = ["incident_id"] + list(fields)
+        cur = c.execute(f"INSERT INTO incidents ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                        ["pending"] + list(fields.values()))
+        incident_id = f"{prefix}_{cur.lastrowid:02d}"
+        c.execute("UPDATE incidents SET incident_id=? WHERE rowid=?", (incident_id, cur.lastrowid))
+        return incident_id
+
+    def _assign_case(self, c, sensor_id, session_id, src_ip, run, mode, occurred: str) -> str:
+        """The case this event belongs to, created if needed; counts and times updated."""
+        kind, basis = case_kind_for(sensor_id, session_id)
+        row = None
+        if session_id:
+            # src_ip too: a session never changes address, so a reused id from another one is another case
+            key = f"{kind}|{sensor_id}|{session_id}|{src_ip}|{run}|{mode}"
+            row = c.execute("SELECT incident_id FROM incidents WHERE case_key=?", (key,)).fetchone()
+        else:
+            # Same source on the same sensor, within the inactivity gap of an existing bucket.
+            gap = timedelta(seconds=self.cfg.windows.get("case_inactivity_seconds", 300))
+            t = _ts(occurred)
+            for r in c.execute(
+                    "SELECT incident_id, first_seen, last_seen FROM incidents WHERE case_kind=? AND sensor_id=? "
+                    "AND src_ip=? AND lab_run_id=? AND capture_mode=? ORDER BY last_seen DESC, rowid DESC",
+                    (kind, sensor_id, src_ip, run, mode)):
+                if _ts(r["first_seen"]) - gap <= t <= _ts(r["last_seen"]) + gap:
+                    row = r
+                    break
+            key = f"{kind}|{sensor_id}|{src_ip}|{run}|{mode}|{occurred}|{uuid.uuid4().hex[:6]}"
+        if row:
+            c.execute("UPDATE incidents SET event_count=event_count+1, "
+                      "first_seen=MIN(first_seen, ?), last_seen=MAX(last_seen, ?) WHERE incident_id=?",
+                      (occurred, occurred, row["incident_id"]))
+            return row["incident_id"]
+        return self._new_case(c, "inc", src_ip=src_ip, lab_run_id=run, first_seen=occurred, last_seen=occurred,
+                              event_count=1, case_kind=kind, grouping_basis=basis, sensor_id=sensor_id,
+                              session_id=session_id, capture_mode=mode, case_key=key)
+
+    def _source_auth_events(self, c, src_ip, run, mode) -> list[dict]:
+        return [self._event_dict(r) for r in c.execute(
+            "SELECT * FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? AND sensor_id=? "
+            "AND event_type IN ('auth_failure', 'auth_success') ORDER BY seq", (src_ip, run, mode, SSH))]
+
+    def _refresh_credential_cases(self, c, sources: set) -> set:
+        """Password guessing across sessions (R01) gets its own credential_attempts case per
+        source, user, run and mode. It cites the sessions' events but takes none of them."""
+        out = set()
+        for src_ip, run, mode in sorted(sources):
+            pool = self._source_auth_events(c, src_ip, run, mode)
+            if not pool:
+                continue
+            for f in r01.evaluate(pool, self.cfg):
+                user = f["key"].removeprefix("user=")
+                key = f"credential_attempts|{src_ip}|{run}|{mode}|{user}"
+                row = c.execute("SELECT incident_id FROM incidents WHERE case_key=?", (key,)).fetchone()
+                if row:
+                    out.add(row["incident_id"])
+                else:
+                    first = min(e["occurred_at"] for e in pool)
+                    out.add(self._new_case(c, "inc", src_ip=src_ip, lab_run_id=run, first_seen=first, last_seen=first,
+                                           event_count=0, case_kind="credential_attempts",
+                                           grouping_basis="credential_window", capture_mode=mode,
+                                           username=user, case_key=key))
+            # existing credential cases of this source re-run on the larger pool
+            out |= {r["incident_id"] for r in c.execute(
+                "SELECT incident_id FROM incidents WHERE case_kind='credential_attempts' AND src_ip=? "
+                "AND lab_run_id=? AND capture_mode=?", (src_ip, run, mode))}
+        return out
+
+    def _apply_investigation(self, c, link: dict) -> set:
+        """Keep the investigation for this link in step with its decision. Returns case ids to re-sync.
+        An investigation exists only while at least one of its links is confirmed."""
+        a, b = link["from_incident_id"], link["to_incident_id"]
+        if a == b:
+            return set()
+        invs = [dict(r) for r in c.execute(
+            "SELECT * FROM incidents WHERE case_kind='investigation' ORDER BY rowid")]
+        home = next((i for i in invs if link["link_id"] in json.loads(i["basis_link_ids"])), None)
+        if link["status"] == "confirmed" and home is None:
+            home = next((i for i in invs if i["status"] == "open"
+                         and {a, b} & set(json.loads(i["children"]))), None)
+        if home is None:
+            if link["status"] != "confirmed":
+                return set()
+            child = c.execute("SELECT src_ip, lab_run_id, capture_mode, first_seen FROM incidents "
+                              "WHERE incident_id=?", (a,)).fetchone()
+            inv_id = self._new_case(c, "inv", src_ip=child["src_ip"], lab_run_id=child["lab_run_id"],
+                                    first_seen=child["first_seen"], last_seen=child["first_seen"],
+                                    case_kind="investigation", grouping_basis="analyst_confirmed_link",
+                                    capture_mode=child["capture_mode"], case_key=f"investigation|{link['link_id']}")
+            home = dict(c.execute("SELECT * FROM incidents WHERE incident_id=?", (inv_id,)).fetchone())
+        basis = json.loads(home["basis_link_ids"])
+        if link["link_id"] not in basis:
+            basis.append(link["link_id"])
+        # Another open investigation that shares a child is merged into this one.
+        if link["status"] == "confirmed":
+            for other in invs:
+                if other["incident_id"] != home["incident_id"] and other["status"] == "open" \
+                        and {a, b} & set(json.loads(other["children"])):
+                    basis += [l for l in json.loads(other["basis_link_ids"]) if l not in basis]
+                    c.execute("UPDATE incidents SET status='dissolved', basis_link_ids='[]' WHERE incident_id=?",
+                              (other["incident_id"],))
+        confirmed = [dict(r) for r in c.execute(
+            f"SELECT * FROM links WHERE status='confirmed' AND link_id IN ({','.join('?' * len(basis))}) "
+            "ORDER BY decided_at, link_id", basis)]
+        old_children = json.loads(home["children"])
+        children = list(dict.fromkeys(x for l in confirmed for x in (l["from_incident_id"], l["to_incident_id"])))
+        status = "open" if confirmed else "dissolved"
+        c.execute("UPDATE incidents SET parent_id=NULL WHERE parent_id=?", (home["incident_id"],))
+        if confirmed:
+            c.execute(f"UPDATE incidents SET parent_id=? WHERE incident_id IN ({','.join('?' * len(children))})",
+                      [home["incident_id"]] + children)
+        # A dissolved investigation keeps its last membership for the audit trail.
+        c.execute("UPDATE incidents SET status=?, basis_link_ids=?, children=? WHERE incident_id=?",
+                  (status, json.dumps(basis), json.dumps(children or old_children), home["incident_id"]))
+        return {home["incident_id"], a, b} | set(old_children) | set(children)
+
+    @staticmethod
+    def _parents(c, ids) -> set:
+        if not ids:
+            return set()
+        return {r[0] for r in c.execute(
+            f"SELECT DISTINCT parent_id FROM incidents WHERE parent_id IS NOT NULL "
+            f"AND incident_id IN ({','.join('?' * len(ids))})", list(ids))}
+
+    @staticmethod
+    def _sync_order(c, ids) -> list:
+        """Children before investigations: an investigation's score reads its children's findings."""
+        kinds = {r["incident_id"]: r["case_kind"] for r in c.execute(
+            f"SELECT incident_id, case_kind FROM incidents WHERE incident_id IN ({','.join('?' * len(ids))})",
+            list(ids))} if ids else {}
+        return sorted(kinds, key=lambda i: (kinds[i] == "investigation", i))
+
     def _incident_events(self, c, incident_id: str) -> list[dict]:
         return [self._event_dict(r) for r in
                 c.execute("SELECT * FROM events WHERE incident_id=? ORDER BY seq", (incident_id,))]
 
-    def _refresh_links(self, c, loaded: dict) -> list[dict]:
-        """`loaded`: incident_id -> its events, for the incidents this ingest touched."""
+    def _source_events(self, c, src_ip, run, mode) -> list[dict]:
+        return [self._event_dict(r) for r in c.execute(
+            "SELECT * FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? ORDER BY seq",
+            (src_ip, run, mode))]
+
+    def _refresh_links(self, c, loaded: dict, sources: set) -> list[dict]:
+        """`loaded`: case id -> its events, for the cases this ingest touched;
+        `sources`: (src_ip, run, mode) touched, for candidate links across cases."""
         def planted_lookup(tok: dict, use: dict) -> Optional[dict]:
             # Prefer the same src_ip, then a shell command (e.g. reading the bait file), then latest.
             r = c.execute(
-                "SELECT * FROM events WHERE sensor_id=? AND lab_run_id=? AND occurred_at<=? "
+                "SELECT * FROM events WHERE sensor_id=? AND lab_run_id=? AND capture_mode=? AND occurred_at<=? "
                 "AND event_type != 'blocked_request' "
                 "ORDER BY (src_ip=?) DESC, (event_type='command_input') DESC, occurred_at DESC, seq DESC LIMIT 1",
-                (tok["planted_on"], use["lab_run_id"], use["occurred_at"], use["src_ip"]),
+                (tok["planted_on"], use["lab_run_id"], use["capture_mode"], use["occurred_at"], use["src_ip"]),
             ).fetchone()
             return self._event_dict(r) if r else None
 
-        new = []
-        for inc, events in loaded.items():
-            found = linking.candidate_links(inc, events, self.cfg)
+        found = []
+        for src_ip, run, mode in sorted(sources):
+            logged_in = {r["incident_id"] for r in c.execute(
+                "SELECT DISTINCT incident_id FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? "
+                "AND sensor_id=? AND event_type='auth_success'", (src_ip, run, mode, SSH))}
+            found += linking.candidate_links(self._source_events(c, src_ip, run, mode), self.cfg, logged_in)
+        for events in loaded.values():
             found += linking.strong_links(linking.token_uses(events, self.cfg), planted_lookup, self.cfg)
-            for l in found:
-                cur = c.execute(
-                    "INSERT OR IGNORE INTO links (link_id, from_event_id, to_event_id, from_sensor, to_sensor, "
-                    "kind, basis, from_incident_id, to_incident_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                    (l["link_id"], l["from_event_id"], l["to_event_id"], l["from_sensor"], l["to_sensor"],
-                     l["kind"], l["basis"], l["from_incident_id"], l["to_incident_id"], _now()),
-                )
-                if cur.rowcount:
-                    new.append(dict(c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()))
+        new = []
+        for l in found:
+            if c.execute("SELECT 1 FROM links WHERE kind=? AND from_event_id=? AND to_event_id=?",
+                         (l["kind"], l["from_event_id"], l["to_event_id"])).fetchone():
+                continue  # same evidence already linked (a pre-migration link keeps its id and decision)
+            if l["kind"] == "candidate" and c.execute(
+                    "SELECT 1 FROM links WHERE kind='candidate' AND ((from_incident_id=? AND to_incident_id=?) "
+                    "OR (from_incident_id=? AND to_incident_id=?))",
+                    (l["from_incident_id"], l["to_incident_id"], l["to_incident_id"], l["from_incident_id"])).fetchone():
+                continue  # one candidate per pair of cases, whichever key found it first
+            cur = c.execute(
+                "INSERT OR IGNORE INTO links (link_id, from_event_id, to_event_id, from_sensor, to_sensor, "
+                "kind, basis, from_incident_id, to_incident_id, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (l["link_id"], l["from_event_id"], l["to_event_id"], l["from_sensor"], l["to_sensor"],
+                 l["kind"], l["basis"], l["from_incident_id"], l["to_incident_id"], _now()),
+            )
+            if cur.rowcount:
+                new.append(dict(c.execute("SELECT * FROM links WHERE link_id=?", (l["link_id"],)).fetchone()))
         return new
 
     def _links_for(self, c, incident_id: str) -> list[dict]:
@@ -372,13 +603,56 @@ class Database:
             "SELECT * FROM links WHERE from_incident_id=? OR to_incident_id=? ORDER BY created_at, link_id",
             (incident_id, incident_id))]
 
+    def _links_among(self, c, ids: list) -> list[dict]:
+        if not ids:
+            return []
+        marks = ",".join("?" * len(ids))
+        return [dict(r) for r in c.execute(
+            f"SELECT * FROM links WHERE from_incident_id IN ({marks}) AND to_incident_id IN ({marks}) "
+            "ORDER BY created_at, link_id", list(ids) + list(ids))]
+
+    @staticmethod
+    def _stored_findings(c, ids: list) -> list[dict]:
+        out = []
+        for i in ids:
+            out += [json.loads(r["data"]) for r in c.execute(
+                "SELECT data FROM findings WHERE incident_id=? ORDER BY rowid", (i,))]
+        return out
+
     def _sync_incident(self, c, incident_id: str, events: Optional[list] = None) -> list[dict]:
-        """Re-run rules and scoring for one incident; store and return what changed."""
-        inc = c.execute("SELECT incident_id, src_ip FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
-        links = self._links_for(c, incident_id)
-        if events is None:
-            events = self._incident_events(c, incident_id)
-        fresh = evaluate_incident(dict(inc), events, self.cfg, links)
+        """Re-run rules and scoring for one case; store and return what changed."""
+        case = dict(c.execute("SELECT * FROM incidents WHERE incident_id=?", (incident_id,)).fetchone())
+        kind = case["case_kind"]
+        if kind == "legacy_ip_run":
+            return []  # superseded rows are kept as they were
+        inherited: list = []
+        if kind == "investigation":
+            children = json.loads(case["children"]) if case["status"] == "open" else []
+            links = self._links_among(c, children)
+            basis = set(json.loads(case["basis_link_ids"]))
+            fresh = evaluate_investigation(case, [l for l in links if l["link_id"] in basis])
+            inherited = sorted(self._stored_findings(c, children), key=lambda f: (f["created_at"], f["finding_id"]))
+            if children:
+                bounds = c.execute(
+                    f"SELECT MIN(first_seen), MAX(last_seen), SUM(event_count) FROM incidents "
+                    f"WHERE incident_id IN ({','.join('?' * len(children))})", children).fetchone()
+                c.execute("UPDATE incidents SET first_seen=?, last_seen=?, event_count=? WHERE incident_id=?",
+                          (bounds[0], bounds[1], bounds[2] or 0, incident_id))
+        elif kind == "credential_attempts":
+            links = []
+            pool = [e for e in self._source_auth_events(c, case["src_ip"], case["lab_run_id"], case["capture_mode"])
+                    if e["attributes"].get("username", "") == case["username"]]
+            fresh = evaluate_incident(case, pool, self.cfg, CREDENTIAL_RULES)
+            cited = {i for f in fresh for i in f["evidence_event_ids"]}
+            times = [e["occurred_at"] for e in pool if e["event_id"] in cited]
+            if times:
+                c.execute("UPDATE incidents SET first_seen=?, last_seen=? WHERE incident_id=?",
+                          (min(times), max(times), incident_id))
+        else:
+            links = self._links_for(c, incident_id)
+            if events is None:
+                events = self._incident_events(c, incident_id)
+            fresh = evaluate_incident(case, events, self.cfg, SESSION_RULES)
         # rowid = order first recorded; scoring walks findings in that order (new ones last).
         existing = {r["finding_id"]: json.loads(r["data"]) for r in c.execute(
             "SELECT finding_id, data FROM findings WHERE incident_id=? ORDER BY rowid", (incident_id,))}
@@ -386,7 +660,7 @@ class Database:
         fresh.sort(key=lambda f: rank.get(f["finding_id"], len(rank)))  # stable: new ones keep rule order
         for f in fresh:
             f["created_at"] = existing[f["finding_id"]]["created_at"] if f["finding_id"] in existing else _now()
-        scored = score_incident(fresh, links, self.cfg)
+        scored = score_incident(inherited + fresh, links, self.cfg)
         changed = []
         for f in fresh:
             f["points"], f["pending_confirmation"] = scored["points"][f["finding_id"]]
@@ -445,8 +719,9 @@ class Database:
             sql += " AND capture_mode=?"
             args.append(capture_mode)
         if incident_id:
-            sql += " AND incident_id=?"
-            args.append(incident_id)
+            ids = self._case_event_owners(incident_id)
+            sql += f" AND incident_id IN ({','.join('?' * len(ids))})"
+            args += ids
         if sensor_id:
             sql += " AND sensor_id=?"
             args.append(sensor_id)
@@ -454,6 +729,14 @@ class Database:
         args.append(limit)
         items = [self._event_dict(r) for r in self.conn.execute(sql, args)]
         return {"items": items, "next_seq": items[-1]["seq"] if items else since_seq}
+
+    def _case_event_owners(self, incident_id: str) -> list:
+        """Cases whose events make up this one: itself, or an open investigation's children."""
+        r = self.conn.execute("SELECT case_kind, children, status FROM incidents WHERE incident_id=?",
+                              (incident_id,)).fetchone()
+        if r and r["case_kind"] == "investigation":
+            return json.loads(r["children"]) if r["status"] == "open" else []
+        return [incident_id]
 
     def max_seq(self) -> int:
         return self.conn.execute("SELECT COALESCE(MAX(seq), 0) FROM events").fetchone()[0]
@@ -482,14 +765,31 @@ class Database:
     def incident_exists(self, incident_id: str) -> bool:
         return self.conn.execute("SELECT 1 FROM incidents WHERE incident_id=?", (incident_id,)).fetchone() is not None
 
+    def _case_findings(self, r) -> list[dict]:
+        """Findings that make up a case: its own, plus an open investigation's children's."""
+        own = self.list_findings(r["incident_id"])
+        if r["case_kind"] != "investigation" or r["status"] != "open":
+            return own
+        children = sorted(self._stored_findings(self.conn, json.loads(r["children"])),
+                          key=lambda f: (f["created_at"], f["finding_id"]))
+        return children + own
+
     def incident_summary(self, incident_id: str) -> dict:
         r = self.conn.execute("SELECT * FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
+        findings = self._case_findings(r)
+        seen = {f["stage"] for f in findings}
         return {
             "incident_id": r["incident_id"], "src_ip": r["src_ip"], "lab_run_id": r["lab_run_id"],
             "score": r["score"], "severity": r["severity"],
-            "capture_mode": self.run_mode(r["lab_run_id"]),
-            "stages_observed": self._stages(incident_id),
+            "capture_mode": r["capture_mode"],
+            "stages_observed": [s for s in STAGE_ORDER if s in seen],
             "first_seen": r["first_seen"], "last_seen": r["last_seen"], "event_count": r["event_count"],
+            "case_kind": r["case_kind"], "grouping_basis": r["grouping_basis"],
+            "sensor_id": r["sensor_id"], "session_id": r["session_id"],
+            "parent_id": r["parent_id"],
+            "children": json.loads(r["children"]) if r["case_kind"] == "investigation" else [],
+            "status": r["status"],
+            "quiet": r["case_kind"] in SESSION_KINDS and not findings,
         }
 
     @contextmanager
@@ -505,11 +805,12 @@ class Database:
         finally:
             c.execute("COMMIT")
 
-    def list_incidents(self) -> list[dict]:
+    def list_incidents(self, include_quiet: bool = True) -> list[dict]:
         with self.snapshot():
             ids = [r[0] for r in self.conn.execute(
-                "SELECT incident_id FROM incidents ORDER BY last_seen DESC, rowid DESC")]
-            return [self.incident_summary(i) for i in ids]
+                "SELECT incident_id FROM incidents WHERE status != 'superseded' ORDER BY last_seen DESC, rowid DESC")]
+            items = [self.incident_summary(i) for i in ids]
+            return items if include_quiet else [i for i in items if not i["quiet"]]
 
     def list_findings(self, incident_id: str) -> list[dict]:
         rows = self.conn.execute(
@@ -523,23 +824,26 @@ class Database:
             rows = [dict(r) for r in self.conn.execute("SELECT * FROM links ORDER BY created_at, link_id")]
         return [self.public_link(r) for r in rows]
 
-    def _stages(self, incident_id: str) -> list[str]:
-        seen = {f["stage"] for f in self.list_findings(incident_id)}
-        return [s for s in STAGE_ORDER if s in seen]
-
     def sessions(self, incident_id: str) -> list[dict]:
+        ids = self._case_event_owners(incident_id)
+        if not ids:
+            return []
         rows = self.conn.execute(
             "SELECT session_id, sensor_id, MIN(occurred_at) AS started_at, "
             "SUM(event_type='command_input') AS commands FROM events "
-            "WHERE incident_id=? AND session_id IS NOT NULL GROUP BY sensor_id, session_id "
-            "ORDER BY started_at, session_id", (incident_id,))
+            f"WHERE incident_id IN ({','.join('?' * len(ids))}) AND session_id IS NOT NULL "
+            "GROUP BY sensor_id, session_id ORDER BY started_at, session_id", ids)
         return [dict(r) for r in rows]
 
     def incident_detail(self, incident_id: str) -> dict:
         """Incident minus `summary` and `active_block`, which main.py adds."""
         with self.snapshot():
-            findings = self.list_findings(incident_id)
-            links = self._links_for(self.conn, incident_id)
+            r = self.conn.execute("SELECT * FROM incidents WHERE incident_id=?", (incident_id,)).fetchone()
+            findings = self._case_findings(r)
+            if r["case_kind"] == "investigation":
+                links = self._links_among(self.conn, json.loads(r["children"]) if r["status"] == "open" else [])
+            else:
+                links = self._links_for(self.conn, incident_id)
             out = self.incident_summary(incident_id)
             out.update({
                 "findings": findings,
@@ -550,18 +854,20 @@ class Database:
             return out
 
     def transcript(self, incident_id: str, session_id: Optional[str]) -> Optional[dict]:
+        ids = self._case_event_owners(incident_id) or ["-"]
+        owners = f"incident_id IN ({','.join('?' * len(ids))})"
         if not session_id:
             # Default: the first session that logged in, else the first session at all.
             r = self.conn.execute(
-                "SELECT session_id FROM events WHERE incident_id=? AND sensor_id='ssh-decoy-01' "
+                f"SELECT session_id FROM events WHERE {owners} AND sensor_id='ssh-decoy-01' "
                 "AND session_id IS NOT NULL ORDER BY (event_type='auth_success') DESC, occurred_at, seq LIMIT 1",
-                (incident_id,)).fetchone()
+                ids).fetchone()
             if not r:
                 return {"session_id": None, "lines": []}
             session_id = r["session_id"]
         rows = self.conn.execute(
-            "SELECT * FROM events WHERE incident_id=? AND sensor_id='ssh-decoy-01' AND session_id=? "
-            "ORDER BY occurred_at, seq", (incident_id, session_id)).fetchall()
+            f"SELECT * FROM events WHERE {owners} AND sensor_id='ssh-decoy-01' AND session_id=? "
+            "ORDER BY occurred_at, seq", ids + [session_id]).fetchall()
         if not rows:
             return None
         lines = []
@@ -582,27 +888,31 @@ class Database:
 
     def stats(self) -> dict:
         c = self.conn
+        live = "status = 'open' AND case_kind != 'investigation'"
         with self.snapshot():
-            by_rule = {r["rule_id"]: r["n"] for r in
-                       c.execute("SELECT rule_id, COUNT(*) AS n FROM findings GROUP BY rule_id ORDER BY rule_id")}
-            first = c.execute("SELECT incident_id, created_at FROM findings ORDER BY created_at LIMIT 1").fetchone()
+            by_rule = {r["rule_id"]: r["n"] for r in c.execute(
+                "SELECT f.rule_id, COUNT(*) AS n FROM findings f JOIN incidents i USING (incident_id) "
+                "WHERE i.status != 'superseded' GROUP BY f.rule_id ORDER BY f.rule_id")}
+            first = c.execute(
+                "SELECT f.incident_id, f.created_at FROM findings f JOIN incidents i USING (incident_id) "
+                "WHERE i.status != 'superseded' AND i.event_count > 0 ORDER BY f.created_at LIMIT 1").fetchone()
             first_alert = None
             if first:
-                # From the backend receiving that incident's first event to its first finding.
+                # From the backend receiving that case's first event to its first finding.
                 start = c.execute("SELECT MIN(ingested_at) FROM events WHERE incident_id=?",
                                   (first["incident_id"],)).fetchone()[0]
                 first_alert = round(max(0.0, (_ts(first["created_at"]) - _ts(start)).total_seconds()), 3)
             return {
                 "raw_events": c.execute("SELECT COUNT(*) FROM events").fetchone()[0],
-                "incidents": c.execute("SELECT COUNT(*) FROM incidents").fetchone()[0],
-                "low_priority_incidents": c.execute("SELECT COUNT(*) FROM incidents WHERE score < ?",
+                "incidents": c.execute(f"SELECT COUNT(*) FROM incidents WHERE {live}").fetchone()[0],
+                "low_priority_incidents": c.execute(f"SELECT COUNT(*) FROM incidents WHERE {live} AND score < ?",
                                                     (self.cfg.low_priority_below,)).fetchone()[0],
                 "findings_by_rule": by_rule,
                 "first_alert_seconds": first_alert,
             }
 
     def export_events(self, incident_id: str) -> list[dict]:
-        """Incident events for export with password hashes removed."""
+        """Case events for export with password hashes removed."""
         out = []
         for e in self.list_events(incident_id=incident_id, limit=1_000_000)["items"]:
             e["attributes"] = {k: v for k, v in e["attributes"].items() if k != "password_sha256"}
@@ -614,3 +924,49 @@ class Database:
         for r in self.conn.execute("SELECT sensor_id, MAX(occurred_at) AS t FROM events GROUP BY sensor_id"):
             out[r["sensor_id"]] = r["t"]
         return out
+
+    # ---- source profiles (a view; never scored) ----
+    def list_profiles(self, lab_run_id: Optional[str] = None) -> list[dict]:
+        sql, args = "SELECT DISTINCT src_ip, lab_run_id, capture_mode FROM events", []
+        if lab_run_id:
+            sql += " WHERE lab_run_id=?"
+            args.append(lab_run_id)
+        with self.snapshot():
+            keys = [tuple(r) for r in self.conn.execute(sql, args)]
+            items = [self._profile(*k) for k in keys]
+        return sorted(items, key=lambda p: p["last_seen"], reverse=True)
+
+    def profile(self, src_ip: str, lab_run_id: str) -> Optional[dict]:
+        r = self.conn.execute("SELECT capture_mode FROM events WHERE src_ip=? AND lab_run_id=? LIMIT 1",
+                              (src_ip, lab_run_id)).fetchone()
+        if not r:
+            return None
+        with self.snapshot():
+            return self._profile(src_ip, lab_run_id, r["capture_mode"])
+
+    def _profile(self, src_ip: str, run: str, mode: str) -> dict:
+        c = self.conn
+        span = c.execute("SELECT MIN(occurred_at), MAX(occurred_at) FROM events WHERE src_ip=? AND lab_run_id=? "
+                         "AND capture_mode=?", (src_ip, run, mode)).fetchone()
+        sensors = {r["sensor_id"]: {"cases": r["cases"], "events": r["events"]} for r in c.execute(
+            "SELECT sensor_id, COUNT(DISTINCT incident_id) AS cases, COUNT(*) AS events FROM events "
+            "WHERE src_ip=? AND lab_run_id=? AND capture_mode=? GROUP BY sensor_id ORDER BY sensor_id",
+            (src_ip, run, mode))}
+        users, claims = set(), []
+        for r in c.execute("SELECT sensor_id, event_type, attributes FROM events WHERE src_ip=? AND lab_run_id=? "
+                           "AND capture_mode=? ORDER BY seq", (src_ip, run, mode)):
+            a = json.loads(r["attributes"])
+            if r["event_type"] in ("auth_failure", "auth_success") and a.get("username"):
+                users.add(a["username"][:64])
+            for field in ("client_version", "user_agent"):
+                if a.get(field):
+                    claim = {"sensor_id": r["sensor_id"], field: a[field][:128]}
+                    if claim not in claims and len(claims) < 20:
+                        claims.append(claim)
+        case_ids = [r["incident_id"] for r in c.execute(
+            "SELECT incident_id FROM incidents WHERE src_ip=? AND lab_run_id=? AND capture_mode=? "
+            "AND status != 'superseded' AND case_kind != 'investigation' ORDER BY rowid", (src_ip, run, mode))]
+        return {"src_ip": src_ip, "lab_run_id": run, "capture_mode": mode,
+                "first_seen": span[0], "last_seen": span[1], "sensors": sensors,
+                "attempted_usernames": sorted(users)[:50], "client_claims": claims,
+                "case_ids": case_ids, "note": PROFILE_NOTE}
