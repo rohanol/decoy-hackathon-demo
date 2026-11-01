@@ -1,11 +1,13 @@
 /**
- * Sign in. Google first, email and password second. See auth/AuthProvider.tsx
- * for the provider and what this does and does not protect.
+ * Sign in. With a provider configured: Google first, email and password second.
+ * Without one, on the lab machine: a single local sign-in. The page never shows
+ * controls that cannot work. See auth/AuthProvider.tsx for what this protects.
  */
 
+import { ArrowRight } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
-import { AUTH_CONFIGURED, AUTH_DEV_BYPASS, useAuth } from '../auth/AuthProvider';
+import { AUTH_CONFIGURED, AUTH_LOCAL, useAuth } from '../auth/AuthProvider';
 import { BinaryRain } from '../components/BinaryRain';
 import { BrandMark } from '../components/BrandMark';
 
@@ -32,17 +34,12 @@ function GoogleLogo() {
   );
 }
 
-export function Login() {
-  const { user, signInWithGoogle, signInWithPassword, signInDev } = useAuth();
-  const location = useLocation();
-  const from = (location.state as { from?: string } | null)?.from ?? '/';
-
+function ProviderSignIn() {
+  const { signInWithGoogle, signInWithPassword } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  if (user) return <Navigate to={from} replace />;
 
   const submit = async (formEvent: FormEvent) => {
     formEvent.preventDefault();
@@ -50,6 +47,72 @@ export function Login() {
     setError(await signInWithPassword(email.trim(), password));
     setBusy(false);
   };
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn btn--google"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          const message = await signInWithGoogle();
+          if (message) {
+            setError(message);
+            setBusy(false);
+          }
+        }}
+      >
+        <GoogleLogo /> Continue with Google
+      </button>
+
+      <div className="auth__or">
+        <span>or</span>
+      </div>
+
+      <form className="auth__form" onSubmit={submit}>
+        <label className="field">
+          <span className="field__label">Work email</span>
+          <input
+            className="input input--lg"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(changeEvent) => setEmail(changeEvent.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field__label">Password</span>
+          <input
+            className="input input--lg"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(changeEvent) => setPassword(changeEvent.target.value)}
+          />
+        </label>
+        <button type="submit" className="btn btn--primary btn--block" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+
+      {error ? (
+        <p className="auth__error" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+export function Login() {
+  const { user, signInLocal } = useAuth();
+  const location = useLocation();
+  const from = (location.state as { from?: string } | null)?.from ?? '/';
+
+  if (user) return <Navigate to={from} replace />;
 
   return (
     <div className="auth">
@@ -67,79 +130,17 @@ export function Login() {
           </h1>
           <p className="auth__lead">to the DeceptionGraph console</p>
 
-          <button
-            type="button"
-            className="btn btn--google"
-            disabled={!AUTH_CONFIGURED || busy}
-            onClick={async () => {
-              setBusy(true);
-              const message = await signInWithGoogle();
-              if (message) {
-                setError(message);
-                setBusy(false);
-              }
-            }}
-          >
-            <GoogleLogo /> Continue with Google
-          </button>
-
-          <div className="auth__or">
-            <span>or</span>
-          </div>
-
-          <form className="auth__form" onSubmit={submit}>
-            <label className="field">
-              <span className="field__label">Work email</span>
-              <input
-                className="input input--lg"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                disabled={!AUTH_CONFIGURED}
-                onChange={(changeEvent) => setEmail(changeEvent.target.value)}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">Password</span>
-              <input
-                className="input input--lg"
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                disabled={!AUTH_CONFIGURED}
-                onChange={(changeEvent) => setPassword(changeEvent.target.value)}
-              />
-            </label>
-            <button
-              type="submit"
-              className="btn btn--primary btn--block"
-              disabled={!AUTH_CONFIGURED || busy}
-            >
-              {busy ? 'Signing in…' : 'Sign in'}
+          {AUTH_CONFIGURED ? (
+            <ProviderSignIn />
+          ) : AUTH_LOCAL ? (
+            <button type="button" className="btn btn--primary btn--block btn--lg" onClick={signInLocal}>
+              Enter the console <ArrowRight size={18} strokeWidth={2.2} />
             </button>
-          </form>
-
-          {error ? (
+          ) : (
             <p className="auth__error" role="alert">
-              {error}
+              Sign-in is not set up on this machine.
             </p>
-          ) : null}
-
-          {!AUTH_CONFIGURED ? (
-            <div className="auth__note">
-              <p>
-                Sign-in provider not connected yet. Set <code>VITE_SUPABASE_URL</code> and{' '}
-                <code>VITE_SUPABASE_ANON_KEY</code> in <code>frontend/.env.local</code>.
-              </p>
-              {AUTH_DEV_BYPASS ? (
-                <button type="button" className="btn btn--ghost btn--block" onClick={signInDev}>
-                  Continue as lab analyst (dev only)
-                </button>
-              ) : null}
-            </div>
-          ) : null}
+          )}
         </section>
         <p className="auth__foot">Access is limited to the lab SOC team.</p>
       </main>

@@ -135,7 +135,16 @@ function CameraRig({ view, focus }: { view: CameraView; focus: THREE.Vector3 | n
 
 /* ---------- the funnel ---------- */
 
-function Funnel({ depth }: { depth: RingId | null }) {
+function Funnel({
+  depth,
+  labels,
+  sectors,
+}: {
+  depth: RingId | null;
+  labels: boolean;
+  /** Decoys the source has reached; only their names are drawn. */
+  sectors: Set<string>;
+}) {
   const reachedDepth = depth === null ? -1 : RING_DEPTH[depth];
   const rings = RINGS.filter((ring) => ring.id !== 'crown');
 
@@ -172,11 +181,13 @@ function Funnel({ depth }: { depth: RingId | null }) {
               transparent
               opacity={reached ? 0.9 : 0.7}
             />
-            <Html position={[0, y + 0.08, -radius]} center zIndexRange={[10, 0]}>
-              <div className={reached ? 'c3ring c3ring--reached' : 'c3ring'} title={ring.meaning}>
-                {ring.label}
-              </div>
-            </Html>
+            {labels && reached ? (
+              <Html position={[0, y + 0.08, -radius]} center zIndexRange={[10, 0]}>
+                <div className={reached ? 'c3ring c3ring--reached' : 'c3ring'} title={ring.meaning}>
+                  {ring.label}
+                </div>
+              </Html>
+            ) : null}
           </group>
         );
       })}
@@ -211,12 +222,16 @@ function Funnel({ depth }: { depth: RingId | null }) {
         />
       ))}
 
-      <Html position={[-PERIMETER * SCALE * 0.7, 1.5, -PERIMETER * SCALE * 0.7]} center zIndexRange={[10, 0]}>
-        <div className="c3sector">SSH decoy</div>
-      </Html>
-      <Html position={[PERIMETER * SCALE * 0.7, 1.5, -PERIMETER * SCALE * 0.7]} center zIndexRange={[10, 0]}>
-        <div className="c3sector">Web decoy</div>
-      </Html>
+      {labels && sectors.has('ssh') ? (
+        <Html position={[-PERIMETER * SCALE * 0.7, 1.5, -PERIMETER * SCALE * 0.7]} center zIndexRange={[10, 0]}>
+          <div className="c3sector">SSH decoy</div>
+        </Html>
+      ) : null}
+      {labels && sectors.has('web') ? (
+        <Html position={[PERIMETER * SCALE * 0.7, 1.5, -PERIMETER * SCALE * 0.7]} center zIndexRange={[10, 0]}>
+          <div className="c3sector">Web decoy</div>
+        </Html>
+      ) : null}
 
       <primitive object={floor} />
     </group>
@@ -265,12 +280,15 @@ function LureNode({
   selected,
   awaiting,
   animate,
+  arrived,
   onSelect,
 }: {
   view: LureView;
   selected: boolean;
   awaiting: boolean;
   animate: boolean;
+  /** Reached while the screen was open (not already reached at load). */
+  arrived: boolean;
   onSelect: () => void;
 }) {
   const { lure, state } = view;
@@ -284,6 +302,16 @@ function LureNode({
   // history as fireworks on page load would be decoration.
   const previous = useRef(state);
   const [ignite, setIgnite] = useState(0);
+
+  // A lure only exists once reached, so it arrives by growing out of nothing,
+  // with a pulse if the attack reached it while you were watching.
+  useEffect(() => {
+    body.current?.scale.setScalar(0.001);
+    if (arrived && animate) setIgnite(1);
+    // Mount only: later state changes go through the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (previous.current === 'untouched' && state !== 'untouched' && animate) {
       setIgnite((count) => count + 1);
@@ -633,6 +661,7 @@ export default function Chakra3D({
   view,
   autoRotate,
   animate,
+  empty,
   onSelect,
 }: {
   model: WheelModel;
@@ -641,12 +670,25 @@ export default function Chakra3D({
   view: CameraView;
   autoRotate: boolean;
   animate: boolean;
+  /** No source yet: draw only the bare funnel, no lures or labels. */
+  empty: boolean;
   onSelect: (selection: ChakraSelection) => void;
 }) {
   const focus = useMemo(
     () => (selection?.kind === 'lure' ? positionOf(selection.id) : null),
     [selection],
   );
+  const reachedLures = useMemo(
+    () => (empty ? [] : [...model.lures.values()].filter((view) => view.state !== 'untouched')),
+    [model, empty],
+  );
+  const reachedSectors = useMemo(
+    () => new Set<string>(reachedLures.map((view) => view.lure.sector)),
+    [reachedLures],
+  );
+  // Lures that appear after the first moments on screen arrive with a pulse;
+  // the ones already reached at load simply grow in.
+  const sceneStart = useRef(performance.now());
 
   return (
     <Canvas
@@ -666,16 +708,19 @@ export default function Chakra3D({
       <directionalLight position={[4, 8, 6]} intensity={1.4} />
       <pointLight position={[0, CROWN_Y + 1.5, 0]} intensity={4} distance={6} color="#ff2d6a" />
 
-      <Funnel depth={model.depth} />
+      <Funnel depth={model.depth} labels={!empty} sectors={reachedSectors} />
       <Trail trail={model.trail} comet={animate} />
 
-      {[...model.lures.values()].map((lureView) => (
+      {/* Only lures the source has reached exist in the scene; the rest of the
+          map appears one lure at a time as the attack moves through it. */}
+      {reachedLures.map((lureView) => (
         <LureNode
           key={lureView.lure.id}
           view={lureView}
           selected={selection?.kind === 'lure' && selection.id === lureView.lure.id}
           awaiting={awaitingLures.has(lureView.lure.id)}
           animate={animate}
+          arrived={performance.now() - sceneStart.current > 1500}
           onSelect={() => onSelect({ kind: 'lure', id: lureView.lure.id })}
         />
       ))}

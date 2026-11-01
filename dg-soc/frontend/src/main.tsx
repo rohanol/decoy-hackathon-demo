@@ -2,6 +2,8 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
 import { App } from './App';
 import './styles/tokens.css';
 import './styles/app.css';
@@ -12,6 +14,7 @@ import './styles/response.css';
 import './styles/chakra3d.css';
 import './styles/evidence.css';
 import './styles/v12.css';
+import './styles/captions.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root is missing from index.html');

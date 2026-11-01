@@ -58,10 +58,34 @@ function IncidentCard({
 
       <KillChainStrip stagesObserved={incident.stages_observed} severity={incident.severity} />
 
-      <div className="inccard__meta mono">
-        {incident.case_kind ? `${incident.case_kind.replace(/_/g, ' ')} · ${incident.capture_mode} · ${incident.status} · ` : ''}
-        {incident.incident_id} · {incident.lab_run_id} · first {fullUtc(incident.first_seen)} ·
-        last {timeUtcZ(incident.last_seen)} · {duration(incident.first_seen, incident.last_seen)}
+      <div className="inccard__meta">
+        <span>
+          <em>Incident</em> {incident.incident_id}
+        </span>
+        {incident.case_kind ? (
+          <span>
+            <em>Case</em> {incident.case_kind.replace(/_/g, ' ')}
+          </span>
+        ) : null}
+        {incident.status ? (
+          <span>
+            <em>Status</em> {incident.status}
+          </span>
+        ) : null}
+        {incident.capture_mode ? (
+          <span>
+            <em>Mode</em> {incident.capture_mode}
+          </span>
+        ) : null}
+        <span>
+          <em>First seen</em> {fullUtc(incident.first_seen)}
+        </span>
+        <span>
+          <em>Last seen</em> {timeUtcZ(incident.last_seen)}
+        </span>
+        <span>
+          <em>Duration</em> {duration(incident.first_seen, incident.last_seen)}
+        </span>
       </div>
     </RouterLink>
   );

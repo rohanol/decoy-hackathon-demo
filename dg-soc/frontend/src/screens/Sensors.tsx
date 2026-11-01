@@ -31,7 +31,6 @@ interface SensorDef {
   decoy: string;
   port: string;
   what: string;
-  planned?: boolean;
   /** v1.2 decoy: shown as not on this backend until the backend reports it. */
   v12?: boolean;
 }
@@ -132,9 +131,9 @@ export function Sensors() {
       <div className="sensorgrid">
         {SENSORS.map((sensor) => {
           // A v1.2 decoy is only "on this backend" once the backend reports it.
-          const absent = sensor.planned || (sensor.v12 && !(health && sensor.id in health.sensors));
+          const absent = Boolean(sensor.v12 && !(health && sensor.id in health.sensors));
           const state = absent
-            ? { tone: 'neutral' as const, text: sensor.planned ? 'not deployed' : 'not on this backend' }
+            ? { tone: 'neutral' as const, text: 'not on this backend' }
             : sensorHealth(health, sensor.id);
           const activity = absent ? null : sensorActivity(health, sensor.id, now);
           const stats = bySensor.get(sensor.id);
@@ -144,7 +143,7 @@ export function Sensors() {
           return (
             <section
               key={sensor.id}
-              className={absent ? 'sensorcard sensorcard--planned' : 'sensorcard'}
+              className={absent ? 'sensorcard sensorcard--absent' : 'sensorcard'}
             >
               <header className="sensorcard__head">
                 <Dot tone={state.tone} />

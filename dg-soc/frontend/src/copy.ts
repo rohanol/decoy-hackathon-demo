@@ -113,7 +113,7 @@ export const COPY = {
   noiseCounterNote:
     'Deduplicated sensor records grouped by source IP and lab run. This is grouping compression, not a measured false-positive reduction: separate clients behind one address are pooled into one incident.',
 
-  lowPriorityTooltip: 'Scored below the noise threshold set in scoring.yaml.',
+  lowPriorityTooltip: 'Below the scoring.yaml noise threshold.',
 
   exportTooltip: 'JSON export, password hashes excluded.',
 

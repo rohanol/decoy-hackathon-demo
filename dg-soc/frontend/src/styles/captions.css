@@ -1,0 +1,102 @@
+/*
+ * Small descriptive text across the console. One caption style, set in IBM Plex
+ * Sans, tight and left-aligned with the value above it, instead of loose Inter
+ * at 12px. Loaded last so it wins over the screen stylesheets.
+ */
+
+.kpi__hint,
+.funnel__note,
+.rules__note,
+.incsec__note,
+.state__hint,
+.sensorcard__foot,
+.sensorcard__unit,
+.spotlight__desc,
+.evmodal__desc,
+.c3hud__sub,
+.c3hud--hint,
+.auth__lead,
+.auth__foot,
+.landing__lab,
+.graph__note,
+.decide__none,
+.inchero__score-hint,
+.timeline__count,
+.funnel__label,
+.feedstate,
+.toolbar__count,
+.inccard__count,
+.inccard__meta {
+  font-family: var(--font-caption);
+  font-size: 13px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.kpi__hint {
+  margin-top: 2px;
+  color: #8c8c88;
+}
+
+.kpi__label,
+.panel__title,
+.funnel__label {
+  font-family: var(--font-caption);
+  font-weight: 500;
+}
+
+.kpi__label {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+}
+
+/* ---------- overview panels: content centred in the card ---------- */
+
+.ovgrid2 .panel > .funnel,
+.ovgrid2 .panel > .rules {
+  margin-block: auto;
+}
+
+.funnel__headline {
+  font-family: var(--font-caption);
+  font-size: 19px;
+}
+
+.funnel__note,
+.rules__note {
+  margin-top: 20px;
+  color: #8c8c88;
+}
+
+.rule__name {
+  font-family: var(--font-caption);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* A v1.2 decoy the backend has not reported yet: present, but quiet. */
+.sensorcard--absent {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
+/* ---------- incident card meta ---------- */
+
+.inccard__count {
+  margin-left: auto;
+  color: var(--text-secondary);
+}
+
+.inccard__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  margin-top: 4px;
+  color: var(--text-secondary);
+}
+
+.inccard__meta em {
+  margin-right: 6px;
+  font-style: normal;
+  color: var(--text-muted);
+}

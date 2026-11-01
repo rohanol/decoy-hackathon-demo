@@ -760,7 +760,7 @@ a:hover {
 
 .sensorgrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
 }
 
@@ -782,10 +782,6 @@ a:hover {
   transform: translateY(-2px);
 }
 
-.sensorcard--planned {
-  opacity: 0.55;
-  border-style: dashed;
-}
 
 .sensorcard__head {
   display: flex;
