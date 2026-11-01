@@ -105,8 +105,10 @@ def test_one_case_per_session_per_run(client):
 
 def test_health_reports_last_event_per_sensor(client):
     h = client.get("/api/health").json()
-    assert h["ok"] is True and h["sensors"] == {"ssh-decoy-01": None, "web-decoy-01": None}  # v1.0 keys kept
-    assert set(h["sensor_health"]) == {"ssh-decoy-01", "web-decoy-01"}  # v1.1, see test_health.py
+    four = {"ssh-decoy-01": None, "web-decoy-01": None, "db-decoy-01": None, "file-decoy-01": None}
+    assert h["ok"] is True and h["sensors"] == four  # v1.0 keys kept; v1.2 adds the two new honeypots
+    assert set(h["sensor_health"]) == set(four)  # see test_health.py; the gateway is never a sensor
+    assert set(h["telemetry_health"]) == {"gateway-01", "demo-app-01"}
     post(client, [make_event("a")])
     assert client.get("/api/health").json()["sensors"]["ssh-decoy-01"] == "2026-11-01T04:30:00Z"
 

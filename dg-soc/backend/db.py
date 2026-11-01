@@ -12,8 +12,9 @@ from typing import Optional
 
 from . import links as linking
 from .config import Config, load_config
-from .models import IngestEvent, evidence_role, observation_kind, to_rfc3339
-from .rules import CREDENTIAL_RULES, SESSION_RULES, evaluate_incident, evaluate_investigation, r01
+from .models import IngestEvent, TelemetryRecord, evidence_role, observation_kind, to_rfc3339
+from .rules import (CHALLENGE_CREDENTIAL_RULES, CREDENTIAL_RULES, SESSION_RULES, evaluate_incident,
+                    evaluate_investigation, r01, r11)
 from .scoring import score_incident
 
 DEFAULT_DB = Path(__file__).parent / "data" / "dg.db"
@@ -116,17 +117,48 @@ CREATE TABLE IF NOT EXISTS ingest_counters (
     sensor_id TEXT PRIMARY KEY,
     duplicate INTEGER NOT NULL DEFAULT 0
 );
+-- v1.2 (migration 4): gateway and demo-app telemetry. Never events: no case, rule or score reads it.
+CREATE TABLE IF NOT EXISTS telemetry (
+    tseq               INTEGER PRIMARY KEY AUTOINCREMENT,
+    telemetry_id       TEXT NOT NULL UNIQUE,
+    telemetry_version  TEXT NOT NULL,
+    source_id          TEXT NOT NULL,
+    record_id          TEXT NOT NULL,
+    record_type        TEXT NOT NULL,
+    occurred_at        TEXT NOT NULL,
+    ingested_at        TEXT NOT NULL,
+    lab_run_id         TEXT NOT NULL,
+    capture_mode       TEXT NOT NULL,
+    ingest_namespace   TEXT NOT NULL,
+    origin_record_id   TEXT,
+    gateway_request_id TEXT,
+    gateway_session_ref TEXT,
+    attributes         TEXT NOT NULL,
+    UNIQUE (ingest_namespace, source_id, record_id)
+);
+CREATE INDEX IF NOT EXISTS idx_telemetry_request ON telemetry(gateway_request_id);
+CREATE INDEX IF NOT EXISTS idx_telemetry_session ON telemetry(gateway_session_ref, lab_run_id, capture_mode);
+CREATE TABLE IF NOT EXISTS telemetry_heartbeats (
+    collector_id TEXT NOT NULL,
+    source_id    TEXT NOT NULL,
+    received_at  TEXT NOT NULL,
+    body         TEXT NOT NULL,
+    PRIMARY KEY (collector_id, source_id)
+);
 """
 
 # PRAGMA user_version: 0 = v1.0 layout, 1 = runs table + namespaced dedup (PR 2),
 # 2 = session cases, credential cases and investigations (PR 3),
-# 3 = token links carry attribution and candidate issuances (PR 4).
-DB_VERSION = 3
+# 3 = token links carry attribution and candidate issuances (PR 4),
+# 4 = gateway and demo-app telemetry tables (contract v1.2); no existing row is rewritten.
+DB_VERSION = 4
 LINK_COLUMNS_V3 = (("attribution", "TEXT"), ("candidate_issuance_ids", "TEXT NOT NULL DEFAULT '[]'"))
 ACTIVE_RUN_MINUTES = 15
 ELIGIBLE_MINUTES = 10           # M2 refuses a block on older web evidence (response/router.py)
 HEARTBEAT_FRESH_SECONDS = 30    # adapter sends every 10 s
 ACTIVITY_MINUTES = 5
+CORRELATION_SECONDS = 30        # a decision and its upstream record further apart than this conflict
+SOURCES_FILE = Path(__file__).resolve().parents[1] / "contracts" / "sources.json"
 
 # v0 -> v1. SQLite cannot drop the old UNIQUE(sensor_id, source_record_id) in place, so the
 # events table is rebuilt once: every row is copied unchanged, seq included. Runs that already
@@ -206,9 +238,16 @@ DROP TABLE incidents;
 ALTER TABLE incidents_v2 RENAME TO incidents;
 """
 
-SENSORS = ("ssh-decoy-01", "web-decoy-01")
-SSH = "ssh-decoy-01"
-SESSION_KINDS = ("ssh_session", "ssh_unsessioned", "web_session", "web_activity")
+SENSORS = ("ssh-decoy-01", "web-decoy-01", "db-decoy-01", "file-decoy-01")  # the four honeypots
+TELEMETRY_SOURCES = ("gateway-01", "demo-app-01")  # never honeypots
+SSH, WEB = "ssh-decoy-01", "web-decoy-01"
+CHALLENGE_SENSORS = ("db-decoy-01", "file-decoy-01")  # salted-proof logins: R11, never R01
+CASE_PREFIX = {"db-decoy-01": "db", "file-decoy-01": "file"}
+SESSION_KINDS = ("ssh_session", "ssh_unsessioned", "web_session", "web_activity",
+                 "db_session", "db_activity", "file_session", "file_activity")
+RESPONSE_SCOPE = {"enforced_on": [WEB], "not_enforced_on": [s for s in SENSORS if s != WEB]}
+COVERAGE_NOTE = ("Counts only the records demo-app-01 logged and the backend received. Missing records do not "
+                 "show that the app was not contacted.")
 STAGE_ORDER = ["recon", "credential_attack", "exploit_attempt", "post_access", "lure_access", "data_access"]
 LINK_FIELDS = ["link_id", "from_event_id", "to_event_id", "from_sensor", "to_sensor",
                "kind", "basis", "status", "decided_at", "rationale", "from_incident_id", "to_incident_id",
@@ -232,6 +271,9 @@ def case_kind_for(sensor_id: str, session_id: Optional[str]) -> tuple:
     """(case_kind, grouping_basis) for an event, per the table in contracts/API.md."""
     if sensor_id == SSH:
         return ("ssh_session", "sensor_session") if session_id else ("ssh_unsessioned", "inactivity_5min")
+    if sensor_id in CASE_PREFIX:  # v1.2: MySQL connection / SMB session, else an inactivity bucket
+        prefix = CASE_PREFIX[sensor_id]
+        return (f"{prefix}_session", "sensor_session") if session_id else (f"{prefix}_activity", "inactivity_5min")
     return ("web_session", "sensor_session") if session_id else ("web_activity", "inactivity_5min")
 
 
@@ -299,6 +341,10 @@ class Database:
                     c.execute(f"ALTER TABLE links ADD COLUMN {name} {decl}")
             if version == 1:
                 self._migrate_v1_v2()
+            c.execute(f"PRAGMA user_version = {DB_VERSION}")
+        elif has_events and version == 3:
+            # v3 -> v4: telemetry tables only (created below); no row is touched.
+            self._backup("v3")
             c.execute(f"PRAGMA user_version = {DB_VERSION}")
         c.executescript(SCHEMA)  # creates whatever is missing; no-op on an up-to-date file
         if not has_events:
@@ -407,6 +453,8 @@ class Database:
 
     def _insert_one(self, c: sqlite3.Connection, ev: IngestEvent, touched: set, sources: set) -> tuple:
         run = c.execute("SELECT capture_mode FROM runs WHERE lab_run_id=?", (ev.lab_run_id,)).fetchone()
+        if run is None:  # v1.2: gateway or demo-app telemetry may have fixed the run's mode first
+            run = c.execute("SELECT capture_mode FROM telemetry WHERE lab_run_id=? LIMIT 1", (ev.lab_run_id,)).fetchone()
         if run and run["capture_mode"] != ev.capture_mode:
             return ("rejected", f"lab_run_id: run {ev.lab_run_id} is {run['capture_mode']}; "
                                 f"{ev.capture_mode} events need their own run")
@@ -486,10 +534,10 @@ class Database:
                               event_count=1, case_kind=kind, grouping_basis=basis, sensor_id=sensor_id,
                               session_id=session_id, capture_mode=mode, case_key=key)
 
-    def _source_auth_events(self, c, src_ip, run, mode) -> list[dict]:
+    def _source_auth_events(self, c, src_ip, run, mode, sensor_id=SSH) -> list[dict]:
         return [self._event_dict(r) for r in c.execute(
             "SELECT * FROM events WHERE src_ip=? AND lab_run_id=? AND capture_mode=? AND sensor_id=? "
-            "AND event_type IN ('auth_failure', 'auth_success') ORDER BY seq", (src_ip, run, mode, SSH))]
+            "AND event_type IN ('auth_failure', 'auth_success') ORDER BY seq", (src_ip, run, mode, sensor_id))]
 
     def _refresh_credential_cases(self, c, sources: set) -> set:
         """Password guessing across sessions (R01) gets its own credential_attempts case per
@@ -497,9 +545,7 @@ class Database:
         out = set()
         for src_ip, run, mode in sorted(sources):
             pool = self._source_auth_events(c, src_ip, run, mode)
-            if not pool:
-                continue
-            for f in r01.evaluate(pool, self.cfg):
+            for f in r01.evaluate(pool, self.cfg) if pool else []:
                 user = f["key"].removeprefix("user=")
                 key = f"credential_attempts|{src_ip}|{run}|{mode}|{user}"
                 row = c.execute("SELECT incident_id FROM incidents WHERE case_key=?", (key,)).fetchone()
@@ -511,6 +557,18 @@ class Database:
                                            event_count=0, case_kind="credential_attempts",
                                            grouping_basis="credential_window", capture_mode=mode,
                                            username=user, case_key=key))
+            # v1.2: one credential case per challenge-response decoy, source, user, run and mode (R11).
+            for sensor in CHALLENGE_SENSORS:
+                spool = self._source_auth_events(c, src_ip, run, mode, sensor)
+                for f in r11.evaluate(spool, self.cfg) if spool else []:
+                    user = f["key"].split("|user=", 1)[1]
+                    key = f"credential_attempts|{sensor}|{src_ip}|{run}|{mode}|{user}"
+                    if not c.execute("SELECT 1 FROM incidents WHERE case_key=?", (key,)).fetchone():
+                        first = min(e["occurred_at"] for e in spool)
+                        out.add(self._new_case(c, "inc", src_ip=src_ip, lab_run_id=run, first_seen=first,
+                                               last_seen=first, event_count=0, case_kind="credential_attempts",
+                                               grouping_basis="credential_window", capture_mode=mode,
+                                               sensor_id=sensor, username=user, case_key=key))
             # existing credential cases of this source re-run on the larger pool
             out |= {r["incident_id"] for r in c.execute(
                 "SELECT incident_id FROM incidents WHERE case_kind='credential_attempts' AND src_ip=? "
@@ -613,7 +671,7 @@ class Database:
         if not assets:
             return None
         for r in c.execute(
-                "SELECT * FROM events WHERE event_type='command_input' AND schema_version='1.1' AND sensor_id=? "
+                "SELECT * FROM events WHERE event_type='command_input' AND schema_version IN ('1.1', '1.2') AND sensor_id=? "
                 "AND lab_run_id=? AND capture_mode=? AND occurred_at<=? ORDER BY occurred_at DESC, seq DESC",
                 (tok["planted_on"], use["lab_run_id"], use["capture_mode"], use["occurred_at"])):
             e = self._event_dict(r)
@@ -725,9 +783,11 @@ class Database:
                           (bounds[0], bounds[1], bounds[2] or 0, incident_id))
         elif kind == "credential_attempts":
             links = []
-            pool = [e for e in self._source_auth_events(c, case["src_ip"], case["lab_run_id"], case["capture_mode"])
+            sensor = case["sensor_id"] or SSH  # SSH credential cases predate the sensor column
+            pool = [e for e in self._source_auth_events(c, case["src_ip"], case["lab_run_id"], case["capture_mode"], sensor)
                     if e["attributes"].get("username", "") == case["username"]]
-            fresh = evaluate_incident(case, pool, self.cfg, CREDENTIAL_RULES)
+            rules = CHALLENGE_CREDENTIAL_RULES if sensor in CHALLENGE_SENSORS else CREDENTIAL_RULES
+            fresh = evaluate_incident(case, pool, self.cfg, rules)
             cited = {i for f in fresh for i in f["evidence_event_ids"]}
             times = [e["occurred_at"] for e in pool if e["event_id"] in cited]
             if times:
@@ -1041,13 +1101,24 @@ class Database:
             if observed is None or datetime.now(timezone.utc) - _ts(observed) >= timedelta(minutes=ELIGIBLE_MINUTES):
                 reasons.append({"code": "stale_observation",
                                 "message": f"no web-decoy-01 event from this address in the last {ELIGIBLE_MINUTES} minutes"})
+            if r["sensor_id"] in CHALLENGE_SENSORS:
+                reasons.append({"code": "response_unsupported_sensor",
+                                "message": f"{r['sensor_id']} has no response capability; the only block is on web-decoy-01"})
             return {"incident_id": incident_id, "eligible": not reasons, "target_ip": target, "lab_run_id": run,
                     "capture_mode": mode, "reasons": reasons, "last_web_observation_at": observed,
-                    "checked_at": _now()}
+                    "checked_at": _now(), "response_scope": RESPONSE_SCOPE}
 
     # ---- collector health (PR 5) ----
     def record_heartbeat(self, hb) -> None:
-        body = hb.model_dump(mode="json")
+        body = hb.model_dump(mode="json", exclude_none=hb.source_id is not None)
+        if hb.source_id is not None:  # v1.2: the gateway and demo app are not sensors
+            body = {k: v for k, v in body.items() if k != "sensor_id"}
+            self._write(lambda c: c.execute(
+                "INSERT INTO telemetry_heartbeats (collector_id, source_id, received_at, body) VALUES (?,?,?,?) "
+                "ON CONFLICT(collector_id, source_id) DO UPDATE SET received_at=excluded.received_at, body=excluded.body",
+                (hb.collector_id, hb.source_id, _now(), json.dumps(body))))
+            return
+        body.pop("source_id", None)
         self._write(lambda c: c.execute(
             "INSERT INTO collector_heartbeats (collector_id, sensor_id, received_at, body) VALUES (?,?,?,?) "
             "ON CONFLICT(collector_id, sensor_id) DO UPDATE SET received_at=excluded.received_at, body=excluded.body",
@@ -1076,27 +1147,55 @@ class Database:
                        "backlog_records": None, "oldest_backlog_age_s": None, "error_count": None, "ingest": None,
                        "clock_skew_s": None, "last_event_at": last["occ"]}
                 if hb:
-                    # Stored rows may predate the canonical heartbeat wire form.
-                    from .models import Heartbeat
-                    b = json.loads(hb["body"])
-                    if "sensor_process" in b:
-                        b = Heartbeat.model_validate(b).model_dump(mode="json")
-                    received = _ts(hb["received_at"])
-                    fresh = (now - received).total_seconds() < HEARTBEAT_FRESH_SECONDS
-                    state = b["process_state"]
-                    row.update({
-                        "service": {"running": "up", "stopped": "down"}.get(state, "unknown") if fresh else "unknown",
-                        "collection": "ok" if fresh else "stale",
-                        "collector_id": hb["collector_id"], "heartbeat_at": hb["received_at"],
-                        "process_state": state, "last_read_at": b["last_read_at"],
-                        "last_ingest_at": b["last_ingest_at"], "backlog_records": b["backlog_records"],
-                        "oldest_backlog_age_s": b["oldest_backlog_age_s"], "error_count": b["error_count"],
-                        "ingest": {**b["ingest"],
-                                   "accepted": b["ingest"]["accepted"] if b["ingest"]["accepted"] is not None else counts,
-                                   "duplicate": b["ingest"]["duplicate"] if b["ingest"]["duplicate"] is not None else dup["duplicate"] if dup else 0},
-                        "clock_skew_s": round((_ts(b["sent_at"]) - received).total_seconds(), 3),
-                    })
+                    row.update(self._heartbeat_fields(hb, now, counts, dup["duplicate"] if dup else 0))
                 out[sensor] = row
+        return out
+
+    @staticmethod
+    def _heartbeat_fields(hb, now, counts, duplicates) -> dict:
+        """The latest heartbeat translated to M1's CollectorHealth names."""
+        # Stored rows may predate the canonical heartbeat wire form.
+        from .models import Heartbeat
+        b = json.loads(hb["body"])
+        if "sensor_process" in b:
+            b = Heartbeat.model_validate(b).model_dump(mode="json")
+        received = _ts(hb["received_at"])
+        fresh = (now - received).total_seconds() < HEARTBEAT_FRESH_SECONDS
+        state = b["process_state"]
+        return {
+            "service": {"running": "up", "stopped": "down"}.get(state, "unknown") if fresh else "unknown",
+            "collection": "ok" if fresh else "stale",
+            "collector_id": hb["collector_id"], "heartbeat_at": hb["received_at"],
+            "process_state": state, "last_read_at": b.get("last_read_at"),
+            "last_ingest_at": b.get("last_ingest_at"), "backlog_records": b.get("backlog_records"),
+            "oldest_backlog_age_s": b.get("oldest_backlog_age_s"), "error_count": b.get("error_count"),
+            "ingest": {**b["ingest"],
+                       "accepted": b["ingest"]["accepted"] if b["ingest"]["accepted"] is not None else counts,
+                       "duplicate": b["ingest"]["duplicate"] if b["ingest"]["duplicate"] is not None else duplicates},
+            "clock_skew_s": round((_ts(b["sent_at"]) - received).total_seconds(), 3),
+        }
+
+    def telemetry_health(self) -> dict:
+        """v1.2: the gateway and demo app, in the same shape as sensor_health. Not honeypots."""
+        now = datetime.now(timezone.utc)
+        out = {}
+        with self.snapshot():
+            for source in TELEMETRY_SOURCES:
+                hb = self.conn.execute("SELECT * FROM telemetry_heartbeats WHERE source_id=? "
+                                       "ORDER BY received_at DESC LIMIT 1", (source,)).fetchone()
+                last = self.conn.execute("SELECT MAX(occurred_at) AS occ, MAX(ingested_at) AS ing, COUNT(*) AS n "
+                                         "FROM telemetry WHERE source_id=?", (source,)).fetchone()
+                if last["ing"] is None:
+                    activity = "none"
+                else:
+                    activity = "recent" if now - _ts(last["ing"]) < timedelta(minutes=ACTIVITY_MINUTES) else "quiet"
+                row = {"service": "unknown", "collection": "never", "activity": activity, "collector_id": None,
+                       "heartbeat_at": None, "process_state": None, "last_read_at": None, "last_ingest_at": None,
+                       "backlog_records": None, "oldest_backlog_age_s": None, "error_count": None, "ingest": None,
+                       "clock_skew_s": None, "last_record_at": last["occ"], "counted_as_honeypot": False}
+                if hb:
+                    row.update(self._heartbeat_fields(hb, now, last["n"], 0))
+                out[source] = row
         return out
 
     # ---- source profiles (a view; never scored) ----
@@ -1144,3 +1243,189 @@ class Database:
                 "first_seen": span[0], "last_seen": span[1], "sensors": sensors,
                 "attempted_usernames": sorted(users)[:50], "client_claims": claims,
                 "case_ids": case_ids, "note": PROFILE_NOTE}
+
+    # ---- telemetry (contract v1.2): gateway and demo app; never events, never scored ----
+    def ingest_telemetry(self, records: list[TelemetryRecord]) -> list[tuple]:
+        """Store records in one transaction. Returns ("stored", record) | ("duplicate", None) |
+        ("rejected", reason) per record. Telemetry never creates or activates a run."""
+        def work(c):
+            return [self._insert_telemetry(c, r) for r in records]
+        return self._write(work)
+
+    def _insert_telemetry(self, c, r: TelemetryRecord) -> tuple:
+        other = "replay" if r.capture_mode == "live" else "live"
+        if c.execute("SELECT 1 FROM runs WHERE lab_run_id=? AND capture_mode=?", (r.lab_run_id, other)).fetchone() \
+                or c.execute("SELECT 1 FROM telemetry WHERE lab_run_id=? AND capture_mode=? LIMIT 1",
+                             (r.lab_run_id, other)).fetchone():
+            return ("rejected", f"lab_run_id: run {r.lab_run_id} is {other}; {r.capture_mode} records need their own run")
+        namespace = "live" if r.capture_mode == "live" else f"replay:{r.lab_run_id}"
+        if c.execute("SELECT 1 FROM telemetry WHERE ingest_namespace=? AND source_id=? AND record_id=?",
+                     (namespace, r.source_id, r.record_id)).fetchone():
+            return ("duplicate", None)
+        a = r.attributes
+        cur = c.execute(
+            "INSERT INTO telemetry (telemetry_id, telemetry_version, source_id, record_id, record_type, occurred_at, "
+            "ingested_at, lab_run_id, capture_mode, ingest_namespace, origin_record_id, gateway_request_id, "
+            "gateway_session_ref, attributes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("tel_" + uuid.uuid4().hex[:12], r.telemetry_version, r.source_id, r.record_id, r.record_type,
+             to_rfc3339(r.occurred_at), _now(), r.lab_run_id, r.capture_mode, namespace, r.origin_record_id,
+             a.get("gateway_request_id"), a.get("gateway_session_ref"), json.dumps(a)))
+        return ("stored", self._telemetry_dict(c.execute("SELECT * FROM telemetry WHERE tseq=?",
+                                                          (cur.lastrowid,)).fetchone()))
+
+    @staticmethod
+    def _telemetry_dict(r) -> dict:
+        return {"telemetry_id": r["telemetry_id"], "telemetry_seq": r["tseq"], "telemetry_version": r["telemetry_version"],
+                "record_id": r["record_id"], "source_id": r["source_id"], "record_type": r["record_type"],
+                "occurred_at": r["occurred_at"], "ingested_at": r["ingested_at"], "lab_run_id": r["lab_run_id"],
+                "capture_mode": r["capture_mode"], "ingest_namespace": r["ingest_namespace"],
+                "origin_record_id": r["origin_record_id"], "attributes": json.loads(r["attributes"])}
+
+    def list_telemetry(self, source_id=None, record_type=None, lab_run_id=None, capture_mode=None,
+                       gateway_request_id=None, since_seq=0, limit=200) -> dict:
+        sql, args = "SELECT * FROM telemetry WHERE tseq > ?", [since_seq]
+        for col, val in (("source_id", source_id), ("record_type", record_type), ("lab_run_id", lab_run_id),
+                         ("capture_mode", capture_mode), ("gateway_request_id", gateway_request_id)):
+            if val:
+                sql += f" AND {col}=?"
+                args.append(val)
+        sql += " ORDER BY tseq LIMIT ?"
+        args.append(limit)
+        items = [self._telemetry_dict(r) for r in self.conn.execute(sql, args)]
+        return {"items": items, "next_seq": items[-1]["telemetry_seq"] if items else since_seq}
+
+    def _upstream_events(self, gateway_request_id: str) -> list[dict]:
+        """Honeypot events whose own verified gateway context names this request."""
+        return [self._event_dict(r) for r in self.conn.execute(
+            "SELECT * FROM events WHERE json_extract(attributes, '$.ingress.gateway_context')='verified' "
+            "AND json_extract(attributes, '$.ingress.gateway_request_id')=? ORDER BY seq", (gateway_request_id,))]
+
+    def gateway_request(self, gateway_request_id: str, lab_run_id: Optional[str] = None) -> Optional[dict]:
+        """Requested routing, the gateway's view of the result and the upstream's own records, joined
+        only through the verified gateway request id (contract v1.2)."""
+        with self.snapshot():
+            rows = [self._telemetry_dict(r) for r in self.conn.execute(
+                "SELECT * FROM telemetry WHERE gateway_request_id=? ORDER BY tseq", (gateway_request_id,))]
+            events = self._upstream_events(gateway_request_id)
+        if lab_run_id:
+            rows = [r for r in rows if r["lab_run_id"] == lab_run_id]
+            events = [e for e in events if e["lab_run_id"] == lab_run_id]
+        decision = next((r for r in rows if r["record_type"] == "route_decision"), None)
+        result = next((r for r in rows if r["record_type"] == "upstream_result"), None)
+        apps = [r for r in rows if r["record_type"] == "app_request"]
+        if decision is None and not events and not apps:
+            return None
+        handling = [{"kind": "event", "event_id": e["event_id"], "sensor_id": e["sensor_id"], "event_type": e["event_type"],
+                     "incident_id": e["incident_id"], "occurred_at": e["occurred_at"]} for e in events]
+        handling += [{"kind": "telemetry", "record_id": r["record_id"], "source_id": r["source_id"],
+                      "app_request_id": r["attributes"]["app_request_id"], "occurred_at": r["occurred_at"]} for r in apps]
+        status, reasons = self._correlate(decision, events, apps)
+        anchor = decision or (events[0] if events else apps[0])
+        out = {"gateway_request_id": gateway_request_id, "lab_run_id": anchor["lab_run_id"],
+               "capture_mode": anchor["capture_mode"], "decision": None, "gateway_observed_upstream": None,
+               "upstream_handling": handling, "correlation": {"status": status, "reasons": reasons},
+               "note": "The decision is what the gateway requested; upstream_handling lists the upstream's own records "
+                       "that carry this verified gateway request id."}
+        if decision:
+            a = decision["attributes"]
+            out["decision"] = {"record_id": decision["record_id"], "decision": a["decision"], "upstream_id": a["upstream_id"],
+                               "reasons": a["reasons"], "indicator_classes": a.get("indicator_classes", []),
+                               "client_ip": a["client_ip"], "gateway_session_ref": a.get("gateway_session_ref"),
+                               "routing_policy_id": a["routing_policy_id"],
+                               "routing_policy_revision": a["routing_policy_revision"],
+                               "pin_scope": a["pin"]["scope"], "occurred_at": decision["occurred_at"]}
+        if result:
+            a = result["attributes"]
+            out["gateway_observed_upstream"] = {"record_id": result["record_id"], "upstream_id": a["upstream_id"],
+                                                "outcome": a["outcome"], "status_code": a.get("status_code")}
+        return out
+
+    @staticmethod
+    def _correlate(decision, events, apps) -> tuple:
+        if decision is None:
+            return "upstream_only", []
+        if not events and not apps:
+            return "gateway_only", []
+        a = decision["attributes"]
+        reasons = []
+        upstream = [(e["sensor_id"], e["src_ip"], e) for e in events] + \
+                   [(r["source_id"], r["attributes"]["src_ip"], r) for r in apps]
+        if any(src != a["upstream_id"] for src, _, _ in upstream):
+            reasons.append("wrong_upstream")
+        if any(ip != a["client_ip"] for _, ip, _ in upstream):
+            reasons.append("client_mismatch")
+        if any((rec["lab_run_id"], rec["capture_mode"]) != (decision["lab_run_id"], decision["capture_mode"])
+               for _, _, rec in upstream):
+            reasons.append("run_mismatch")
+        if any(abs((_ts(rec["occurred_at"]) - _ts(decision["occurred_at"])).total_seconds()) > CORRELATION_SECONDS
+               for _, _, rec in upstream):
+            reasons.append("time_skew")
+        # One gateway request is handled once: several events of one decoy request share its request_id.
+        handled = {("event", e["attributes"].get("request_id") or e["event_id"]) for e in events} | \
+                  {("app", r["attributes"]["app_request_id"]) for r in apps}
+        if len(handled) > 1:
+            reasons.append("context_reused")
+        return ("conflict", reasons) if reasons else ("observed", [])
+
+    def incident_routing(self, incident_id: str) -> dict:
+        """The case's gateway requests, sessions and normal-app contact, with telemetry coverage."""
+        with self.snapshot():
+            r = self.conn.execute("SELECT lab_run_id, capture_mode FROM incidents WHERE incident_id=?",
+                                  (incident_id,)).fetchone()
+            run, mode = r["lab_run_id"], r["capture_mode"]
+            owners = self._case_event_owners(incident_id) or ["-"]
+            events = [self._event_dict(x) for x in self.conn.execute(
+                f"SELECT * FROM events WHERE incident_id IN ({','.join('?' * len(owners))}) AND sensor_id=? ORDER BY seq",
+                owners + [WEB])]
+            ingress = {"verified": 0, "absent": 0, "invalid": 0}
+            request_ids, session_refs = [], []
+            for e in events:
+                ing = e["attributes"].get("ingress") if e["schema_version"] == "1.2" else None
+                if not isinstance(ing, dict):
+                    continue
+                ingress[ing["gateway_context"]] += 1
+                if ing["gateway_context"] == "verified":
+                    if ing["gateway_request_id"] not in request_ids:
+                        request_ids.append(ing["gateway_request_id"])
+                    if ing.get("gateway_session_ref") and ing["gateway_session_ref"] not in session_refs:
+                        session_refs.append(ing["gateway_session_ref"])
+            app_rows = []
+            if session_refs:
+                app_rows = [self._telemetry_dict(x) for x in self.conn.execute(
+                    f"SELECT * FROM telemetry WHERE source_id='demo-app-01' AND record_type='app_request' "
+                    f"AND lab_run_id=? AND capture_mode=? AND gateway_session_ref IN ({','.join('?' * len(session_refs))}) "
+                    "ORDER BY occurred_at, tseq", [run, mode] + session_refs)]
+            span = self.conn.execute(
+                "SELECT MIN(occurred_at), MAX(occurred_at), COUNT(*) FROM telemetry WHERE source_id='demo-app-01' "
+                "AND lab_run_id=? AND capture_mode=?", (run, mode)).fetchone()
+        requests = []
+        for gw in request_ids:
+            g = self.gateway_request(gw)
+            d = g["decision"] or {}
+            requests.append({"gateway_request_id": gw, "decision": d.get("decision"), "reasons": d.get("reasons", []),
+                             "correlation_status": g["correlation"]["status"]})
+        records = [{"record_id": x["record_id"], "gateway_request_id": x["attributes"].get("gateway_request_id"),
+                    "method": x["attributes"]["method"], "path": x["attributes"]["path"],
+                    "status_code": x["attributes"]["status_code"], "occurred_at": x["occurred_at"]} for x in app_rows]
+        n = len(records)
+        if n:
+            statement = (f"{n} normal-app request{'s' if n != 1 else ''} recorded in this case's gateway session(s) "
+                         f"between {records[0]['occurred_at']} and {records[-1]['occurred_at']}. {COVERAGE_NOTE}")
+        elif span[2]:
+            statement = (f"No normal-app request recorded in this case's gateway session(s); demo-app-01 records for "
+                         f"this run span {span[0]} to {span[1]}. {COVERAGE_NOTE}")
+        else:
+            statement = f"No demo-app-01 records for this run. {COVERAGE_NOTE}"
+        return {"incident_id": incident_id, "gateway_requests": requests, "gateway_session_refs": session_refs,
+                "ingress": ingress,
+                "normal_app_contact": {"records": records, "coverage": {
+                    "source_id": "demo-app-01", "lab_run_id": run, "first_record_at": span[0], "last_record_at": span[1],
+                    "records_in_run": span[2], "collection": self.telemetry_health()["demo-app-01"]["collection"]},
+                    "statement": statement}}
+
+    @staticmethod
+    def sources() -> dict:
+        """contracts/sources.json, with the honeypot count the cards use."""
+        reg = json.loads(SOURCES_FILE.read_text(encoding="utf-8"))
+        return {"registry_version": reg["registry_version"], "honeypots": reg["honeypots"],
+                "telemetry_sources": reg["telemetry_sources"], "honeypot_count": len(reg["honeypots"])}

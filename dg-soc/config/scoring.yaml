@@ -1,5 +1,5 @@
 # Owner: M3. Change only by PR. Never change weights to make the demo look dramatic.
-version: 1
+version: 2
 cap: 100
 weights:
   R01: 25   # repeated SSH guessing
@@ -10,6 +10,8 @@ weights:
   R07: 15   # web attack attempt
   R08: 5    # web path probing
   R09: 15   # honeytoken reuse, counts only after confirmation
+  R11: 20   # repeated MySQL/SMB login attempts (v1.2)
+  R12: 15   # file written to an emulated SMB share, stored inert (v1.2)
 needs_confirmation: [R05, R09]
 severity:          # inclusive lower bounds
   low: 0
