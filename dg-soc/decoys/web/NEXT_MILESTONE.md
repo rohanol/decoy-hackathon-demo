@@ -16,8 +16,11 @@ research-portal presentation. `WEB_PORTAL_THEME=research` selects that shell
 independently; `WEB_PORTAL_THEME=legacy` retains the older appearance. New
 `CAPTURE_MODE` accepts `live`/`replay`; run identity is still `LAB_RUN_ID`.
 
-The shell mirrors M1's original Research Portal visual reference: navy/teal
-header, navigation, cards, system fonts and fictional-data footer. It never
+The shell follows the user's corrected black/green design, using the existing
+SOC tokens (#050505 base, #0c0c0c cards, #f4f4f2 text and #39ff88 accents).
+The normal demo portal receives the same styling correction in a focused
+follow-up to M1. Navigation, cards, system fonts and fictional-data footer
+remain. This supersedes M1's original light portal reference. It never
 copies the normal app's accounts or bearer cookies. Existing `svc_portal` lab
 login and the decoy's own session handling remain unchanged. Reports and
 resources are canned; participant text is not interpolated into the HTML.

@@ -22,9 +22,17 @@ const path = require('node:path');
   try {
     await page.goto(normal);
     await page.getByRole('heading', { level: 1 }).waitFor();
+    const theme = () => page.evaluate(() => ({
+      background: getComputedStyle(document.body).backgroundColor,
+      text: getComputedStyle(document.body).color,
+      card: getComputedStyle(document.querySelector('.hero__card, .card')).backgroundColor,
+    }));
+    const expected = { background: 'rgb(5, 5, 5)', text: 'rgb(244, 244, 242)', card: 'rgb(12, 12, 12)' };
+    assert.deepEqual(await theme(), expected);
     await page.screenshot({ path: path.join(shots, 'normal-portal.png'), fullPage: true });
     await page.goto(decoy);
     await page.getByRole('heading', { name: 'Research that connects people and ideas.' }).waitFor();
+    assert.deepEqual(await theme(), expected);
     await page.screenshot({ path: path.join(shots, 'decoy-portal.png'), fullPage: true });
     await page.goto(decoy + '/login');
     await page.getByRole('heading', { name: 'Sign in', exact: true }).waitFor();
@@ -43,7 +51,8 @@ const path = require('node:path');
     await page.screenshot({ path: path.join(shots, 'decoy-mobile.png'), fullPage: true });
     assert.deepEqual(errors, []);
     assert.deepEqual(external, []);
-    const receipt = { checks: 6, browser: 'installed ' + (process.env.DG_BROWSER_CHANNEL || 'msedge'),
+    const receipt = { checks: 7, browser: 'installed ' + (process.env.DG_BROWSER_CHANNEL || 'msedge'),
+      darkTheme: expected,
       normalAndDecoyRendered: true, actualArchiveDownload: 'backup.zip', scriptExecuted: false,
       mobileOverflow: false, pageErrors: errors, externalRequests: external };
     fs.writeFileSync(path.join(shots, 'browser-receipt.json'), JSON.stringify(receipt, null, 2) + '\n');

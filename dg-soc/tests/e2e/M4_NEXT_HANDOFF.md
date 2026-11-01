@@ -8,7 +8,7 @@ the next commit includes the tests and documentation in this handoff.
 
 - Opt-in web schema 1.2; legacy 1.0/1.1 behavior remains supported. Existing
   Compose is not switched to 1.2 in this PR.
-- Original research-portal shell matching M1's visual reference, without
+- Research-portal shell with the user's corrected existing black/green palette, without
   copying the normal app's credentials or session.
 - Inert `/backup/backup.zip`: five fixed regular text/CSV entries, deterministic
   archive/entry digests, token placements and distinct per-serving issuance IDs.
@@ -50,7 +50,7 @@ Windows, Python 3.12, installed Edge. No Docker daemon was available.
 | New focused producer tests (included above) | **47 tests**: real PyMySQL, malformed wire, privacy, bounds, ZIP, context, guarded target refusal |
 | M3 backend boundary, actual loopback HTTP/protocol | **9 checks**, 36 actual generated producer records accepted |
 | Actual M1 app + M2 gateway + M4 decoy | **3 routing/session checks**, two integration gaps retained |
-| Installed Edge browser | **6 checks**, actual backup.zip download, zero page errors/external requests, no script execution or mobile overflow |
+| Installed Edge browser | **7 checks** after theme correction, matching black surfaces on both portals, actual backup.zip download, zero page errors/external requests, no script execution or mobile overflow |
 | Python compilation, Node syntax, scoped whitespace | Passed |
 
 Full regression command (from checkout root):
