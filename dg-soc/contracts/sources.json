@@ -1,0 +1,41 @@
+{
+  "_note": "Source registry, contract v1.2. Identities are frozen by M3; bindings are PROPOSED until M2 checks port conflicts and records the final values in deployment/. GET /api/sources returns this registry. Four honeypots; the gateway and the demo app are telemetry sources, never honeypots.",
+  "registry_version": "1.2",
+  "honeypots": [
+    { "source_id": "ssh-decoy-01", "source_kind": "honeypot", "protocol": "ssh", "label": "Cowrie SSH (emulated shell)",
+      "event_schema_versions": ["1.0", "1.1", "1.2"],
+      "event_types": ["connection_open", "auth_failure", "auth_success", "command_input", "connection_close", "synthetic_file_access", "bait_served"],
+      "binding": { "host": "192.168.77.20", "port": 2222, "status": "deployed" },
+      "credential_evidence": "password_sha256",
+      "response": { "block": "unsupported" } },
+    { "source_id": "web-decoy-01", "source_kind": "honeypot", "protocol": "http", "label": "Flask web decoy",
+      "event_schema_versions": ["1.0", "1.1", "1.2"],
+      "event_types": ["http_request", "synthetic_file_access", "blocked_request", "bait_served"],
+      "binding": { "host": "192.168.77.20", "port": 8080, "status": "deployed", "also_behind": "gateway-01" },
+      "credential_evidence": "password_sha256",
+      "response": { "block": "supported", "scope": "web-decoy-01 only" } },
+    { "source_id": "db-decoy-01", "source_kind": "honeypot", "protocol": "mysql", "label": "MySQL authentication deception (no query execution)",
+      "event_schema_versions": ["1.2"],
+      "event_types": ["connection_open", "auth_failure", "auth_success", "db_request", "connection_close"],
+      "binding": { "host": "192.168.77.20", "port": 3306, "status": "proposed" },
+      "credential_evidence": "challenge_response_proof_check",
+      "response": { "block": "unsupported" } },
+    { "source_id": "file-decoy-01", "source_kind": "honeypot", "protocol": "smb", "label": "SMB file-service honeypot (inert storage)",
+      "event_schema_versions": ["1.2"],
+      "event_types": ["connection_open", "auth_failure", "auth_success", "file_operation", "synthetic_file_access", "bait_served", "connection_close"],
+      "binding": { "host": "192.168.77.20", "port": 445, "status": "proposed" },
+      "credential_evidence": "challenge_response_proof_check",
+      "response": { "block": "unsupported" } }
+  ],
+  "telemetry_sources": [
+    { "source_id": "gateway-01", "source_kind": "gateway", "protocol": "http", "label": "HTTP routing gateway (fixed upstreams)",
+      "telemetry_versions": ["1.0"], "record_types": ["route_decision", "upstream_result"],
+      "upstreams": ["demo-app-01", "web-decoy-01"],
+      "binding": { "host": "192.168.77.20", "port": 8081, "status": "proposed" },
+      "response": { "block": "not_applicable" } },
+    { "source_id": "demo-app-01", "source_kind": "application", "protocol": "http", "label": "DeceptionGraph Research Portal (normal synthetic app)",
+      "telemetry_versions": ["1.0"], "record_types": ["app_request"],
+      "binding": { "host": "internal", "port": null, "status": "proposed", "reachable_via": "gateway-01" },
+      "response": { "block": "not_applicable" } }
+  ]
+}
