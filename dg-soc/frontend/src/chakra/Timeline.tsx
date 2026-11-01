@@ -7,8 +7,8 @@
 
 import { Pause, Play, Radio, RotateCcw } from 'lucide-react';
 import { useEffect, useMemo, useRef } from 'react';
-import { EVENT_TYPE_LABEL } from '../copy';
-import { EVENT_STYLE } from '../lib/eventStyle';
+import { eventTypeLabel } from '../copy';
+import { styleOf } from '../lib/eventStyle';
 import { timeUtc } from '../lib/format';
 import type { SocEvent } from '../types/api';
 
@@ -68,8 +68,8 @@ export function Timeline({
       events.map((event) => ({
         id: event.event_id,
         at: span === 0 ? 1 : (Date.parse(event.occurred_at) - start) / span,
-        tone: EVENT_STYLE[event.event_type].tone,
-        label: `${timeUtc(event.occurred_at)} · ${EVENT_TYPE_LABEL[event.event_type]}`,
+        tone: styleOf(event.event_type).tone,
+        label: `${timeUtc(event.occurred_at)} · ${eventTypeLabel(event.event_type)}`,
       })),
     [events, span, start],
   );

@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react';
-import { RULE_NAME, STAGE_LABEL } from '../copy';
+import { RULE_NAME, stageLabel } from '../copy';
 import type { Finding, SocEvent } from '../types/api';
 
 /** MITRE's canonical URL for a technique id: T1110.001 -> /techniques/T1110/001/ */
@@ -87,7 +87,7 @@ export function FindingCard({
         <span className="finding__rule">{finding.rule_id}</span>
         <span className="finding__name">{RULE_NAME[finding.rule_id]}</span>
         {finding.stage !== 'none' ? (
-          <span className="chip">{STAGE_LABEL[finding.stage]}</span>
+          <span className="chip">{stageLabel(finding.stage)}</span>
         ) : null}
         {finding.technique_ids.map((techniqueId) => (
           <a

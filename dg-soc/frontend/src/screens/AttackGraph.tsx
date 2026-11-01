@@ -125,12 +125,9 @@ function SensorNode({
   onOpen: () => void;
 }) {
   const y = sensorY(sensorId);
-  const tone =
-    lastSeen === null || lastSeen === undefined
-      ? 'neutral'
-      : (Date.now() - new Date(lastSeen).getTime()) / 1000 < 60
-        ? 'ok'
-        : 'warn';
+  // lastSeen is attacker activity, not sensor health (review F9), so it never
+  // colours the node green. v1.0 reports no collector health to show here.
+  const tone = 'neutral';
 
   return (
     <g
@@ -138,7 +135,7 @@ function SensorNode({
       onClick={onOpen}
       role="button"
       tabIndex={0}
-      aria-label={`${SENSOR_LABEL[sensorId]} ${sensorId}`}
+      aria-label={`${SENSOR_LABEL[sensorId]} ${sensorId}${lastSeen ? `, last event ${lastSeen}` : ''}`}
       onKeyDown={(keyEvent) => {
         if (keyEvent.key === 'Enter' || keyEvent.key === ' ') {
           keyEvent.preventDefault();

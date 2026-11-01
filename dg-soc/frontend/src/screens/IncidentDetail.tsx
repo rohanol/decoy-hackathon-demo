@@ -10,10 +10,10 @@
  * cap note rather than replacing the real score.
  */
 
-import { ArrowLeft, Download, Play, ShieldBan } from 'lucide-react';
+import { ArrowLeft, Download, ShieldBan } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useParams } from 'react-router-dom';
-import { ApiError, fetchEvents, fetchIncident, incidentExportUrl } from '../api/client';
+import { ApiError, fetchActions, fetchAllEvents, fetchIncident, incidentExportUrl } from '../api/client';
 import { USE_FIXTURES } from '../api/config';
 import { FindingCard } from '../components/FindingCard';
 import { KillChainBar } from '../components/KillChainBar';
@@ -23,10 +23,37 @@ import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
-import { RULE_NAME, STAGE_LABEL, linkPhrase } from '../copy';
+import { ModeBadge } from '../components/evidence/bits';
+import { SessionCaseCard, SourceProfileCard } from '../components/evidence/CaseViews';
+import { MappingList } from '../components/evidence/MappingViews';
+import { ParentCard, RelationCard } from '../components/evidence/RelationViews';
+import {
+  EligibilityNotice,
+  GatedActionButton,
+  VerificationTimeline,
+} from '../components/evidence/ResponseViews';
+import {
+  eligibilityFromV1,
+  mappingsFromV1,
+  parentsFromV1,
+  relationsFromV1,
+  sessionCasesFromV1,
+  sourceProfileFromV1,
+  verificationFromV1,
+} from '../evidence/fromV1';
+import { RULE_NAME, linkPhrase, stageLabel } from '../copy';
 import { fullUtc, number, timeUtcZ } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
-import { KILL_CHAIN_STAGES, type Incident, type Link, type SocEvent, type Stage } from '../types/api';
+import {
+  KILL_CHAIN_STAGES,
+  type Incident,
+  type Link,
+  type ResponseAction,
+  type SocEvent,
+  type Stage,
+} from '../types/api';
+
+const ACTIONS_POLL_MS = 2000;
 
 /** "2m 30s" between two timestamps. Presentation only. */
 function duration(from: string, to: string): string {
@@ -95,46 +122,16 @@ function EvidenceButton({
   );
 }
 
-function LinkRow({ link, onDecide }: { link: Link; onDecide: (link: Link) => void }) {
-  const classes = [
-    'linkrow',
-    `linkrow--${link.status}`,
-    link.status === 'open' && link.kind === 'strong_candidate' ? 'linkrow--strong' : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-
-  return (
-    <div className={classes}>
-      <div className="linkrow__sensors">
-        <span className="mono">{link.from_sensor}</span>
-        <span className="linkhead__arrow">⇢</span>
-        <span className="mono">{link.to_sensor}</span>
-      </div>
-      <div className="linkrow__phrase">{linkPhrase(link.kind, link.status)}</div>
-      <div className="linkrow__basis mono">{link.basis}</div>
-      {link.rationale ? (
-        <div className="linkrow__rationale">
-          “{link.rationale}”
-          {link.decided_at ? <span className="mono"> {timeUtcZ(link.decided_at)}</span> : null}
-        </div>
-      ) : null}
-      <div className="linkrow__actions">
-        <button type="button" className="btn" onClick={() => onDecide(link)}>
-          {link.status === 'open' ? 'Confirm or reject' : 'Change decision'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
 export function IncidentDetail() {
   const { incidentId } = useParams<{ incidentId: string }>();
   const { subscribe, connectionEpoch } = useLiveStore();
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [incident, setIncident] = useState<Incident | null>(null);
+  const [events, setEvents] = useState<SocEvent[]>([]);
   const [eventsById, setEventsById] = useState<Map<string, SocEvent>>(new Map());
+  /** Response actions targeting this source. [] when the router is not installed. */
+  const [sourceActions, setSourceActions] = useState<ResponseAction[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -147,14 +144,16 @@ export function IncidentDetail() {
     if (!incidentId) return;
     setLoading(true);
     try {
-      // The incident drives the page; the events are fetched alongside it so
-      // every evidence id on screen can open its raw event.
-      const [loadedIncident, eventsPage] = await Promise.all([
+      // The incident drives the page; all of its events are fetched alongside
+      // it (paged, not just the first 200) so every evidence id on screen can
+      // open its raw event and every session case is complete.
+      const [loadedIncident, loadedEvents] = await Promise.all([
         fetchIncident(incidentId),
-        fetchEvents({ incident_id: incidentId, limit: 200 }),
+        fetchAllEvents({ incident_id: incidentId }),
       ]);
       setIncident(loadedIncident);
-      setEventsById(new Map(eventsPage.items.map((event) => [event.event_id, event])));
+      setEvents(loadedEvents);
+      setEventsById(new Map(loadedEvents.map((event) => [event.event_id, event])));
       setError(null);
     } catch (cause) {
       setError(
@@ -170,6 +169,31 @@ export function IncidentDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const srcIp = incident?.src_ip ?? null;
+  const loadActions = useCallback(async () => {
+    if (!srcIp) return;
+    try {
+      const page = await fetchActions();
+      setSourceActions(page.items.filter((action) => action.target_ip === srcIp));
+    } catch {
+      // 503 response_unavailable or a network blip: the Response Center says
+      // which. Here, no actions is the honest display.
+      setSourceActions([]);
+    }
+  }, [srcIp]);
+
+  useEffect(() => {
+    void loadActions();
+  }, [loadActions]);
+
+  // Block status is not pushed (API.md reserves `action`), so poll while live.
+  const hasLiveAction = sourceActions.some((a) => a.status === 'applied' || a.status === 'verified');
+  useEffect(() => {
+    if (!hasLiveAction) return;
+    const timer = setInterval(() => void loadActions(), ACTIONS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [hasLiveAction, loadActions]);
 
   // Resync after a dropped connection: API.md requires the whole snapshot to be
   // reloaded on reconnect, not just the event feed.
@@ -213,6 +237,36 @@ export function IncidentDetail() {
     };
   }, [subscribe, incidentId, load]);
 
+  /*
+   * The evidence structure, reshaped from v1.0 data (src/evidence/fromV1.ts):
+   * regrouping only, nothing scored or inferred. Swap these inputs for the
+   * agreed session/source/parent endpoints once the contract lands.
+   */
+  const evidence = useMemo(() => {
+    if (!incident) return null;
+    const cases = sessionCasesFromV1(events, incident.findings);
+    const relations = relationsFromV1(incident.links, events);
+    return {
+      cases,
+      relations,
+      profile: sourceProfileFromV1(incident, events, cases),
+      parents: parentsFromV1(relations),
+      mappings: mappingsFromV1(incident.findings),
+      eligibility: eligibilityFromV1(events),
+    };
+  }, [incident, events]);
+
+  const evidenceHandlers = useMemo(
+    () => ({
+      onOpenEvent: (id: string) => {
+        const event = eventsById.get(id);
+        if (event) setOpenEvent(event);
+      },
+      isKnown: (id: string) => eventsById.has(id),
+    }),
+    [eventsById],
+  );
+
   const visibleFindings = useMemo(() => {
     if (!incident) return [];
     if (stageFilter === null) return incident.findings;
@@ -242,7 +296,7 @@ export function IncidentDetail() {
     );
   }
 
-  if (!incident) return null;
+  if (!incident || !evidence) return null;
 
   const openLinks = incident.links.filter((link) => link.status === 'open');
   const pendingFindings = incident.findings.filter((finding) => finding.pending_confirmation);
@@ -268,14 +322,9 @@ export function IncidentDetail() {
         >
           <Download size={15} /> Export report
         </a>
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={() => setBlocking(true)}
-          title="Preview a 120 s block of this source on the web decoy"
-        >
+        <GatedActionButton eligibility={evidence.eligibility} onClick={() => setBlocking(true)}>
           <ShieldBan size={15} /> Block source
-        </button>
+        </GatedActionButton>
       </div>
 
       <header className={`inchero inchero--${incident.severity}`}>
@@ -285,6 +334,9 @@ export function IncidentDetail() {
             <span>
               {incident.incident_id} · {incident.lab_run_id}
             </span>
+            {evidence.profile.capture_modes.map((mode) => (
+              <ModeBadge key={mode} mode={mode} />
+            ))}
           </div>
           <h1 className="inchero__ip">{incident.src_ip}</h1>
           <dl className="inchero__facts">
@@ -313,11 +365,19 @@ export function IncidentDetail() {
           </dl>
         </div>
         <div className="inchero__score">
-          <span className="inchero__score-label">Risk score</span>
+          <span
+            className="inchero__score-label"
+            title="Contract v1.0 scores the source address in this run, pooling every session case behind it."
+          >
+            Source score · v1.0
+          </span>
           <span className={`inchero__score-value inchero__score-value--${incident.severity}`}>
             {number(incident.score)}
           </span>
-          <span className="inchero__score-hint">from {incident.findings.length} findings</span>
+          <span className="inchero__score-hint">
+            {incident.findings.length} findings across {evidence.cases.length} session case
+            {evidence.cases.length === 1 ? '' : 's'}
+          </span>
         </div>
       </header>
 
@@ -382,20 +442,35 @@ export function IncidentDetail() {
             </div>
             <div className="decide">
               <h3 className="decide__title">Response</h3>
-              {incident.active_block === null ? (
+              <EligibilityNotice eligibility={evidence.eligibility} />
+              {incident.active_block !== null ? (
+                <ActionCard action={incident.active_block} onExpired={() => void load()} />
+              ) : null}
+              {sourceActions.length > 0 ? (
+                <p className="decide__none" title="GET /api/response/actions carries no run or incident id">
+                  Actions targeting {incident.src_ip}. Contract v1.0 does not say which run or incident
+                  an action came from, so one may belong to another run of this address.
+                </p>
+              ) : null}
+              {sourceActions.map((action) => (
+                <VerificationTimeline
+                  key={action.action_id}
+                  verification={verificationFromV1(action)}
+                  {...evidenceHandlers}
+                />
+              ))}
+              {incident.active_block === null && !hasLiveAction ? (
                 <>
-                  <p className="decide__none">No action applied.</p>
-                  <button
-                    type="button"
+                  {sourceActions.length === 0 ? <p className="decide__none">No action applied.</p> : null}
+                  <GatedActionButton
+                    eligibility={evidence.eligibility}
                     className="btn btn--block"
                     onClick={() => setBlocking(true)}
                   >
                     Preview block
-                  </button>
+                  </GatedActionButton>
                 </>
-              ) : (
-                <ActionCard action={incident.active_block} onExpired={() => void load()} />
-              )}
+              ) : null}
             </div>
           </aside>
         </div>
@@ -419,7 +494,7 @@ export function IncidentDetail() {
           </h2>
           {stageFilter ? (
             <button type="button" className="btn btn--ghost" onClick={() => setStageFilter(null)}>
-              Clear {STAGE_LABEL[stageFilter]} filter
+              Clear {stageLabel(stageFilter)} filter
             </button>
           ) : null}
         </div>
@@ -442,65 +517,86 @@ export function IncidentDetail() {
         )}
       </section>
 
-      <div className="incsec incsec--split">
-        <section>
-          <h2 className="incsec__title">
-            Cross-decoy links <span className="incsec__count">{incident.links.length}</span>
-          </h2>
-          {incident.links.length === 0 ? (
-            <EmptyState
-              title="No cross-decoy links."
-              hint="A link appears when the same source touches both decoys within 5 minutes."
-            />
-          ) : (
-            <div className="stack">
-              {incident.links.map((link) => (
-                <LinkRow key={link.link_id} link={link} onDecide={setDecidingLink} />
-              ))}
-            </div>
-          )}
-        </section>
+      <section className="incsec">
+        <h2 className="incsec__title">
+          Mapping rationale <span className="incsec__count">{evidence.mappings.length}</span>
+        </h2>
+        <p className="incsec__note">
+          Each technique id with its reason and limitation. No technique is a valid answer.
+        </p>
+        <MappingList mappings={evidence.mappings} basis="contract_v1" {...evidenceHandlers} />
+      </section>
 
-        <section>
-          <h2 className="incsec__title">
-            Sessions <span className="incsec__count">{incident.sessions.length}</span>
-          </h2>
-          {incident.sessions.length === 0 ? (
-            <EmptyState
-              title="No sessions."
-              hint="SSH sessions appear here once a connection is opened."
-            />
-          ) : (
-            <div className="sessions">
-              {[...incident.sessions]
-                .sort((a, b) => b.commands - a.commands)
-                .map((session) => (
-                  <div
-                    key={session.session_id}
-                    className={session.commands > 0 ? 'sessionrow' : 'sessionrow sessionrow--empty'}
-                  >
-                    <span className="mono">{session.session_id}</span>
-                    <span className="sessionrow__sensor mono">{session.sensor_id}</span>
-                    <span className="sessionrow__count">
-                      {session.commands} cmd{session.commands === 1 ? '' : 's'}
-                    </span>
-                    {session.commands > 0 ? (
-                      <RouterLink
-                        className="btn"
-                        to={`/incidents/${incident.incident_id}/transcript/${session.session_id}`}
-                      >
-                        <Play size={13} /> Replay
-                      </RouterLink>
-                    ) : null}
-                  </div>
-                ))}
-              <p className="incsec__note">
-                Sessions with no commands never reached a shell, so there is nothing to replay.
-              </p>
-            </div>
-          )}
-        </section>
-      </div>
+      <section className="incsec evsection" aria-label="Evidence structure">
+        <h2 className="incsec__title">Evidence structure</h2>
+        <p className="incsec__note">
+          The source is an observed endpoint. Each decoy session is its own case. Only an
+          analyst-approved relation joins cases across decoys.
+        </p>
+        <p className="incsec__note">
+          These cases and the parent are <strong>display groupings</strong> built in the browser
+          from v1.0 events. The backend&apos;s authoritative cases and investigations arrive with
+          M3&apos;s case model; until then the backend still scores this source as one incident.
+        </p>
+
+        <SourceProfileCard profile={evidence.profile} {...evidenceHandlers} />
+
+        {evidence.parents.map((parent) => (
+          <ParentCard
+            key={parent.parent_id}
+            parent={parent}
+            cases={evidence.cases}
+            relations={evidence.relations}
+          />
+        ))}
+
+        <div className="evsection__label">
+          Session cases <span className="incsec__count">{evidence.cases.length}</span>
+        </div>
+        {evidence.cases.length === 0 ? (
+          <EmptyState title="No session cases." hint="Cases appear as the decoys record sessions." />
+        ) : (
+          <div className="casegrid">
+            {evidence.cases.map((item) => (
+              <SessionCaseCard
+                key={item.case_id}
+                item={item}
+                transcriptHref={
+                  item.sensor_id === 'ssh-decoy-01' && item.session_id && item.commands > 0
+                    ? `/incidents/${incident.incident_id}/transcript/${item.session_id}`
+                    : null
+                }
+                {...evidenceHandlers}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="evsection__label">
+          Relations <span className="incsec__count">{evidence.relations.length}</span>
+        </div>
+        {evidence.relations.length === 0 ? (
+          <EmptyState
+            title="No cross-decoy relations."
+            hint="A candidate appears when this source touches both decoys within 5 minutes."
+          />
+        ) : (
+          <div className="rellist">
+            {evidence.relations.map((relation) => {
+              const link = incident.links.find((item) => item.link_id === relation.relation_id);
+              return (
+                <RelationCard
+                  key={relation.relation_id}
+                  relation={relation}
+                  cases={evidence.cases}
+                  onDecide={link ? () => setDecidingLink(link) : undefined}
+                  {...evidenceHandlers}
+                />
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       <section className="incsec">
         <h2 className="incsec__title">Score breakdown</h2>
@@ -519,8 +615,12 @@ export function IncidentDetail() {
           onClose={() => {
             setBlocking(false);
             void load();
+            void loadActions();
           }}
-          onChanged={() => void load()}
+          onChanged={() => {
+            void load();
+            void loadActions();
+          }}
         />
       ) : null}
 

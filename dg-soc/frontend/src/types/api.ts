@@ -217,7 +217,20 @@ export interface Health {
   sensors: Record<string, string | null>;
 }
 
-export type ActionStatus = 'applied' | 'verified' | 'expired' | 'revoked';
+/**
+ * `reconciliation_required` is M2's (PR #8): after a restart the action was
+ * missing from, or changed in, the enforced policy. Additive; v1.0 backends
+ * never send it.
+ */
+export type ActionStatus = 'applied' | 'verified' | 'expired' | 'revoked' | 'reconciliation_required';
+
+/** One observation the backend refused to count as verification. */
+export interface VerificationRefusal {
+  event_id: string | null;
+  reason: string;
+  /** M2 only. */
+  received_at?: string | null;
+}
 
 export interface ResponseAction {
   action_id: string;
@@ -227,6 +240,14 @@ export interface ResponseAction {
   created_at: string;
   until: string;
   verified_by_event_id: string | null;
+  /**
+   * NOT YET AGREED. M2's router (PR #8, runtime) returns
+   * `verification_mismatches`; M3's contract v1.1 (PR #9) names it
+   * `verification_rejects`. Both are read until one is chosen; neither is
+   * sent by the v1.0 router on main.
+   */
+  verification_mismatches?: VerificationRefusal[];
+  verification_rejects?: VerificationRefusal[];
 }
 
 export interface BlockPreview {

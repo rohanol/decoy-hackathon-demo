@@ -16,9 +16,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, ErrorCard, SkeletonRows, AttackerText } from '../components/primitives';
 import { RawEventDrawer } from '../components/RawEventDrawer';
-import { COPY, EVENT_TYPE_DESCRIPTION, EVENT_TYPE_LABEL, SENSOR_LABEL } from '../copy';
+import { EventFacets, ModeBadge } from '../components/evidence/bits';
+import {
+  filtersActive as anyFilterActive,
+  matchesFeedFilters,
+  requestIdsAvailable,
+  type FeedFilters,
+} from '../state/feedFilters';
+import { COPY, SENSOR_LABEL, eventTypeDescription, eventTypeLabel } from '../copy';
 import { FEED_MAX_ROWS } from '../api/config';
-import { EVENT_STYLE } from '../lib/eventStyle';
+import { styleOf } from '../lib/eventStyle';
 import { bytes, clamp, number, relativeFromNow, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { EVENT_TYPES, SENSOR_IDS, type EventType, type SocEvent } from '../types/api';
@@ -87,7 +94,7 @@ function eventSubLabel(event: SocEvent): string | null {
 
 /** The newest event, large, at the top. Swaps in with a short slide. */
 function Spotlight({ event, onOpen }: { event: SocEvent; onOpen: () => void }) {
-  const style = EVENT_STYLE[event.event_type];
+  const style = styleOf(event.event_type);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 1000);
@@ -114,14 +121,14 @@ function Spotlight({ event, onOpen }: { event: SocEvent; onOpen: () => void }) {
           </span>
           <span className="spotlight__row">
             <span className={`spotlight__glyph evtype--${style.tone}`}>{style.glyph}</span>
-            <span className="spotlight__type">{EVENT_TYPE_LABEL[event.event_type]}</span>
+            <span className="spotlight__type">{eventTypeLabel(event.event_type)}</span>
             <span className="spotlight__ip">{event.src_ip}</span>
             <span className="spotlight__sensor">{SENSOR_LABEL[event.sensor_id] ?? event.sensor_id}</span>
           </span>
           <span className="spotlight__detail">
             <DetailCell event={event} max={120} />
           </span>
-          <span className="spotlight__desc">{EVENT_TYPE_DESCRIPTION[event.event_type]}</span>
+          <span className="spotlight__desc">{eventTypeDescription(event.event_type)}</span>
           <span className="spotlight__id">{event.event_id}</span>
         </motion.button>
       </AnimatePresence>
@@ -140,7 +147,7 @@ function EventRow({
   isSelected: boolean;
   onSelect: () => void;
 }) {
-  const style = EVENT_STYLE[event.event_type];
+  const style = styleOf(event.event_type);
   const sub = eventSubLabel(event);
 
   const classes = [`row--${style.tone}`, isLive ? 'row--new' : '', isSelected ? 'is-selected' : '']
@@ -150,6 +157,7 @@ function EventRow({
   return (
     <tr
       className={classes}
+      data-event-id={event.event_id}
       onClick={onSelect}
       tabIndex={0}
       onKeyDown={(keyEvent) => {
@@ -167,7 +175,7 @@ function EventRow({
       <td>
         <div className={`evtype evtype--${style.tone}`}>
           <span className="evtype__glyph">{style.glyph}</span>
-          <span className="evtype__label">{EVENT_TYPE_LABEL[event.event_type]}</span>
+          <span className="evtype__label">{eventTypeLabel(event.event_type)}</span>
         </div>
         {sub ? <div className="evtype__sub">{sub}</div> : null}
       </td>
@@ -175,6 +183,8 @@ function EventRow({
       <td>
         <div className="cell-detail">
           <DetailCell event={event} />
+          {event.capture_mode === 'replay' ? <ModeBadge mode="replay" /> : null}
+          <EventFacets event={event} />
           <div className="cell-detail__ids">
             <span>{event.event_id}</span>
             {event.incident_id ? (
@@ -247,19 +257,32 @@ export function LiveFeed() {
   );
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [ipFilter, setIpFilter] = useState<string>('');
+  // Review section 15: filters by run, mode, session and request. Deep-linkable,
+  // so a session case can open the feed already narrowed to itself.
+  const [runFilter, setRunFilter] = useState<string>(() => searchParams.get('run') ?? '');
+  const [modeFilter, setModeFilter] = useState<string>(() => searchParams.get('mode') ?? '');
+  const [sessionFilter, setSessionFilter] = useState<string>(() => searchParams.get('session') ?? '');
+  const [requestFilter, setRequestFilter] = useState<string>(() => searchParams.get('request') ?? '');
   const [selected, setSelected] = useState<SocEvent | null>(null);
 
-  const filtered = useMemo(() => {
-    const ip = ipFilter.trim();
-    return events.filter((event) => {
-      if (sensorFilter && event.sensor_id !== sensorFilter) return false;
-      if (typeFilter && event.event_type !== typeFilter) return false;
-      if (ip && !event.src_ip.includes(ip)) return false;
-      return true;
-    });
-  }, [events, sensorFilter, typeFilter, ipFilter]);
-
-  const filtersActive = sensorFilter !== '' || typeFilter !== '' || ipFilter.trim() !== '';
+  /** Runs present in the loaded window, newest first. Offered, never assumed. */
+  const runs = useMemo(() => [...new Set(events.map((event) => event.lab_run_id))], [events]);
+  /** request_id: the filter is offered once events carry it (M4 web records, v1.1). */
+  const requestAvailable = useMemo(() => requestIdsAvailable(events), [events]);
+  const filters = useMemo<FeedFilters>(
+    () => ({
+      sensor: sensorFilter,
+      type: typeFilter,
+      ip: ipFilter,
+      run: runFilter,
+      mode: modeFilter,
+      session: sessionFilter,
+      request: requestFilter,
+    }),
+    [sensorFilter, typeFilter, ipFilter, runFilter, modeFilter, sessionFilter, requestFilter],
+  );
+  const filtered = useMemo(() => events.filter((event) => matchesFeedFilters(event, filters)), [events, filters]);
+  const filtersActive = anyFilterActive(filters);
   const trimmed = receivedCount > FEED_MAX_ROWS;
   const newest = events[0] ?? null;
   const { arrived, jumpToTop } = useArrivedAbove(newest?.seq ?? 0);
@@ -312,7 +335,7 @@ export function LiveFeed() {
           <option value="">All event types</option>
           {EVENT_TYPES.map((eventType: EventType) => (
             <option key={eventType} value={eventType}>
-              {EVENT_TYPE_LABEL[eventType]}
+              {eventTypeLabel(eventType)}
             </option>
           ))}
         </select>
@@ -323,6 +346,53 @@ export function LiveFeed() {
           placeholder="Source IP"
           value={ipFilter}
           onChange={(changeEvent) => setIpFilter(changeEvent.target.value)}
+        />
+
+        <select
+          className="select"
+          aria-label="Filter by lab run"
+          value={runFilter}
+          onChange={(changeEvent) => setRunFilter(changeEvent.target.value)}
+        >
+          <option value="">All runs</option>
+          {runs.map((run) => (
+            <option key={run} value={run}>
+              {run}
+            </option>
+          ))}
+        </select>
+
+        <select
+          className="select"
+          aria-label="Filter by capture mode"
+          value={modeFilter}
+          onChange={(changeEvent) => setModeFilter(changeEvent.target.value)}
+        >
+          <option value="">Live and replay</option>
+          <option value="live">Live only</option>
+          <option value="replay">Replay only</option>
+        </select>
+
+        <input
+          className="input"
+          aria-label="Filter by session id"
+          placeholder="Session id"
+          value={sessionFilter}
+          onChange={(changeEvent) => setSessionFilter(changeEvent.target.value)}
+        />
+
+        <input
+          className="input"
+          aria-label="Filter by request id"
+          placeholder={requestAvailable ? 'Request id' : 'Request id · not in v1.0'}
+          title={
+            requestAvailable
+              ? undefined
+              : 'request_id is a proposed field. Contract v1.0 events do not carry it yet.'
+          }
+          disabled={!requestAvailable && requestFilter === ''}
+          value={requestFilter}
+          onChange={(changeEvent) => setRequestFilter(changeEvent.target.value)}
         />
 
         <span className="toolbar__spacer" />
@@ -343,6 +413,10 @@ export function LiveFeed() {
               setSensorFilter('');
               setTypeFilter('');
               setIpFilter('');
+              setRunFilter('');
+              setModeFilter('');
+              setSessionFilter('');
+              setRequestFilter('');
               setSearchParams({}, { replace: true });
             }}
           >
