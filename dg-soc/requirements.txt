@@ -5,3 +5,4 @@ httpx==0.28.1
 websockets==16.0
 pytest==9.2.0
 PyYAML==6.0.3
+jsonschema==4.25.1

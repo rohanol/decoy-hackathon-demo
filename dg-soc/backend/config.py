@@ -1,7 +1,7 @@
 """Loads config/scoring.yaml, config/web_patterns.yaml and config/honeytokens.yaml."""
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +23,8 @@ class Config:
     honeytokens: dict  # token id -> {"planted_on", "valid_on", ...} (hashes only)
     scoring_version: int = 1
     patterns_version: int = 1
+    # asset id -> {asset_id, sensor_id, path, honeytoken_ids, fixture_version} (honeytokens.yaml, M4)
+    bait_assets: dict = field(default_factory=dict)
 
 
 def _read(path: Path) -> dict:
@@ -47,4 +49,5 @@ def load_config(config_dir: Optional[str] = None) -> Config:
         honeytokens={t["id"]: t for t in tokens.get("tokens", [])},
         scoring_version=scoring.get("version", 1),
         patterns_version=patterns.get("version", 1),
+        bait_assets={a["asset_id"]: a for a in tokens.get("bait_assets") or []},
     )
