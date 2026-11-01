@@ -72,6 +72,8 @@
   /* type */
   --font-ui: 'Inter Variable', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Arial,
     sans-serif;
+  /* Small descriptive text: tighter and more editorial than Inter at 12px. */
+  --font-caption: 'IBM Plex Sans', 'Inter Variable', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo,
     Consolas, monospace;
 

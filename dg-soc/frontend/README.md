@@ -29,7 +29,9 @@ redirect URL. Google sign-in needs internet on the SOC laptop.
 
 This gates the UI only. The backend has no auth yet, so `/api` stays open on
 loopback until it verifies the Supabase token. Until a provider is set,
-`VITE_AUTH_DEV_BYPASS=1` shows a "Continue as lab analyst" button (dev only).
+`VITE_AUTH_LOCAL=1` replaces the Google and email form with a single "Enter the
+console" sign-in for the lab machine. The login page never shows controls that
+cannot work.
 
 ## Run
 

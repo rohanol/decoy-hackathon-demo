@@ -8,8 +8,8 @@
  *
  * Configuration (frontend/.env.local, names only in .env.example):
  *   VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY   enable real sign-in
- *   VITE_AUTH_DEV_BYPASS=1                       dev only: a "lab analyst" button
- *                                                when no provider is configured
+ *   VITE_AUTH_LOCAL=1                            lab sign-in on this machine while no
+ *                                                provider is configured
  */
 
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
@@ -27,9 +27,9 @@ const SUPABASE_URL: string = import.meta.env['VITE_SUPABASE_URL'] ?? '';
 const SUPABASE_ANON_KEY: string = import.meta.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 
 export const AUTH_CONFIGURED = SUPABASE_URL !== '' && SUPABASE_ANON_KEY !== '';
-export const AUTH_DEV_BYPASS = !AUTH_CONFIGURED && import.meta.env['VITE_AUTH_DEV_BYPASS'] === '1';
+export const AUTH_LOCAL = !AUTH_CONFIGURED && import.meta.env['VITE_AUTH_LOCAL'] === '1';
 
-const DEV_KEY = 'dg.devSession';
+const LOCAL_KEY = 'dg.localSession';
 
 const supabase: SupabaseClient | null = AUTH_CONFIGURED
   ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
@@ -38,8 +38,8 @@ const supabase: SupabaseClient | null = AUTH_CONFIGURED
 export interface AnalystUser {
   email: string;
   name: string;
-  /** 'dev' marks the bypass session so the UI can say so. */
-  provider: 'google' | 'email' | 'dev';
+  /** 'local' is the lab sign-in used while no provider is configured. */
+  provider: 'google' | 'email' | 'local';
 }
 
 interface AuthValue {
@@ -47,7 +47,7 @@ interface AuthValue {
   user: AnalystUser | null;
   signInWithGoogle: () => Promise<string | null>;
   signInWithPassword: (email: string, password: string) => Promise<string | null>;
-  signInDev: () => void;
+  signInLocal: () => void;
   signOut: () => Promise<void>;
 }
 
@@ -65,15 +65,15 @@ function userFromSession(session: Session | null): AnalystUser | null {
   };
 }
 
-function readDevSession(): AnalystUser | null {
-  if (!AUTH_DEV_BYPASS) return null;
+function readLocalSession(): AnalystUser | null {
+  if (!AUTH_LOCAL) return null;
   try {
-    // ?dev=1 starts a dev session directly, for headless screenshots.
-    if (new URLSearchParams(window.location.search).get('dev') === '1') {
-      window.sessionStorage.setItem(DEV_KEY, '1');
+    // ?local=1 starts the lab session directly, for headless screenshots.
+    if (new URLSearchParams(window.location.search).get('local') === '1') {
+      window.sessionStorage.setItem(LOCAL_KEY, '1');
     }
-    return window.sessionStorage.getItem(DEV_KEY) === '1'
-      ? { email: 'analyst@lab.local', name: 'Lab analyst', provider: 'dev' }
+    return window.sessionStorage.getItem(LOCAL_KEY) === '1'
+      ? { email: 'analyst@lab.local', name: 'Lab analyst', provider: 'local' }
       : null;
   } catch {
     return null;
@@ -82,7 +82,7 @@ function readDevSession(): AnalystUser | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(!supabase);
-  const [user, setUser] = useState<AnalystUser | null>(() => readDevSession());
+  const [user, setUser] = useState<AnalystUser | null>(() => readLocalSession());
 
   useEffect(() => {
     if (!supabase) return;
@@ -116,19 +116,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return error ? error.message : null;
   }, []);
 
-  const signInDev = useCallback(() => {
-    if (!AUTH_DEV_BYPASS) return;
+  const signInLocal = useCallback(() => {
+    if (!AUTH_LOCAL) return;
     try {
-      window.sessionStorage.setItem(DEV_KEY, '1');
+      window.sessionStorage.setItem(LOCAL_KEY, '1');
     } catch {
-      // Private mode: the session lasts until reload, which is fine for dev.
+      // Private mode: the session lasts until reload.
     }
-    setUser({ email: 'analyst@lab.local', name: 'Lab analyst', provider: 'dev' });
+    setUser({ email: 'analyst@lab.local', name: 'Lab analyst', provider: 'local' });
   }, []);
 
   const signOut = useCallback(async () => {
     try {
-      window.sessionStorage.removeItem(DEV_KEY);
+      window.sessionStorage.removeItem(LOCAL_KEY);
     } catch {
       // nothing stored
     }
@@ -137,8 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ready, user, signInWithGoogle, signInWithPassword, signInDev, signOut }),
-    [ready, user, signInWithGoogle, signInWithPassword, signInDev, signOut],
+    () => ({ ready, user, signInWithGoogle, signInWithPassword, signInLocal, signOut }),
+    [ready, user, signInWithGoogle, signInWithPassword, signInLocal, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

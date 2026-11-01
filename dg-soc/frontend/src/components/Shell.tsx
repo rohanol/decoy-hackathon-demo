@@ -189,7 +189,6 @@ export function Shell() {
             <span className="sidebar__team-title">Blue team</span>
             <span className="sidebar__team-user" title={user?.email}>
               {user?.name ?? 'analyst'}
-              {user?.provider === 'dev' ? ' · dev' : ''}
             </span>
           </div>
           <button
