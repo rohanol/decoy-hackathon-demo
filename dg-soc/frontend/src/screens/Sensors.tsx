@@ -20,6 +20,10 @@ import { eventTypeLabel } from '../copy';
 import { number, timeUtc } from '../lib/format';
 import { useLiveStore } from '../state/LiveStore';
 import { SENSOR_IDS, type EventType } from '../types/api';
+import { fetchSources, isNotServed } from '../api/client';
+import { SourcesPanel } from '../v12/components';
+import type { SourcesRegistry } from '../v12/types';
+import { sourceRows } from '../v12/views';
 
 interface SensorDef {
   id: string;
@@ -28,6 +32,8 @@ interface SensorDef {
   port: string;
   what: string;
   planned?: boolean;
+  /** v1.2 decoy: shown as not on this backend until the backend reports it. */
+  v12?: boolean;
 }
 
 const SENSORS: SensorDef[] = [
@@ -45,10 +51,36 @@ const SENSORS: SensorDef[] = [
     port: '8080',
     what: 'Staff portal, hidden paths, a fake .env and a synthetic customer export.',
   },
+  {
+    id: 'db-decoy-01',
+    name: 'MySQL decoy',
+    decoy: 'D3 · authentication deception (contract v1.2)',
+    port: '3306',
+    what: 'Records the login handshake and command packets. Never sees a password, never executes a query.',
+    v12: true,
+  },
+  {
+    id: 'file-decoy-01',
+    name: 'SMB file decoy',
+    decoy: 'D4 · file-service honeypot (contract v1.2)',
+    port: '445',
+    what: 'Records logins and file operations. Uploads are stored inert or discarded; never executed or given a verdict.',
+    v12: true,
+  },
 ];
 
 export function Sensors() {
   const { events, health, healthCheckedAt, status } = useLiveStore();
+  const [registry, setRegistry] = useState<SourcesRegistry | null>(null);
+  const [registryState, setRegistryState] = useState<'loading' | 'served' | 'not_served' | 'error'>('loading');
+  useEffect(() => {
+    let alive = true;
+    fetchSources()
+      .then((value) => { if (alive) { setRegistry(value); setRegistryState('served'); } })
+      .catch((error) => { if (alive) setRegistryState(isNotServed(error) ? 'not_served' : 'error'); });
+    return () => { alive = false; };
+  }, []);
+  const rows = useMemo(() => sourceRows(registry, health), [registry, health]);
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 5000);
@@ -83,12 +115,28 @@ export function Sensors() {
         />
       </section>
 
+      <section className="panel" style={{ marginBottom: 'var(--s4)', padding: 'var(--s4)' }} aria-label="Sources">
+        {registryState === 'loading' ? (
+          <p className="v12note">Loading source registry…</p>
+        ) : (
+          <SourcesPanel
+            honeypots={rows.honeypots}
+            telemetry={[]}
+            honeypotCount={rows.honeypot_count}
+            registryServed={registryState === 'served'}
+            now={now}
+          />
+        )}
+      </section>
+
       <div className="sensorgrid">
         {SENSORS.map((sensor) => {
-          const state = sensor.planned
-            ? { tone: 'neutral' as const, text: 'not deployed' }
+          // A v1.2 decoy is only "on this backend" once the backend reports it.
+          const absent = sensor.planned || (sensor.v12 && !(health && sensor.id in health.sensors));
+          const state = absent
+            ? { tone: 'neutral' as const, text: sensor.planned ? 'not deployed' : 'not on this backend' }
             : sensorHealth(health, sensor.id);
-          const activity = sensor.planned ? null : sensorActivity(health, sensor.id, now);
+          const activity = absent ? null : sensorActivity(health, sensor.id, now);
           const stats = bySensor.get(sensor.id);
           const types = stats ? [...stats.types.entries()].sort((a, b) => b[1] - a[1]) : [];
           const max = Math.max(1, ...types.map(([, count]) => count));
@@ -96,7 +144,7 @@ export function Sensors() {
           return (
             <section
               key={sensor.id}
-              className={sensor.planned ? 'sensorcard sensorcard--planned' : 'sensorcard'}
+              className={absent ? 'sensorcard sensorcard--planned' : 'sensorcard'}
             >
               <header className="sensorcard__head">
                 <Dot tone={state.tone} />
@@ -115,7 +163,7 @@ export function Sensors() {
                 <strong>{sensor.decoy}.</strong> {sensor.what}
               </p>
 
-              {sensor.planned ? null : (
+              {absent ? null : (
                 <>
                   {activity ? (
                     <p className="sensorcard__activity" title="Attacker activity, not health">

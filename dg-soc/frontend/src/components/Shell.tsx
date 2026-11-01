@@ -115,7 +115,7 @@ export function sensorHealth(health: Health | null, sensorId?: string): { tone: 
       if (row.process_state === 'stopped') return { tone: 'danger', text: 'collector stopped' };
       return row.process_state === 'running' ? { tone: 'ok', text: 'collector running' } : { tone: 'neutral', text: 'collector state unknown' };
     }
-  return { tone: 'neutral', text: 'collection health not reported (v1.0)' };
+  return { tone: 'neutral', text: 'collection health not reported by this backend' };
 }
 
 /**
@@ -133,7 +133,8 @@ function SensorDots() {
 
   return (
     <span className="navitem__dots">
-      {SENSOR_IDS.map((sensorId) => {
+      {/* Only sensors this backend reports: a v1.1 backend gets two dots, not four. */}
+      {(health ? SENSOR_IDS.filter((sensorId) => sensorId in health.sensors) : SENSOR_IDS).map((sensorId) => {
           const state = sensorHealth(health, sensorId);
         const activity = sensorActivity(health, sensorId, now);
         return (

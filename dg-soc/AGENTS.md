@@ -1,5 +1,14 @@
 # AGENTS.md: DeceptionGraph SOC rules for every coding assistant
 
+Current owner direction (1 November 2026): central integration in this chat is
+authorized across all component folders. Preserve the existing Kali workflow,
+dark SOC and original web decoy. Add ZIP bait, MySQL and bounded SMB services.
+Do not build/deploy the new demo app, gateway, public hosting or portal redesign.
+Historical role restrictions below describe the earlier parallel workflow;
+they do not require teammate handoffs for this authorized integration. The
+containment and evidence requirements still apply. Current runtime details:
+deployment/KALI_FOUR_RUNBOOK.md and contracts/API.md.
+
 D3COY PS 04. Four people, 24 hours. This file is the source of truth for the build. `docs/prd/PRD_v3.0.md` and the old master prompt are background reading only. If they say something different from this file, this file wins. Safety rules in section 6 beat everything.
 
 Claude Code reads `CLAUDE.md`, which imports this file. Other assistants (Codex, Cursor, Gemini) read this file directly or you paste it first.
@@ -7,7 +16,7 @@ Claude Code reads `CLAUDE.md`, which imports this file. Other assistants (Codex,
 ## 1. The project in six lines
 
 - Laptop A (Kali, 192.168.77.10) attacks. Laptop B (192.168.77.20) runs the decoys and the SOC. One ethernet cable, no internet on the lab link.
-- Decoys: Cowrie SSH on 2222 (`ssh-decoy-01`), Flask web decoy on 8080 (`web-decoy-01`). No third decoy.
+- Decoys: Cowrie SSH on 2222 (`ssh-decoy-01`), original Flask web decoy on 8080 (`web-decoy-01`), optional MySQL authentication deception on 3306 (`db-decoy-01`) and bounded SMB2 on 445 (`file-decoy-01`). No gateway or normal demo app in the current runtime. Their contract identities are disabled compatibility entries.
 - Flow: decoy log → adapter → `POST /api/ingest/events` → FastAPI + SQLite → rules → incidents → REST and `/ws/events` → React.
 - First milestone (H4): one real SSH login from Kali visible on the dashboard with its event ID.
 - The only response is a manual, previewed, 120 s block of one IP on the web decoy, with undo.
@@ -24,7 +33,14 @@ Demo story: SSH brute force → login → `ls` → `cat notes.txt` finds a porta
 | `sensors/`, `deployment/`, `decoys/ssh/`, `decoys/policy/`, `response/` | Vedant (M2) | Network, Cowrie, log adapter, compose, preflight, blocklist and the whole block flow |
 | `decoys/web/`, `analyst/`, `scenarios/`, `tests/e2e/`, `config/web_patterns.yaml`, `config/honeytokens.yaml`, `contracts/examples/payloads.json` | Prajwal (M4) | Web bait, fake data, token plants, attack patterns, rule summary, attack scripts, end-to-end runs |
 
-Other people's folders are read-only for you. Need a change there? Tell the owner, or open a PR they review. Never resolve a merge conflict by deleting someone else's change.
+Current central integration owns all folders for this release. The table records
+original contributors. MySQL and SMB redact secrets before any persistent
+write, including native logs. The original SOC consumes the source registry,
+collector health, protocol evidence and causal links.
+
+Historical parallel work used folder ownership; the owner's central integration
+instruction supersedes handoff restrictions. Preserve unrelated work and never
+resolve a merge conflict by deleting it.
 
 ## 3. Frozen interfaces (change by PR plus Rohan's OK)
 
@@ -37,7 +53,8 @@ Other people's folders are read-only for you. Need a change there? Tell the owne
 | Score weights and thresholds | `config/scoring.yaml` |
 | Honeytokens (hashes only) | `config/honeytokens.yaml` |
 | Web attack regexes and hidden paths | `config/web_patterns.yaml` |
-| Ports | 2222 and 8080 bound to 192.168.77.20. Backend 8000 and Vite 5173 bound to 127.0.0.1 |
+| Ports | 2222, 8080, optional 3306 and 445 bound to 192.168.77.20. Backend 8000 and Vite 5173 bound to 127.0.0.1. Native port-conflict acceptance required; no gateway binding. |
+| Telemetry schema, source registry | `contracts/telemetry.schema.json`, `contracts/sources.json` (v1.2) |
 
 A contract PR changes the file and its example in the same PR and says in one line what breaks. No decision documents needed.
 
@@ -69,7 +86,7 @@ Must ship, in this order:
 6. Rule-based incident summary.
 7. H20 feature freeze. Demo runs clean from a fresh start using `scenarios/demo_p3.md`.
 
-Do not build: OpenCanary, a third decoy, LLM decoy responses, native TTY replay, HASSH, STIX, Navigator export, Detection Strategy refs, bot-vs-human, isolation panel, latency or precision/recall reports, login/CSRF for the SOC, outbox tables, Kafka, Elastic, Postgres, Redis, Kubernetes.
+Do not build: OpenCanary, any decoy beyond the four named in section 1, LLM decoy responses, native TTY replay, HASSH, STIX, Navigator export, Detection Strategy refs, bot-vs-human, isolation panel, latency or precision/recall reports, login/CSRF for the SOC, outbox tables, Kafka, Elastic, Postgres, Redis, Kubernetes.
 
 If ahead at H16, ask the team first, then maybe: R10 (wget/crontab/useradd labels), ATT&CK heatmap, LLM summary (needs API credit; Claude Pro does not include API).
 
@@ -83,6 +100,9 @@ If ahead at H16, ask the team first, then maybe: R10 (wget/crontab/useradd label
 - Fake secrets use the `DGLAB-` prefix. Fake people use `example.com` emails.
 - Escape all attacker text in the UI (React default; never `dangerouslySetInnerHTML`).
 - Block exact lab IPs only. Never 192.168.77.20, 127.0.0.1 or a range.
+- v1.2 components follow the same rules: no privileged containers or Docker socket, no attacker-selected execution or fetches, no malware execution, no executable or auto-run bait (`backup.zip` holds fixed `.txt`/`.csv` only), no external tracking beacons. Uploads to the SMB decoy are stored inert or discarded, never executed or given a verdict. The MySQL decoy never executes queries.
+- Gateway, demo app, MySQL and SMB redact secrets before any persistent write, including their own native logs; adapter-only redaction is not enough. Challenge-response decoys hold protocol verifiers for planted `DGLAB-` credentials only, never values.
+- Build and download dependencies only in the preparation phase, with decoys stopped. No Wi-Fi or default route during lab runs.
 
 ## 7. Labels must match evidence
 

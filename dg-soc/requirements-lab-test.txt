@@ -1,0 +1,3 @@
+# Optional developer/attacker client dependencies; not needed by host adapter.
+-r decoys/database/requirements-dev.txt
+-r decoys/files/requirements.txt

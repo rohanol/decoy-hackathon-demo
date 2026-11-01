@@ -1,5 +1,9 @@
 # Integrated prototype — Vedant's native Docker Engine / Kali VM
 
+For the current optional four-honeypot release, follow
+[KALI_FOUR_RUNBOOK.md](KALI_FOUR_RUNBOOK.md). The backup/fresh-checkout procedure
+below remains useful; its startup steps describe the original two-decoy mode.
+
 This release combines M1–M4, case/investigation APIs, causal token links, current
 adapter indicators, canonical/legacy heartbeats, truthful refusal migration and
 the dashboard consumers. Compose selects web schema 1.1. Keep SOC ports on

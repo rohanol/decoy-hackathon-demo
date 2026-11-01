@@ -1,6 +1,12 @@
-# API contract v1.1 (v1.0 compatible)
+# API contract v1.2 (v1.0 and v1.1 compatible)
 
-The integrated prototype implements v1.1. The rules are in **Evidence boundaries (v1.1)** below; the Migration section records the staged implementation history.
+The integrated backend and adapter accept v1.2. The direct Kali release uses
+four honeypots with the original SOC and web portal: see
+`deployment/KALI_FOUR_RUNBOOK.md`. Gateway/demo-app contracts below remain
+compatible interfaces, but those sources are disabled and no gateway or normal
+app is deployed. Base Compose keeps web producer 1.1; the optional four-service
+override selects 1.2 and enables inert ZIP bait. The rules are in **Evidence
+boundaries (v1.1)** below; Migration records staged implementation history.
 
 Compatibility, precisely:
 - `schema_version` selects the validation rules. A `"1.0"` event is checked exactly as before; the frozen copy is `contracts/history/event.schema.v1.0.json`, and `backend/tests/test_contracts.py` runs edge cases through both. Every new or stricter rule applies only to `"1.1"` events.
@@ -389,3 +395,180 @@ Rollback:
 3. Check out the previous commit.
 
 For a hackathon reset, export the old run (`GET /api/incidents/{id}/export`), then start a new `lab_run_id`. Never replay old live records into a live run; replay them into a `replay-*` run.
+
+## Four honeypots, gateway and telemetry (v1.2)
+
+Status: contract published 2 Nov 2026 for the next milestone. Producers (gateway, demo app, MySQL decoy, SMB decoy, `backup.zip`) do not exist yet, so every v1.2 example in `examples/telemetry_v1_2.json` is **provisional synthetic** and says so. The milestone brief explicitly authorises the gateway, the normal demo app and the two extra honeypots; the old "no third decoy" limit no longer applies to them. Containment and evidence rules are unchanged.
+
+### Versions, precisely
+
+| Interface | Version | What it accepts |
+|---|---|---|
+| Honeypot events, `POST /api/ingest/events` | `schema_version` `"1.0"`, `"1.1"`, `"1.2"` | 1.0 and 1.1 are checked exactly as before (frozen copies in `history/event.schema.v1.0.json` and `history/event.schema.v1.1.json`). Only 1.2 may name `db-decoy-01`, `file-decoy-01`, `db_request` or `file_operation`, or carry the new attributes below. Any other version, for example `"1.3"`, is rejected per record |
+| Gateway and normal-app telemetry, `POST /api/ingest/telemetry` (new) | `telemetry_version` `"1.0"` | `contracts/telemetry.schema.json`. Separate interface on purpose: these sources are not honeypots |
+| Heartbeat, `POST /api/ingest/heartbeat` | unchanged body | Additive: `sensor_id` may name all four honeypots; a telemetry source sends `source_id` instead (exactly one of the two) |
+
+Nothing old is reinterpreted: a stored 1.0/1.1 event keeps its meaning, and no 1.0/1.1 record gains a v1.2 field or a v1.2 sensor.
+
+### Source identities (frozen)
+
+Registry: `contracts/sources.json`, served as `GET /api/sources`.
+
+| Id | Kind | Protocol | Proposed binding (M2 confirms) | Response capability |
+|---|---|---|---|---|
+| `ssh-decoy-01` | honeypot | ssh | 192.168.77.20:2222 (deployed) | `unsupported` |
+| `web-decoy-01` | honeypot | http | 192.168.77.20:8080 direct (deployed), and the gateway's decoy upstream | `supported`, scope "web-decoy-01 only" |
+| `db-decoy-01` | honeypot | mysql | 192.168.77.20:3306 | `unsupported` |
+| `file-decoy-01` | honeypot | smb | 192.168.77.20:445 | `unsupported` |
+| `gateway-01` | gateway (telemetry) | http | 192.168.77.20:8081 | `not_applicable` |
+| `demo-app-01` | application (telemetry) | http | internal, reachable only through the gateway | `not_applicable` |
+
+There are **four honeypots**. The gateway and the demo app never appear in `sensor_health`, honeypot counts, event feeds, cases or scores. The gateway does not proxy MySQL or SMB; those decoys are reached directly.
+
+Event types per honeypot (1.2 enforces this for the new ones):
+
+| Sensor | Event types |
+|---|---|
+| `db-decoy-01` | `connection_open`, `auth_failure`, `auth_success`, `db_request`, `connection_close` |
+| `file-decoy-01` | `connection_open`, `auth_failure`, `auth_success`, `file_operation`, `synthetic_file_access`, `bait_served`, `connection_close` |
+| `ssh-decoy-01`, `web-decoy-01` | as in 1.1 |
+
+`attributes.protocol` (`ssh`, `http`, `mysql`, `smb`) is required on the two new sensors and must match them. `password_sha256` and `ingress` are forbidden on them.
+
+### Gateway trust boundary
+
+The gateway decides before any upstream handles the request: ordinary sessions go to `demo-app-01`, qualifying suspicious ones to `web-decoy-01`, and once a session is diverted its later requests in that run stay on the decoy (`pin.scope`). There is no promise that the diversion is undetectable.
+
+How upstreams learn the gateway context (for M2's gateway and M4's upstreams; the backend never sees the key):
+
+1. The gateway strips every incoming `X-DG-*` and `X-Forwarded-*` header. Nothing a client sends is ever trusted as a client address, session or result.
+2. The gateway adds `X-DG-Gateway-Context: v1.<payload>.<mac>`. `payload` is base64url JSON `{ "gw_req", "gw_sess", "client_ip", "client_port", "run", "upstream", "iat" }`. `mac` is base64url HMAC-SHA256 over `v1.<payload>` with `DG_GATEWAY_CONTEXT_KEY`. That key is generated per lab run, kept in `deployment/lab.env` only (format `DGLAB-GWCTX-<64 hex>`), and never logged or committed.
+3. The upstream checks the MAC (constant-time), `run` equal to its own run, `upstream` equal to itself, and `iat` within 30 s. If all pass, the context is `verified`, and the record's `src_ip` is the context's `client_ip`. Otherwise the context is `absent` (no header, for example direct 8080 traffic) or `invalid` with `invalid_reason`; `src_ip` is then the TCP peer, and the record must not carry `gateway_request_id` or `gateway_session_ref`. Schema and backend both reject records that break this.
+4. `gateway_session_ref` (`gws_<hex>`) is a keyed digest of the gateway's own session cookie under the per-run key. It is never the cookie and cannot be replayed as one.
+
+Web decoy events (1.2) carry `attributes.ingress = { gateway_context, gateway_request_id?, gateway_session_ref?, invalid_reason? }`. The normal app's `app_request` telemetry carries the same fields.
+
+### Telemetry records (`telemetry_version` 1.0)
+
+Common fields: `telemetry_version`, `record_id`, `source_id`, `record_type`, `occurred_at`, `lab_run_id`, `capture_mode`, `origin_record_id` (replay only) and `attributes`. Every level is closed: unknown keys are rejected, so no cookie, password or token can ride along.
+
+| `record_type` | Source | Says | Never says |
+|---|---|---|---|
+| `route_decision` | `gateway-01` | which upstream the gateway chose and why: `decision` (`normal_app` or `decoy`), `upstream_id`, `reasons`, `indicator_classes`, `routing_policy_id`, `routing_policy_revision`, `pin`, `client_ip` (TCP peer), `gateway_session_ref`, `decided_before_upstream: true` | how the upstream handled the request |
+| `upstream_result` | `gateway-01` | what the gateway saw come back: `outcome`, `status_code`, `response_bytes`, `elapsed_ms` | what the upstream logged |
+| `app_request` | `demo-app-01` | the normal app's own handling record: `app_request_id`, gateway context, `src_ip`, `path`, `status_code`, `route_class`, optional `login.outcome` | any password, hash, cookie or real data |
+
+Routing reasons: `no_trigger` (only with `normal_app`), `session_pinned`, `source_pinned`, `web_attack_indicator` (needs `indicator_classes` from the shared structural indicator vocabulary; lexical indicators alone never divert), `hidden_path_probe`, `bait_path_requested`, `honeytoken_presented`, `manual_lab_rule`.
+
+Ingest: `POST /api/ingest/telemetry` with `{ "records": [ ... ] }`, max 100 records or 1 MiB, JSON only. The response has the same shape as event ingest: `{ "accepted", "duplicates", "rejected": [ { "index", "reason" } ] }`. Dedup key: `(namespace, source_id, record_id)`, where the namespace is `live` or `replay:<lab_run_id>`. A record whose run already has the other capture mode, in events or telemetry, is rejected. Telemetry never creates or activates a run, so `/api/runs`' `active` flag and response eligibility depend on honeypot events only.
+
+### Requested routing versus observed handling
+
+Three different claims, kept apart:
+
+1. **Requested**: the gateway's `route_decision`.
+2. **Gateway-observed**: the gateway's `upstream_result`.
+3. **Upstream-observed**: the upstream's own record (a `web-decoy-01` event or a `demo-app-01` `app_request`) with a `verified` context naming the same `gateway_request_id`.
+
+The backend joins these only through that verified id, never by IP and time alone. `GET /api/gateway/requests/{gateway_request_id}` returns the decision, the gateway-observed result, the upstream records and `correlation`:
+
+| `correlation.status` | Means |
+|---|---|
+| `observed` | decision and upstream record agree: same run and mode, the upstream named in the decision, the same client address, and the upstream record within 30 s of the decision |
+| `gateway_only` | a decision exists; no upstream record carries its id (not received, not logged, or never handled) |
+| `upstream_only` | an upstream record carries a verified id with no matching decision received |
+| `conflict` | they disagree; `reasons` lists `wrong_upstream`, `client_mismatch`, `run_mismatch`, `time_skew` or `context_reused` (more than one upstream record with one id) |
+
+`GET /api/incidents/{id}/routing` (web cases and investigations) lists the case's gateway requests with their correlation status, the case's `gateway_session_refs`, an `ingress` count (`verified`, `absent`, `invalid`), and `normal_app_contact`. Normal-app contact is the `app_request` records whose verified `gateway_session_ref` is one of the case's. It always comes with `coverage` (`first_record_at`, `last_record_at`, `records_in_run`, and the demo app's collection state) and a statement. Missing logs never prove an asset was untouched.
+
+Gateway decisions and upstream results never enter rules or scores and never verify a block. Verification is unchanged: only a `blocked_request` from `web-decoy-01` with the full tuple counts. Behind the gateway, its `src_ip` comes from the verified context; with an `absent` or `invalid` context, it is the gateway's peer address and fails `wrong_source`.
+
+### Database authentication deception (`db-decoy-01`)
+
+MySQL sends a salted challenge-response proof, never the password. So there is no `password_sha256`, and attempts cannot be shown to repeat or differ. Auth events carry `attributes.credential = { scheme, proof_check, verifier_version }`:
+
+- `scheme` is one of `mysql_native_password`, `caching_sha2_password`, `ntlmv2`, `ntlmv1`, `smb_anonymous`, `smb_guest` or `other`.
+- `proof_check: matched_honeytoken` means the decoy verified the proof against a planted lab credential it was configured with (it holds only the protocol verifier, for example SHA1(SHA1(password)), never the value). `honeytoken_id` is then required. With any other `proof_check`, `honeytoken_id` is forbidden.
+- `not_matched` means checked against every planted credential for that user, and none verified. `not_checked`, `unsupported_scheme` and `malformed` mean nothing is known about the password.
+- The decoy never asks a client to switch to cleartext authentication.
+- `auth_success` means the emulator completed the handshake as if the login succeeded. It does not mean a database session exists.
+
+`db_request` records a command packet received after the handshake. `attributes.db = { command, statement_verb, length_bytes, schema_name?, execution: "not_supported", error_code? }`. There is no statement text. The emulator executes nothing.
+
+### File service (`file-decoy-01`)
+
+Auth uses the same `credential` record (NTLM is challenge-response too). `file_operation` carries `attributes.file = { operation, share, path, bytes, content_sha256, digest_scope, storage, magic_type_hint }`.
+
+- Uploads are stored `quarantined_inert` or `discarded`. They are never executed, opened by a parser, or scanned into a verdict.
+- `magic_type_hint` comes from the first bytes only and is not a verdict.
+- No 1.2 attribute key may contain `verdict`, `malware` or `malicious`.
+- A synthetic file read over SMB is `synthetic_file_access` (and `bait_served` if it holds tokens).
+
+### Archive bait (`web:/backup/backup.zip`)
+
+The zip is served by `web-decoy-01`, normally behind the gateway's `bait_path_requested` or pinned diversion. It holds only fixed plain-text and CSV entries with synthetic `DGLAB-` values and `example.com` identities.
+
+The serving emits `synthetic_file_access` (outcome `served`) and `bait_served` with:
+- `asset_id`, `honeytoken_ids` (every token in any entry), `issuance_id`, `evidence_basis: "sensor_response"`;
+- `sha256` and `size_bytes` with `digest_scope: "full_asset"`, and `fixture_version`;
+- optional `issued_expires_at`;
+- `archive = { format: "zip", compression, entries: [ { name, size_bytes, sha256, honeytoken_ids } ], contains_executable: false, auto_run: false }`. Entry names must end in `.txt` or `.csv` and have no path. Anything else is rejected.
+
+`transfer = { response_status, content_length, bytes_written, completion }` describes the server's side only. `body_written` means the decoy finished writing the body to its socket.
+
+Claims ladder:
+
+| Claim | Evidence | Shown as |
+|---|---|---|
+| requested | `http_request` for the path | request |
+| served | `bait_served` / `synthetic_file_access`, `sensor_response` | response evidence |
+| client finished downloading | **never observed** (`body_written` is not this) | not claimed |
+| extracted or opened | **never observed** | not claimed |
+| a planted credential from it was used | a later `honeytoken_id` presentation on the token's `valid_on` sensor | causal token link (below) |
+
+Tokens `tok_db_01` (valid on `db-decoy-01`) and `tok_smb_01` (valid on `file-decoy-01`) are planted in the zip on `web-decoy-01`. Causal token matching is unchanged. One serving gives a `unique` strong candidate. Several servings of the same static credential give `ambiguous`, and the backend never picks one. No serving gives an orphan R09. Re-serving the zip, ingest duplicates, gateway decisions and analyst decisions add no points.
+
+### Cases and rules (v1.2)
+
+| Case kind | Key | Gets |
+|---|---|---|
+| `db_session` / `db_activity` | as `ssh_session` / `ssh_unsessioned`, on `db-decoy-01` | MySQL events with / without a connection id |
+| `file_session` / `file_activity` | as above, on `file-decoy-01` | SMB events with / without a session reference |
+| `credential_attempts` | SSH: unchanged key (existing case ids kept). New sensors: `sensor_id + src_ip + username + run + mode` | R01 (SSH) or R11 |
+
+No IP/time `candidate` links are made for the new sensors; they join investigations only through causal token links the analyst confirms.
+
+| Rule | Fires when | Mapping | Weight |
+|---|---|---|---|
+| R11@1 | 5+ `auth_failure` on `db-decoy-01` or `file-decoy-01`, same sensor + src_ip + username, within 60 s, across connections | T1110, `attempted`; the label counts attempts, because a challenge-response proof cannot show distinct passwords | 20 |
+| R12@1 | `file_operation` `write`/`create` with `bytes` > 0 and `storage: quarantined_inert` | no technique (`technique_id: null`, `emulated`): "content written to an emulated share; stored inert; not a malware verdict" | 15 |
+| R04@3 (file only) | `synthetic_file_access` served by `file-decoy-01` | stage `lure_access`, "synthetic lure retrieved over SMB". Web and SSH output stays R04@2 | 30 |
+| R09@2 | unchanged; covers the new `valid_on` sensors | — | 15 after confirmation |
+
+`db_request` is stored and shown, and not scored. All summaries stay rule-generated text; there is no AI feature in v1.2.
+
+### Health and capabilities
+
+`GET /api/health`:
+- `sensors` and `sensor_health` list all four honeypots. A honeypot with no heartbeat shows `collection: "never"`.
+- New `telemetry_health.gateway-01` and `telemetry_health.demo-app-01` use the same fields, with `last_record_at` in place of `last_event_at`, plus `counted_as_honeypot: false`.
+
+`GET /api/sources` returns the registry with `honeypot_count: 4`.
+
+`GET /api/incidents/{id}/response-eligibility` adds:
+- `response_scope = { "enforced_on": ["web-decoy-01"], "not_enforced_on": ["ssh-decoy-01", "db-decoy-01", "file-decoy-01"] }`;
+- reason code `response_unsupported_sensor` for a case on `db-decoy-01` or `file-decoy-01`. A web block never blocks MySQL or SMB.
+
+Errors:
+
+| Case | Answer |
+|---|---|
+| A body that is not JSON, or not `{ "records": [...] }` | 400 `bad_request` |
+| Wrong content type | 415 |
+| More than 100 records or 1 MiB | 413 |
+| `GET /api/gateway/requests/{id}` with no record of that id | 404 `not_found` |
+| `/routing` on a case kind without web traffic | 200 with empty lists and the coverage statement |
+
+### Migration and rollback (v1.2)
+
+DB migration 4 creates the `telemetry` and `telemetry_heartbeats` tables. The file is backed up first to `backend/data/dg.db.v3.bak`. No event, case, finding or link row is rewritten, and all case ids are kept. Rollback: stop the backend, restore `dg.db.v3.bak`, and check out the previous commit. A v4 file may hold 1.2 events that older code does not understand.

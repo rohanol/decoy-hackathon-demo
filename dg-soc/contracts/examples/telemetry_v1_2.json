@@ -1,0 +1,1514 @@
+{
+  "_note": "PROVISIONAL synthetic fixtures for contract v1.2. No gateway, demo-app, MySQL or SMB producer exists yet, so nothing here is a real producer record; replace each with a real record when its producer lands. All addresses are the lab's; all secrets are absent (ids only). Tokens tok_db_01 and tok_smb_01 must be added to config/honeytokens.yaml by M4 (planted_on web-decoy-01, valid_on db-decoy-01 / file-decoy-01) together with bait asset web:/backup/backup.zip.",
+  "provisional": true,
+  "contract_version": "1.2",
+  "events_valid": [
+    {
+      "schema_version": "1.2",
+      "source_record_id": "web-0002",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-02T05:00:12Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 51544,
+      "session_id": null,
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "http",
+        "method": "GET",
+        "path": "/search",
+        "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+        "status_code": 200,
+        "response_class": "fake_error",
+        "request_id": "req-0002",
+        "ingress": {
+          "gateway_context": "verified",
+          "gateway_request_id": "gw_00000000000002",
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "web-0003",
+      "sensor_id": "web-decoy-01",
+      "event_type": "synthetic_file_access",
+      "occurred_at": "2026-11-02T05:00:20Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 51544,
+      "session_id": null,
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "http",
+        "method": "GET",
+        "path": "/backup/backup.zip",
+        "status_code": 200,
+        "response_class": "fake_data",
+        "request_id": "req-0003",
+        "asset_id": "web:/backup/backup.zip",
+        "outcome": "served",
+        "size_bytes": 1184,
+        "sha256": "aec73e82bfb864eaf75117b843bf85f47cd1b4fe7f331be7821b9010a48df523",
+        "digest_scope": "full_asset",
+        "fixture_version": "backup-zip@1",
+        "ingress": {
+          "gateway_context": "verified",
+          "gateway_request_id": "gw_00000000000003",
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+        },
+        "transfer": {
+          "response_status": 200,
+          "content_length": 1184,
+          "bytes_written": 1184,
+          "completion": "body_written"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "web-0003-bait",
+      "sensor_id": "web-decoy-01",
+      "event_type": "bait_served",
+      "occurred_at": "2026-11-02T05:00:20Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 51544,
+      "session_id": null,
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "http",
+        "request_id": "req-0003",
+        "asset_id": "web:/backup/backup.zip",
+        "honeytoken_ids": [
+          "tok_db_01",
+          "tok_smb_01"
+        ],
+        "issuance_id": "iss-zip-0001",
+        "evidence_basis": "sensor_response",
+        "sha256": "aec73e82bfb864eaf75117b843bf85f47cd1b4fe7f331be7821b9010a48df523",
+        "digest_scope": "full_asset",
+        "size_bytes": 1184,
+        "fixture_version": "backup-zip@1",
+        "issued_expires_at": null,
+        "ingress": {
+          "gateway_context": "verified",
+          "gateway_request_id": "gw_00000000000003",
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+        },
+        "archive": {
+          "format": "zip",
+          "compression": "deflate",
+          "entries": [
+            {
+              "name": "README.txt",
+              "size_bytes": 212,
+              "sha256": "66238f8e9b8d65d0bc73f477588d9a3f80c6fde7c8b6c77cdf6f72c67bcbd81f"
+            },
+            {
+              "name": "db_settings.txt",
+              "size_bytes": 164,
+              "sha256": "2ce5b80310f9cb772080bace081d8e650268270c0a5b5f1b5cf5645c4abee41d",
+              "honeytoken_ids": [
+                "tok_db_01"
+              ]
+            },
+            {
+              "name": "share_accounts.csv",
+              "size_bytes": 301,
+              "sha256": "9bc7469df8a160a8f2cc9797abaf237d19662b5227d7510f2b2e6ac7b975b325",
+              "honeytoken_ids": [
+                "tok_smb_01"
+              ]
+            }
+          ],
+          "contains_executable": false,
+          "auto_run": false
+        },
+        "transfer": {
+          "response_status": 200,
+          "content_length": 1184,
+          "bytes_written": 1184,
+          "completion": "body_written"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "web-0004-direct",
+      "sensor_id": "web-decoy-01",
+      "event_type": "http_request",
+      "occurred_at": "2026-11-02T05:00:25Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 51560,
+      "session_id": null,
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "http",
+        "method": "GET",
+        "path": "/login",
+        "status_code": 200,
+        "response_class": "normal",
+        "request_id": "req-0004",
+        "ingress": {
+          "gateway_context": "absent"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "db-0001",
+      "sensor_id": "db-decoy-01",
+      "event_type": "connection_open",
+      "occurred_at": "2026-11-02T05:01:00Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 40112,
+      "session_id": "db-conn-17",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "mysql",
+        "client_version": "mysql 8.0 (claimed)"
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "db-0002",
+      "sensor_id": "db-decoy-01",
+      "event_type": "auth_failure",
+      "occurred_at": "2026-11-02T05:01:01Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 40112,
+      "session_id": "db-conn-17",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "mysql",
+        "username": "root",
+        "outcome": "denied",
+        "credential": {
+          "scheme": "mysql_native_password",
+          "proof_check": "not_matched",
+          "verifier_version": "mysqlauth@1"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "db-0003",
+      "sensor_id": "db-decoy-01",
+      "event_type": "auth_success",
+      "occurred_at": "2026-11-02T05:01:05Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 40120,
+      "session_id": "db-conn-18",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "mysql",
+        "username": "svc_reports",
+        "outcome": "emulated_success",
+        "honeytoken_id": "tok_db_01",
+        "credential": {
+          "scheme": "mysql_native_password",
+          "proof_check": "matched_honeytoken",
+          "verifier_version": "mysqlauth@1"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "db-0004",
+      "sensor_id": "db-decoy-01",
+      "event_type": "db_request",
+      "occurred_at": "2026-11-02T05:01:06Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 40120,
+      "session_id": "db-conn-18",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "mysql",
+        "outcome": "failed",
+        "db": {
+          "command": "COM_QUERY",
+          "statement_verb": "select",
+          "length_bytes": 38,
+          "execution": "not_supported",
+          "error_code": 1142
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "smb-0001",
+      "sensor_id": "file-decoy-01",
+      "event_type": "auth_success",
+      "occurred_at": "2026-11-02T05:02:00Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 49800,
+      "session_id": "smb-5f2e",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "smb",
+        "username": "backup_ops",
+        "outcome": "emulated_success",
+        "honeytoken_id": "tok_smb_01",
+        "credential": {
+          "scheme": "ntlmv2",
+          "proof_check": "matched_honeytoken",
+          "verifier_version": "ntlmcheck@1"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "smb-0002",
+      "sensor_id": "file-decoy-01",
+      "event_type": "file_operation",
+      "occurred_at": "2026-11-02T05:02:03Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 49800,
+      "session_id": "smb-5f2e",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "smb",
+        "outcome": "emulated_success",
+        "file": {
+          "operation": "list",
+          "share": "archive",
+          "path": "/",
+          "storage": "not_applicable"
+        }
+      }
+    },
+    {
+      "schema_version": "1.2",
+      "source_record_id": "smb-0003",
+      "sensor_id": "file-decoy-01",
+      "event_type": "file_operation",
+      "occurred_at": "2026-11-02T05:02:09Z",
+      "src_ip": "192.168.77.10",
+      "src_port": 49800,
+      "session_id": "smb-5f2e",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "protocol": "smb",
+        "outcome": "emulated_success",
+        "file": {
+          "operation": "write",
+          "share": "archive",
+          "path": "/upd.bin",
+          "bytes": 40960,
+          "content_sha256": "0a2e494a2eba928a13cc81da5b8522244a667dcc6c66943f2267a68127705b42",
+          "digest_scope": "full_content",
+          "storage": "quarantined_inert",
+          "magic_type_hint": "pe"
+        }
+      }
+    }
+  ],
+  "events_invalid": [
+    {
+      "why": "new sensor under an old schema version",
+      "expect_rejected_field": "sensor_id",
+      "record": {
+        "schema_version": "1.1",
+        "source_record_id": "db-0001",
+        "sensor_id": "db-decoy-01",
+        "event_type": "connection_open",
+        "occurred_at": "2026-11-02T05:01:00Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40112,
+        "session_id": "db-conn-17",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "client_version": "mysql 8.0 (claimed)"
+        }
+      }
+    },
+    {
+      "why": "a challenge-response decoy never sees a password, so it cannot send a password hash",
+      "expect_rejected_field": "attributes.password_sha256",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "db-0002",
+        "sensor_id": "db-decoy-01",
+        "event_type": "auth_failure",
+        "occurred_at": "2026-11-02T05:01:01Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40112,
+        "session_id": "db-conn-17",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "username": "root",
+          "outcome": "denied",
+          "credential": {
+            "scheme": "mysql_native_password",
+            "proof_check": "not_matched",
+            "verifier_version": "mysqlauth@1"
+          },
+          "password_sha256": "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
+        }
+      }
+    },
+    {
+      "why": "database login without a credential proof record",
+      "expect_rejected_field": "attributes.credential",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "db-0002",
+        "sensor_id": "db-decoy-01",
+        "event_type": "auth_failure",
+        "occurred_at": "2026-11-02T05:01:01Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40112,
+        "session_id": "db-conn-17",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "username": "root",
+          "outcome": "denied"
+        }
+      }
+    },
+    {
+      "why": "the emulator never executes queries",
+      "expect_rejected_field": "attributes.db.execution",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "db-0004",
+        "sensor_id": "db-decoy-01",
+        "event_type": "db_request",
+        "occurred_at": "2026-11-02T05:01:06Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40120,
+        "session_id": "db-conn-18",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "outcome": "failed",
+          "db": {
+            "command": "COM_QUERY",
+            "statement_verb": "select",
+            "length_bytes": 38,
+            "execution": "executed",
+            "error_code": 1142
+          }
+        }
+      }
+    },
+    {
+      "why": "honeytoken_id without a verified proof",
+      "expect_rejected_field": "attributes.honeytoken_id",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "db-0002",
+        "sensor_id": "db-decoy-01",
+        "event_type": "auth_failure",
+        "occurred_at": "2026-11-02T05:01:01Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40112,
+        "session_id": "db-conn-17",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "username": "root",
+          "outcome": "denied",
+          "credential": {
+            "scheme": "mysql_native_password",
+            "proof_check": "not_matched",
+            "verifier_version": "mysqlauth@1"
+          },
+          "honeytoken_id": "tok_db_01"
+        }
+      }
+    },
+    {
+      "why": "a request without a verified gateway context cannot name a gateway request",
+      "expect_rejected_field": "attributes.ingress.gateway_request_id",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "web-0004-direct",
+        "sensor_id": "web-decoy-01",
+        "event_type": "http_request",
+        "occurred_at": "2026-11-02T05:00:25Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 51560,
+        "session_id": null,
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "http",
+          "method": "GET",
+          "path": "/login",
+          "status_code": 200,
+          "response_class": "normal",
+          "request_id": "req-0004",
+          "ingress": {
+            "gateway_context": "absent",
+            "gateway_request_id": "gw_00000000000009"
+          }
+        }
+      }
+    },
+    {
+      "why": "archive bait may hold only plain text and CSV entries",
+      "expect_rejected_field": "attributes.archive.entries",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "web-0003-bait",
+        "sensor_id": "web-decoy-01",
+        "event_type": "bait_served",
+        "occurred_at": "2026-11-02T05:00:20Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 51544,
+        "session_id": null,
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "http",
+          "request_id": "req-0003",
+          "asset_id": "web:/backup/backup.zip",
+          "honeytoken_ids": [
+            "tok_db_01",
+            "tok_smb_01"
+          ],
+          "issuance_id": "iss-zip-0001",
+          "evidence_basis": "sensor_response",
+          "sha256": "aec73e82bfb864eaf75117b843bf85f47cd1b4fe7f331be7821b9010a48df523",
+          "digest_scope": "full_asset",
+          "size_bytes": 1184,
+          "fixture_version": "backup-zip@1",
+          "issued_expires_at": null,
+          "ingress": {
+            "gateway_context": "verified",
+            "gateway_request_id": "gw_00000000000003",
+            "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+          },
+          "archive": {
+            "format": "zip",
+            "compression": "deflate",
+            "entries": [
+              {
+                "name": "README.txt",
+                "size_bytes": 212,
+                "sha256": "66238f8e9b8d65d0bc73f477588d9a3f80c6fde7c8b6c77cdf6f72c67bcbd81f"
+              },
+              {
+                "name": "db_settings.txt",
+                "size_bytes": 164,
+                "sha256": "2ce5b80310f9cb772080bace081d8e650268270c0a5b5f1b5cf5645c4abee41d",
+                "honeytoken_ids": [
+                  "tok_db_01"
+                ]
+              },
+              {
+                "name": "share_accounts.csv",
+                "size_bytes": 301,
+                "sha256": "9bc7469df8a160a8f2cc9797abaf237d19662b5227d7510f2b2e6ac7b975b325",
+                "honeytoken_ids": [
+                  "tok_smb_01"
+                ]
+              },
+              {
+                "name": "setup.exe",
+                "size_bytes": 10,
+                "sha256": "9095bdb859308b62acf04036ffd4adfe366d7f737d276eb6c46ae434f3816c9b"
+              }
+            ],
+            "contains_executable": false,
+            "auto_run": false
+          },
+          "transfer": {
+            "response_status": 200,
+            "content_length": 1184,
+            "bytes_written": 1184,
+            "completion": "body_written"
+          }
+        }
+      }
+    },
+    {
+      "why": "no malware verdict from a file-service record",
+      "expect_rejected_field": "attributes",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "smb-0003",
+        "sensor_id": "file-decoy-01",
+        "event_type": "file_operation",
+        "occurred_at": "2026-11-02T05:02:09Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 49800,
+        "session_id": "smb-5f2e",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "smb",
+          "outcome": "emulated_success",
+          "file": {
+            "operation": "write",
+            "share": "archive",
+            "path": "/upd.bin",
+            "bytes": 40960,
+            "content_sha256": "0a2e494a2eba928a13cc81da5b8522244a667dcc6c66943f2267a68127705b42",
+            "digest_scope": "full_content",
+            "storage": "quarantined_inert",
+            "magic_type_hint": "pe"
+          },
+          "malware_verdict": "clean"
+        }
+      }
+    },
+    {
+      "why": "unsupported schema version",
+      "expect_rejected_field": "schema_version",
+      "record": {
+        "schema_version": "1.3",
+        "source_record_id": "web-0002",
+        "sensor_id": "web-decoy-01",
+        "event_type": "http_request",
+        "occurred_at": "2026-11-02T05:00:12Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 51544,
+        "session_id": null,
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "http",
+          "method": "GET",
+          "path": "/search",
+          "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+          "status_code": 200,
+          "response_class": "fake_error",
+          "request_id": "req-0002",
+          "ingress": {
+            "gateway_context": "verified",
+            "gateway_request_id": "gw_00000000000002",
+            "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+          }
+        }
+      }
+    },
+    {
+      "why": "file_operation belongs to file-decoy-01 only",
+      "expect_rejected_field": "event_type",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "web-0002",
+        "sensor_id": "web-decoy-01",
+        "event_type": "file_operation",
+        "occurred_at": "2026-11-02T05:00:12Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 51544,
+        "session_id": null,
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "http",
+          "method": "GET",
+          "path": "/search",
+          "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+          "status_code": 200,
+          "response_class": "fake_error",
+          "request_id": "req-0002",
+          "ingress": {
+            "gateway_context": "verified",
+            "gateway_request_id": "gw_00000000000002",
+            "gateway_session_ref": "gws_3f9a1c2b4d5e6f70"
+          },
+          "file": {
+            "operation": "list",
+            "share": "x"
+          }
+        }
+      }
+    },
+    {
+      "why": "db and file decoys are not reached through the HTTP gateway",
+      "expect_rejected_field": "attributes.ingress",
+      "record": {
+        "schema_version": "1.2",
+        "source_record_id": "db-0003",
+        "sensor_id": "db-decoy-01",
+        "event_type": "auth_success",
+        "occurred_at": "2026-11-02T05:01:05Z",
+        "src_ip": "192.168.77.10",
+        "src_port": 40120,
+        "session_id": "db-conn-18",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "protocol": "mysql",
+          "username": "svc_reports",
+          "outcome": "emulated_success",
+          "honeytoken_id": "tok_db_01",
+          "credential": {
+            "scheme": "mysql_native_password",
+            "proof_check": "matched_honeytoken",
+            "verifier_version": "mysqlauth@1"
+          },
+          "ingress": {
+            "gateway_context": "absent"
+          }
+        }
+      }
+    }
+  ],
+  "telemetry_valid": [
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-dec-0001",
+      "source_id": "gateway-01",
+      "record_type": "route_decision",
+      "occurred_at": "2026-11-02T05:00:05Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000001",
+        "client_ip": "192.168.77.10",
+        "client_port": 51544,
+        "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+        "method": "GET",
+        "path": "/",
+        "decision": "normal_app",
+        "upstream_id": "demo-app-01",
+        "reasons": [
+          "no_trigger"
+        ],
+        "routing_policy_id": "route-policy-lab",
+        "routing_policy_revision": 4,
+        "pin": {
+          "scope": "none",
+          "pinned_at": null,
+          "expires_at": null
+        },
+        "decided_before_upstream": true
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "app-0001",
+      "source_id": "demo-app-01",
+      "record_type": "app_request",
+      "occurred_at": "2026-11-02T05:00:05Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "app_request_id": "app-req-0001",
+        "gateway_context": "verified",
+        "gateway_request_id": "gw_00000000000001",
+        "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+        "src_ip": "192.168.77.10",
+        "method": "GET",
+        "path": "/",
+        "status_code": 200,
+        "route_class": "page"
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-res-0001",
+      "source_id": "gateway-01",
+      "record_type": "upstream_result",
+      "occurred_at": "2026-11-02T05:00:05Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000001",
+        "upstream_id": "demo-app-01",
+        "outcome": "response_received",
+        "status_code": 200,
+        "response_bytes": 5120,
+        "elapsed_ms": 9
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-dec-0002",
+      "source_id": "gateway-01",
+      "record_type": "route_decision",
+      "occurred_at": "2026-11-02T05:00:12Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000002",
+        "client_ip": "192.168.77.10",
+        "client_port": 51544,
+        "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+        "method": "GET",
+        "path": "/search",
+        "decision": "decoy",
+        "upstream_id": "web-decoy-01",
+        "reasons": [
+          "web_attack_indicator"
+        ],
+        "routing_policy_id": "route-policy-lab",
+        "routing_policy_revision": 4,
+        "pin": {
+          "scope": "session",
+          "pinned_at": "2026-11-02T05:00:12Z",
+          "expires_at": null
+        },
+        "decided_before_upstream": true,
+        "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+        "indicator_classes": [
+          "sqli"
+        ]
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-res-0002",
+      "source_id": "gateway-01",
+      "record_type": "upstream_result",
+      "occurred_at": "2026-11-02T05:00:12Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000002",
+        "upstream_id": "web-decoy-01",
+        "outcome": "response_received",
+        "status_code": 200,
+        "response_bytes": 812,
+        "elapsed_ms": 9
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-dec-0003",
+      "source_id": "gateway-01",
+      "record_type": "route_decision",
+      "occurred_at": "2026-11-02T05:00:20Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000003",
+        "client_ip": "192.168.77.10",
+        "client_port": 51544,
+        "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+        "method": "GET",
+        "path": "/backup/backup.zip",
+        "decision": "decoy",
+        "upstream_id": "web-decoy-01",
+        "reasons": [
+          "session_pinned",
+          "bait_path_requested"
+        ],
+        "routing_policy_id": "route-policy-lab",
+        "routing_policy_revision": 4,
+        "pin": {
+          "scope": "session",
+          "pinned_at": "2026-11-02T05:00:20Z",
+          "expires_at": null
+        },
+        "decided_before_upstream": true
+      }
+    },
+    {
+      "telemetry_version": "1.0",
+      "record_id": "gw-res-0003",
+      "source_id": "gateway-01",
+      "record_type": "upstream_result",
+      "occurred_at": "2026-11-02T05:00:20Z",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "attributes": {
+        "gateway_request_id": "gw_00000000000003",
+        "upstream_id": "web-decoy-01",
+        "outcome": "response_received",
+        "status_code": 200,
+        "response_bytes": 1184,
+        "elapsed_ms": 9
+      }
+    }
+  ],
+  "telemetry_invalid": [
+    {
+      "why": "a normal-app decision has no trigger",
+      "expect_rejected_field": "attributes.reasons",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0001",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000001",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/",
+          "decision": "normal_app",
+          "upstream_id": "demo-app-01",
+          "reasons": [
+            "session_pinned"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "none",
+            "pinned_at": null,
+            "expires_at": null
+          },
+          "decided_before_upstream": true
+        }
+      }
+    },
+    {
+      "why": "the app cannot name a gateway request without a verified context",
+      "expect_rejected_field": "attributes.gateway_request_id",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "app-0001",
+        "source_id": "demo-app-01",
+        "record_type": "app_request",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "app_request_id": "app-req-0001",
+          "gateway_context": "absent",
+          "gateway_request_id": "gw_00000000000001",
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "src_ip": "192.168.77.10",
+          "method": "GET",
+          "path": "/",
+          "status_code": 200,
+          "route_class": "page"
+        }
+      }
+    },
+    {
+      "why": "the decision is taken before the upstream runs",
+      "expect_rejected_field": "attributes.decided_before_upstream",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0002",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:12Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000002",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/search",
+          "decision": "decoy",
+          "upstream_id": "web-decoy-01",
+          "reasons": [
+            "web_attack_indicator"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "session",
+            "pinned_at": "2026-11-02T05:00:12Z",
+            "expires_at": null
+          },
+          "decided_before_upstream": false,
+          "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+          "indicator_classes": [
+            "sqli"
+          ]
+        }
+      }
+    },
+    {
+      "why": "a routing decision cannot claim how the upstream handled it",
+      "expect_rejected_field": "attributes",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0002",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:12Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000002",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/search",
+          "decision": "decoy",
+          "upstream_id": "web-decoy-01",
+          "reasons": [
+            "web_attack_indicator"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "session",
+            "pinned_at": "2026-11-02T05:00:12Z",
+            "expires_at": null
+          },
+          "decided_before_upstream": true,
+          "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--",
+          "indicator_classes": [
+            "sqli"
+          ],
+          "upstream_handled": true
+        }
+      }
+    },
+    {
+      "why": "unsupported telemetry version",
+      "expect_rejected_field": "telemetry_version",
+      "record": {
+        "telemetry_version": "2.0",
+        "record_id": "gw-dec-0001",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000001",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/",
+          "decision": "normal_app",
+          "upstream_id": "demo-app-01",
+          "reasons": [
+            "no_trigger"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "none",
+            "pinned_at": null,
+            "expires_at": null
+          },
+          "decided_before_upstream": true
+        }
+      }
+    },
+    {
+      "why": "a honeypot is not a telemetry source",
+      "expect_rejected_field": "source_id",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0001",
+        "source_id": "web-decoy-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000001",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/",
+          "decision": "normal_app",
+          "upstream_id": "demo-app-01",
+          "reasons": [
+            "no_trigger"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "none",
+            "pinned_at": null,
+            "expires_at": null
+          },
+          "decided_before_upstream": true
+        }
+      }
+    },
+    {
+      "why": "attack-indicator diversion names its classes",
+      "expect_rejected_field": "attributes.indicator_classes",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0002",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:12Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000002",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/search",
+          "decision": "decoy",
+          "upstream_id": "web-decoy-01",
+          "reasons": [
+            "web_attack_indicator"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "session",
+            "pinned_at": "2026-11-02T05:00:12Z",
+            "expires_at": null
+          },
+          "decided_before_upstream": true,
+          "query_redacted": "q=1%27%20UNION%20SELECT%20name%20FROM%20users--"
+        }
+      }
+    },
+    {
+      "why": "no cookie, even redacted, in a gateway record",
+      "expect_rejected_field": "attributes",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0001",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000001",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/",
+          "decision": "normal_app",
+          "upstream_id": "demo-app-01",
+          "reasons": [
+            "no_trigger"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "none",
+            "pinned_at": null,
+            "expires_at": null
+          },
+          "decided_before_upstream": true,
+          "cookie": "<redacted>"
+        }
+      }
+    },
+    {
+      "why": "an honeypot event is not a telemetry record",
+      "expect_rejected_field": "schema_version",
+      "record": {
+        "telemetry_version": "1.0",
+        "record_id": "gw-dec-0001",
+        "source_id": "gateway-01",
+        "record_type": "route_decision",
+        "occurred_at": "2026-11-02T05:00:05Z",
+        "lab_run_id": "run-2026-11-02-01",
+        "capture_mode": "live",
+        "attributes": {
+          "gateway_request_id": "gw_00000000000001",
+          "client_ip": "192.168.77.10",
+          "client_port": 51544,
+          "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+          "method": "GET",
+          "path": "/",
+          "decision": "normal_app",
+          "upstream_id": "demo-app-01",
+          "reasons": [
+            "no_trigger"
+          ],
+          "routing_policy_id": "route-policy-lab",
+          "routing_policy_revision": 4,
+          "pin": {
+            "scope": "none",
+            "pinned_at": null,
+            "expires_at": null
+          },
+          "decided_before_upstream": true
+        },
+        "schema_version": "1.2"
+      }
+    }
+  ],
+  "heartbeats": {
+    "valid": [
+      {
+        "collector_id": "adapter-laptop-b",
+        "sent_at": "2026-11-02T05:03:00Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-02T05:02:59Z",
+        "last_ingest_at": "2026-11-02T05:02:58Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 4,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "sensor_id": "db-decoy-01"
+      },
+      {
+        "collector_id": "adapter-laptop-b",
+        "sent_at": "2026-11-02T05:03:00Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-02T05:02:59Z",
+        "last_ingest_at": "2026-11-02T05:02:58Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 4,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "sensor_id": "file-decoy-01"
+      },
+      {
+        "collector_id": "gateway-collector",
+        "sent_at": "2026-11-02T05:03:00Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-02T05:02:59Z",
+        "last_ingest_at": "2026-11-02T05:02:58Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 4,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "source_id": "gateway-01"
+      },
+      {
+        "collector_id": "gateway-collector",
+        "sent_at": "2026-11-02T05:03:00Z",
+        "process_state": "running",
+        "last_read_at": "2026-11-02T05:02:59Z",
+        "last_ingest_at": "2026-11-02T05:02:58Z",
+        "backlog_records": 0,
+        "oldest_backlog_age_s": 0,
+        "error_count": 0,
+        "ingest": {
+          "accepted": 4,
+          "duplicate": 0,
+          "rejected": 0,
+          "quarantined": 0,
+          "retry": 0
+        },
+        "source_id": "demo-app-01"
+      }
+    ],
+    "invalid": [
+      {
+        "why": "exactly one of sensor_id and source_id",
+        "body": {
+          "collector_id": "adapter-laptop-b",
+          "sent_at": "2026-11-02T05:03:00Z",
+          "process_state": "running",
+          "last_read_at": "2026-11-02T05:02:59Z",
+          "last_ingest_at": "2026-11-02T05:02:58Z",
+          "backlog_records": 0,
+          "oldest_backlog_age_s": 0,
+          "error_count": 0,
+          "ingest": {
+            "accepted": 4,
+            "duplicate": 0,
+            "rejected": 0,
+            "quarantined": 0,
+            "retry": 0
+          },
+          "sensor_id": "db-decoy-01",
+          "source_id": "gateway-01"
+        }
+      },
+      {
+        "why": "a honeypot reports as sensor_id",
+        "body": {
+          "collector_id": "adapter-laptop-b",
+          "sent_at": "2026-11-02T05:03:00Z",
+          "process_state": "running",
+          "last_read_at": "2026-11-02T05:02:59Z",
+          "last_ingest_at": "2026-11-02T05:02:58Z",
+          "backlog_records": 0,
+          "oldest_backlog_age_s": 0,
+          "error_count": 0,
+          "ingest": {
+            "accepted": 4,
+            "duplicate": 0,
+            "rejected": 0,
+            "quarantined": 0,
+            "retry": 0
+          },
+          "source_id": "web-decoy-01"
+        }
+      },
+      {
+        "why": "the gateway is not a sensor",
+        "body": {
+          "collector_id": "adapter-laptop-b",
+          "sent_at": "2026-11-02T05:03:00Z",
+          "process_state": "running",
+          "last_read_at": "2026-11-02T05:02:59Z",
+          "last_ingest_at": "2026-11-02T05:02:58Z",
+          "backlog_records": 0,
+          "oldest_backlog_age_s": 0,
+          "error_count": 0,
+          "ingest": {
+            "accepted": 4,
+            "duplicate": 0,
+            "rejected": 0,
+            "quarantined": 0,
+            "retry": 0
+          },
+          "sensor_id": "gateway-01"
+        }
+      }
+    ]
+  },
+  "honeytokens_yaml_additions": {
+    "bait_assets": [
+      {
+        "asset_id": "web:/backup/backup.zip",
+        "sensor_id": "web-decoy-01",
+        "path": "/backup/backup.zip",
+        "honeytoken_ids": [
+          "tok_db_01",
+          "tok_smb_01"
+        ],
+        "fixture_version": "backup-zip@1"
+      }
+    ],
+    "tokens": [
+      {
+        "id": "tok_db_01",
+        "description": "MySQL login for svc_reports (in backup.zip db_settings.txt)",
+        "username": "svc_reports",
+        "planted_on": "web-decoy-01",
+        "placed_in": "web:/backup/backup.zip db_settings.txt",
+        "valid_on": "db-decoy-01",
+        "value_sha256": "<sha256 of the DGLAB- value, as for the other tokens>"
+      },
+      {
+        "id": "tok_smb_01",
+        "description": "SMB login for backup_ops (in backup.zip share_accounts.csv)",
+        "username": "backup_ops",
+        "planted_on": "web-decoy-01",
+        "placed_in": "web:/backup/backup.zip share_accounts.csv",
+        "valid_on": "file-decoy-01",
+        "value_sha256": "<sha256 of the DGLAB- value, as for the other tokens>"
+      }
+    ]
+  },
+  "expected_reads": {
+    "_note": "Shapes the runtime returns after ingesting events_valid and telemetry_valid above. Backend-issued ids (evt_*, inc_*, lnk_*, fnd_*) and backend clock times are placeholders; every other value is exact.",
+    "ingest_events_response": {
+      "accepted": 11,
+      "duplicates": 0,
+      "rejected": []
+    },
+    "ingest_events_again_response": {
+      "accepted": 0,
+      "duplicates": 11,
+      "rejected": []
+    },
+    "ingest_telemetry_response": {
+      "accepted": 7,
+      "duplicates": 0,
+      "rejected": []
+    },
+    "gateway_request": {
+      "gateway_request_id": "gw_00000000000002",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "decision": {
+        "record_id": "gw-dec-0002",
+        "decision": "decoy",
+        "upstream_id": "web-decoy-01",
+        "reasons": [
+          "web_attack_indicator"
+        ],
+        "indicator_classes": [
+          "sqli"
+        ],
+        "client_ip": "192.168.77.10",
+        "gateway_session_ref": "gws_3f9a1c2b4d5e6f70",
+        "routing_policy_id": "route-policy-lab",
+        "routing_policy_revision": 4,
+        "pin_scope": "session",
+        "occurred_at": "2026-11-02T05:00:12Z"
+      },
+      "gateway_observed_upstream": {
+        "record_id": "gw-res-0002",
+        "upstream_id": "web-decoy-01",
+        "outcome": "response_received",
+        "status_code": 200
+      },
+      "upstream_handling": [
+        {
+          "kind": "event",
+          "event_id": "evt_<id>",
+          "sensor_id": "web-decoy-01",
+          "event_type": "http_request",
+          "incident_id": "inc_<id>",
+          "occurred_at": "2026-11-02T05:00:12Z"
+        }
+      ],
+      "correlation": {
+        "status": "observed",
+        "reasons": []
+      },
+      "note": "The decision is what the gateway requested; upstream_handling lists the upstream's own records that carry this verified gateway request id."
+    },
+    "incident_routing_web_case": {
+      "incident_id": "inc_<web activity case>",
+      "gateway_requests": [
+        {
+          "gateway_request_id": "gw_00000000000002",
+          "decision": "decoy",
+          "reasons": [
+            "web_attack_indicator"
+          ],
+          "correlation_status": "observed"
+        },
+        {
+          "gateway_request_id": "gw_00000000000003",
+          "decision": "decoy",
+          "reasons": [
+            "session_pinned",
+            "bait_path_requested"
+          ],
+          "correlation_status": "observed"
+        }
+      ],
+      "gateway_session_refs": [
+        "gws_3f9a1c2b4d5e6f70"
+      ],
+      "ingress": {
+        "verified": 3,
+        "absent": 1,
+        "invalid": 0
+      },
+      "normal_app_contact": {
+        "records": [
+          {
+            "record_id": "app-0001",
+            "gateway_request_id": "gw_00000000000001",
+            "method": "GET",
+            "path": "/",
+            "status_code": 200,
+            "occurred_at": "2026-11-02T05:00:05Z"
+          }
+        ],
+        "coverage": {
+          "source_id": "demo-app-01",
+          "lab_run_id": "run-2026-11-02-01",
+          "first_record_at": "2026-11-02T05:00:05Z",
+          "last_record_at": "2026-11-02T05:00:05Z",
+          "records_in_run": 1,
+          "collection": "never"
+        },
+        "statement": "1 normal-app request recorded in this case's gateway session(s) between 2026-11-02T05:00:05Z and 2026-11-02T05:00:05Z. Counts only the records demo-app-01 logged and the backend received. Missing records do not show that the app was not contacted."
+      }
+    },
+    "sources_excerpt": {
+      "honeypots": [
+        "ssh-decoy-01",
+        "web-decoy-01",
+        "db-decoy-01",
+        "file-decoy-01"
+      ],
+      "telemetry_sources": [
+        "gateway-01",
+        "demo-app-01"
+      ],
+      "honeypot_count": 4
+    },
+    "health_excerpt": {
+      "sensor_health_keys": [
+        "ssh-decoy-01",
+        "web-decoy-01",
+        "db-decoy-01",
+        "file-decoy-01"
+      ],
+      "telemetry_health_keys": [
+        "gateway-01",
+        "demo-app-01"
+      ],
+      "telemetry_health_row": {
+        "service": "unknown",
+        "collection": "never",
+        "activity": "recent",
+        "collector_id": null,
+        "heartbeat_at": null,
+        "last_record_at": "2026-11-02T05:00:20Z",
+        "counted_as_honeypot": false
+      }
+    },
+    "eligibility_db_case": {
+      "incident_id": "inc_<db session case>",
+      "eligible": false,
+      "target_ip": "192.168.77.10",
+      "lab_run_id": "run-2026-11-02-01",
+      "capture_mode": "live",
+      "reasons_include": [
+        {
+          "code": "response_unsupported_sensor",
+          "message": "db-decoy-01 has no response capability; the only block is on web-decoy-01"
+        }
+      ],
+      "response_scope": {
+        "enforced_on": [
+          "web-decoy-01"
+        ],
+        "not_enforced_on": [
+          "ssh-decoy-01",
+          "db-decoy-01",
+          "file-decoy-01"
+        ]
+      }
+    },
+    "token_link_db": {
+      "kind": "strong_candidate",
+      "attribution": "unique",
+      "from_sensor": "web-decoy-01",
+      "to_sensor": "db-decoy-01",
+      "basis": "honeytoken tok_db_01 served by web:/backup/backup.zip (sensor response)",
+      "candidate_issuance_ids": []
+    },
+    "findings_db_case": [
+      {
+        "rule_id": "R09",
+        "token_relation": "linked",
+        "attribution": "unique",
+        "points": 0,
+        "pending_confirmation": true
+      }
+    ],
+    "findings_file_case_rules": [
+      "R09",
+      "R12"
+    ]
+  }
+}

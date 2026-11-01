@@ -1468,6 +1468,15 @@ export function ChakraView() {
         is a link the backend reported. A confirmed link means the same source followed the planted
         trail. It does not identify a person.
       </p>
+      {(() => {
+        const other = events.filter((event) => event.sensor_id !== 'ssh-decoy-01' && event.sensor_id !== 'web-decoy-01').length;
+        return other > 0 ? (
+          <p className="graph__note">
+            {other} event{other === 1 ? '' : 's'} from the MySQL or SMB decoys are not drawn on this wheel, which maps the
+            SSH and web fiction only. They are on the incident page and in the Live Feed.
+          </p>
+        ) : null;
+      })()}
 
       {deciding ? (
         <LinkDecisionModal

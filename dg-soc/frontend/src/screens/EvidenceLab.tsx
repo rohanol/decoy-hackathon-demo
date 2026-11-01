@@ -26,6 +26,7 @@ import { eventTypeLabel } from '../copy';
 import { buildDevScenarios, type DevScenario } from '../evidence/devScenarios';
 import { timeUtcZ } from '../lib/format';
 import type { SocEvent } from '../types/api';
+import { ProvisionalV12Lab } from '../v12/ProvisionalLab';
 
 function gist(event: SocEvent): string {
   const a = event.attributes ?? {};
@@ -182,6 +183,8 @@ export function EvidenceLab() {
           </a>
         ))}
       </nav>
+      <a className="pill" href="#v12-provisional">Contract v1.2 (provisional)</a>
+      <ProvisionalV12Lab onOpen={setOpen} />
       {scenarios.map((scenario) => (
         <Scenario key={scenario.id} scenario={scenario} onOpen={setOpen} />
       ))}

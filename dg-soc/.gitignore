@@ -12,6 +12,10 @@ node_modules/
 dist/
 deployment/state/cowrie-log/*
 deployment/state/web-log/*
+deployment/state/db-log/*
+deployment/state/file-log/*
+deployment/state/file-quarantine/*
+deployment/state/lifecycle/*
 deployment/state/blocklist.json
 deployment/state/adapter-checkpoint.json
 deployment/state/response-actions.json

@@ -17,6 +17,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { EmptyState, ErrorCard, SkeletonRows, AttackerText } from '../components/primitives';
 import { RawEventDrawer } from '../components/RawEventDrawer';
 import { EventFacets, ModeBadge } from '../components/evidence/bits';
+import { ProtocolFacts } from '../v12/components';
 import {
   filtersActive as anyFilterActive,
   matchesFeedFilters,
@@ -185,6 +186,7 @@ function EventRow({
           <DetailCell event={event} />
           {event.capture_mode === 'replay' ? <ModeBadge mode="replay" /> : null}
           <EventFacets event={event} />
+          <ProtocolFacts event={event} />
           <div className="cell-detail__ids">
             <span>{event.event_id}</span>
             {event.incident_id ? (

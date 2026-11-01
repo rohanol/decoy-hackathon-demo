@@ -275,6 +275,9 @@ function normalisePath(path: unknown): string {
  */
 export function classify(event: SocEvent): LureId | null {
   if (event.event_type === 'blocked_request') return null;
+  // The wheel maps the SSH and web fiction only. MySQL and SMB events (v1.2)
+  // are never placed on a web lure; ChakraView says how many it leaves out.
+  if (event.sensor_id !== 'ssh-decoy-01' && event.sensor_id !== 'web-decoy-01') return null;
   const attrs = event.attributes ?? {};
 
   if (event.sensor_id === 'ssh-decoy-01') {

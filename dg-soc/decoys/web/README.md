@@ -1,5 +1,10 @@
 # M4 stateful web decoy
 
+See [NEXT_MILESTONE.md](NEXT_MILESTONE.md) for opt-in schema 1.2, the inert ZIP,
+signed proxy context, MySQL producer integration, actual checks and pending
+dependencies. Older implementation-history notes below are not the current
+integration status.
+
 The Operations Portal is an isolated synthetic application on port 8080, separate
 from the analyst dashboard on 5173. All results are canned. No supplied command,
 SQL, file path or URL is executed, queried, opened as a host file or fetched.

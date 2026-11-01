@@ -21,6 +21,9 @@ import { ActionCard } from '../components/ActionCard';
 import { BlockFlowModal } from '../components/BlockFlowModal';
 import { LinkDecisionModal } from '../components/LinkDecisionModal';
 import { RawEventDrawer } from '../components/RawEventDrawer';
+import { ArchivePanel, ScopeNote, ProtocolFacts } from '../v12/components';
+import { PROTOCOL_COPY } from '../copy';
+import { archiveEvidence, hasTranscript, responseScope } from '../v12/views';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { EmptyState, ErrorCard, SkeletonRows } from '../components/primitives';
 import { ModeBadge } from '../components/evidence/bits';
@@ -282,6 +285,22 @@ export function IncidentDetail() {
     [eventsById],
   );
 
+  /* Contract v1.2 views. Each degrades to "not served" on a v1.1 backend. */
+  const archives = useMemo(
+    () => (incident ? archiveEvidence(events, incident.links).map((item) => ({
+      ...item,
+      // The serving's own request may sit in another case of the run: look there too.
+      claims: item.claims.map((claim) => (claim.claim === 'requested' && claim.state === 'not_observed' && backendContext
+        ? archiveEvidence([...backendContext.events], incident.links)
+          .find((other) => other.served_event_id === item.served_event_id)?.claims.find((c) => c.claim === 'requested') ?? claim
+        : claim)),
+    })) : []),
+    [incident, events, backendContext],
+  );
+  const scope = useMemo(() => responseScope(backendContext?.eligibility ?? null), [backendContext]);
+  const protocolEvents = useMemo(() => events.filter((event) =>
+    event.attributes?.credential || event.attributes?.db || event.attributes?.file).slice(0, 50), [events]);
+
   const visibleFindings = useMemo(() => {
     if (!incident) return [];
     if (stageFilter === null) return incident.findings;
@@ -458,6 +477,7 @@ export function IncidentDetail() {
             <div className="decide">
               <h3 className="decide__title">Response</h3>
               <EligibilityNotice eligibility={evidence.eligibility} />
+              <ScopeNote scope={scope} />
               {incident.active_block !== null ? (
                 <ActionCard action={incident.active_block} onExpired={() => void load()} />
               ) : null}
@@ -575,7 +595,7 @@ export function IncidentDetail() {
                 key={item.case_id}
                 item={item}
                 transcriptHref={
-                  item.sensor_id === 'ssh-decoy-01' && item.session_id && item.commands > 0
+                  hasTranscript(item.sensor_id) && item.session_id && item.commands > 0
                     ? `/incidents/${item.authority === 'backend_case' ? item.case_id : incident.incident_id}/transcript/${item.session_id}`
                     : null
                 }
@@ -610,6 +630,29 @@ export function IncidentDetail() {
           </div>
         )}
       </section>
+
+      {protocolEvents.length > 0 ? (
+        <section className="incsec" aria-label={PROTOCOL_COPY.title}>
+          <h2 className="incsec__title">{PROTOCOL_COPY.title}</h2>
+          <div className="panel">
+            {protocolEvents.map((event) => (
+              <p key={event.event_id}>
+                <button className="chip" type="button" onClick={() => setOpenEvent(event)}>{event.event_id}</button>
+                {' '}<ProtocolFacts event={event} />
+              </p>
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {archives.length > 0 ? (
+        <section className="incsec" aria-label="Archive bait">
+          <h2 className="incsec__title">
+            Archive bait <span className="incsec__count">{archives.length}</span>
+          </h2>
+          <ArchivePanel items={archives} {...evidenceHandlers} />
+        </section>
+      ) : null}
+
 
       <section className="incsec">
         <h2 className="incsec__title">Score breakdown</h2>

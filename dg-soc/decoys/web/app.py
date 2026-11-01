@@ -16,6 +16,7 @@ from flask import Flask, Response, g, request
 from .observation import RequestObservation, decode
 from .policy_bridge import resolve_enforcer
 from .sessions import SessionStore
+from .backup import ASSET_ID, DB_PASSWORD, SMB_PASSWORD, TOKEN_IDS, build_backup
 
 ROOT = Path(__file__).resolve().parents[2]
 ASSET = Path(__file__).parent / "assets/customer_data.csv"
@@ -45,11 +46,15 @@ def create_app(config=None, *, policy_check=None):
         ATTACKER_IPS=os.environ.get("ATTACKER_IPS", "192.168.77.10"),
         DECOY_SESSION_TTL=900, DECOY_SESSION_CAPACITY=512, UPLOAD_FILE_LIMIT=8192,
         WEB_EVENT_SCHEMA_VERSION=os.environ.get("WEB_EVENT_SCHEMA_VERSION", "1.0"),
+        CAPTURE_MODE=os.environ.get("CAPTURE_MODE", "live"),
     )
     app.config.update(config or {})
     tokens = yaml.safe_load(Path(app.config["HONEYTOKENS_PATH"]).read_text())["tokens"]
-    if app.config["WEB_EVENT_SCHEMA_VERSION"] not in {"1.0", "1.1"}:
+    if app.config["WEB_EVENT_SCHEMA_VERSION"] not in {"1.0", "1.1", "1.2"}:
         raise ValueError("Unsupported web event schema version")
+    if app.config["CAPTURE_MODE"] not in {"live", "replay"}:
+        raise ValueError("Unsupported capture mode")
+    backup_data, backup_manifest = build_backup(ASSET.read_bytes())
     checker = policy_check or resolve_enforcer(
         app.config["BLOCKLIST_PATH"], app.config["ATTACKER_IPS"].replace(",", " ").split()
     )
@@ -88,7 +93,7 @@ def create_app(config=None, *, policy_check=None):
         g.semantic_type, g.semantic_attrs = None, {}
         g.response_class, g.cookie = "normal", None
         g.src_ip = request.remote_addr
-        g.observation = RequestObservation(request, seeded_secrets=(BAIT_TOKEN,))
+        g.observation = RequestObservation(request, seeded_secrets=(BAIT_TOKEN, DB_PASSWORD, SMB_PASSWORD))
         g.session = sessions.get(request.cookies.get(COOKIE), app.config["LAB_RUN_ID"])
         try:
             ipaddress.IPv4Address(g.src_ip)
@@ -129,6 +134,8 @@ def create_app(config=None, *, policy_check=None):
             evidence_role="request",
             session_state="authenticated" if g.session and g.session.authenticated else "anonymous",
         )
+        if app.config["WEB_EVENT_SCHEMA_VERSION"] == "1.2":
+            metadata["protocol"] = "http"
         if response.status_code >= 400 and not g.semantic_type:
             metadata["outcome"] = "denied"
         if not g.semantic_type:
@@ -145,6 +152,12 @@ def create_app(config=None, *, policy_check=None):
                                          "network_input" if g.semantic_type in {"auth_success", "auth_failure"} else "emulated_result")
             attrs["evidence_role"] = ("request" if g.semantic_type in {"auth_success", "auth_failure"} else
                                       "bait" if g.semantic_type == "bait_served" else "result")
+            if g.semantic_type == "bait_served" and "archive" in attrs:
+                result = {key: value for key, value in attrs.items() if key not in {
+                    "honeytoken_ids", "issuance_id", "issued_expires_at", "evidence_basis"
+                }}
+                result["evidence_role"] = "result"
+                observations.append(("synthetic_file_access", result))
             observations.append((g.semantic_type, attrs))
         timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         rows = []
@@ -153,7 +166,7 @@ def create_app(config=None, *, policy_check=None):
                 "schema_version": app.config["WEB_EVENT_SCHEMA_VERSION"], "source_record_id": str(uuid.uuid4()),
                 "sensor_id": "web-decoy-01", "event_type": kind, "occurred_at": timestamp,
                 "src_ip": g.src_ip or "0.0.0.0", "session_id": g.session.reference if g.session else None,
-                "lab_run_id": app.config["LAB_RUN_ID"], "capture_mode": "live", "attributes": attrs,
+                "lab_run_id": app.config["LAB_RUN_ID"], "capture_mode": app.config["CAPTURE_MODE"], "attributes": attrs,
             })
             try:
                 ipaddress.IPv4Address(rows[-1]["src_ip"])
@@ -285,13 +298,29 @@ def create_app(config=None, *, policy_check=None):
     def env_bait():
         data = f"APP_ENV=internal\nBACKUP_SSH_USER=backup\nBACKUP_SSH_PASS={BAIT_TOKEN}\n".encode()
         if request.method == "GET":
-            kind = "bait_served" if app.config["WEB_EVENT_SCHEMA_VERSION"] == "1.1" else "synthetic_file_access"
+            kind = "bait_served" if app.config["WEB_EVENT_SCHEMA_VERSION"] in {"1.1", "1.2"} else "synthetic_file_access"
             semantic(kind, asset_id="web:/.env", fixture_version="1",
                      honeytoken_ids=["tok_backup_01"], issuance_id="issue_" + uuid.uuid4().hex,
                      evidence_basis="sensor_response",
                      evidence_kind="bait_served", outcome="served", size_bytes=len(data),
                      sha256=hashlib.sha256(data).hexdigest(), digest_scope="full_asset")
         return Response(data, mimetype="text/plain")
+
+    @app.get("/backup/backup.zip")
+    def backup():
+        if app.config["WEB_EVENT_SCHEMA_VERSION"] != "1.2":
+            return page("<h2>Request unavailable</h2>", 404)
+        if request.method == "GET":
+            g.response_class = "fake_data"
+            semantic("bait_served", asset_id=ASSET_ID, fixture_version="backup-zip@1",
+                     honeytoken_ids=TOKEN_IDS, issuance_id="iss_" + uuid.uuid4().hex,
+                     issued_expires_at=None, evidence_basis="sensor_response", outcome="served",
+                     size_bytes=len(backup_data), sha256=hashlib.sha256(backup_data).hexdigest(),
+                     digest_scope="full_asset", archive=backup_manifest,
+                     transfer={"response_status": 200, "content_length": len(backup_data), "completion": "unknown"})
+        return Response(backup_data, mimetype="application/zip", headers={
+            "Content-Disposition": 'attachment; filename="backup.zip"'
+        })
 
     @app.get("/.git/HEAD")
     def git_bait():

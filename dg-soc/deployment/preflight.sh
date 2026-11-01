@@ -48,7 +48,7 @@ curl --connect-timeout 2 --max-time 5 -fsS "${BACKEND_URL}/api/health" >/dev/nul
 [ -f "$(dirname "$0")/state/blocklist.json" ] && python3 -c "import json,sys;d=json.load(open(sys.argv[1]));assert isinstance(d['entries'],list)" "$(dirname "$0")/state/blocklist.json" 2>/dev/null \
   && pass "blocklist.json exists and is valid JSON" || bad "blocklist.json missing or invalid (run deployment/bootstrap_state.sh)"
 [ -f "$(dirname "$0")/../decoys/ssh/fs.pickle" ] && pass "cowrie fs.pickle built" || bad "decoys/ssh/fs.pickle missing (run decoys/ssh/build_fs.sh)"
-pgrep -f '^python3? .*sensors/adapter\.py' >/dev/null && pass "adapter running" || bad "adapter not running (python sensors/adapter.py)"
+pgrep -f '(^|/)python(3([.][0-9]+)?)? .*sensors/adapter[.]py' >/dev/null && pass "adapter running" || bad "adapter not running (python sensors/adapter.py)"
 python3 - "$(dirname "$0")/state/collector-health.json" <<'PY' && pass "collector heartbeat fresh and healthy" || bad "collector heartbeat missing, stale or degraded"
 import json, sys
 from datetime import datetime, timezone

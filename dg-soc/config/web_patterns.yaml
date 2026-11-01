@@ -29,6 +29,7 @@ classes:
     - "`[^`]+`"
     - "\\$\\([^)]+\\)"
 hidden_paths:
+  - /backup/backup.zip
   - /admin
   - /administrator
   - /.env
