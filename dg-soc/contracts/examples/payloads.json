@@ -31,6 +31,10 @@
     "/",
     "/ping?host=192.168.77.20",
     "/search?q=C# tutorial",
-    "/search?q=email me at a.b@example.com"
+    "/search?q=email me at a.b@example.com",
+    "/search?q=quarterly report--",
+    "/search?q=C#",
+    "/search?q=design notes #",
+    "/search?q=literal comment delimiter /*"
   ]
 }

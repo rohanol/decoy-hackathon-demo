@@ -1,5 +1,6 @@
 # Run manually after building dg-web-decoy:m4; only loopback HTTP is used.
 import hashlib, http.client, json, os, subprocess, tempfile, time
+from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import urlencode
 from jsonschema import Draft202012Validator, FormatChecker
@@ -23,11 +24,17 @@ with tempfile.TemporaryDirectory(prefix="dg-m4-smoke-") as directory:
                "-e", "BLOCKLIST_PATH=/state/blocklist.json",
                "-e", "LOG_PATH=/logs/web.json", "-e", "LAB_RUN_ID=smoke-m4", "dg-web-decoy:m4")
         port = int(docker("port", name, "8080/tcp").rsplit(":", 1)[1])
+        cookies = SimpleCookie()
         def fetch(method, path, data=None):
             connection = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
             headers = {"Content-Type": "application/x-www-form-urlencoded"} if data is not None else {}
+            if cookies:
+                headers["Cookie"] = "; ".join(f"{key}={value.value}" for key, value in cookies.items())
             connection.request(method, path, body=data, headers=headers)
             response = connection.getresponse()
+            for key, value in response.getheaders():
+                if key.lower() == "set-cookie":
+                    cookies.load(value)
             result = response.status, response.read()
             connection.close()
             return result
@@ -42,12 +49,15 @@ with tempfile.TemporaryDirectory(prefix="dg-m4-smoke-") as directory:
         else:
             raise RuntimeError("Container did not become ready")
         assert b"Operations Portal" in body
+        assert fetch("GET", "/download?file=customer_data.csv")[0] == 401
         assert fetch("POST", "/login", urlencode({"username": "svc_portal", "password": "DGLAB-Portal-4471"}))[0] == 200
         assert fetch("GET", "/search?q=x%27%20UNION%20SELECT%20name")[0] == 500
         status, data = fetch("GET", "/download?file=customer_data.csv")
         assert status == 200 and data == (root / "decoys/web/assets/customer_data.csv").read_bytes()
         assert fetch("GET", "/download?file=../../etc/passwd")[0] == 404
         assert fetch("GET", "/.env")[0] == 200
+        assert fetch("POST", "/logout", "")[0] == 200
+        assert fetch("GET", "/download?file=customer_data.csv")[0] == 401
         # Replacing the file, not rewriting its inode, must be visible in-container.
         replacement = state / "blocklist.next"
         replacement.write_text("malformed")
@@ -66,7 +76,7 @@ with tempfile.TemporaryDirectory(prefix="dg-m4-smoke-") as directory:
         for event in events:
             validate.validate(event)
         assert any(e["event_type"] == "auth_success" for e in events)
-        served = next(e for e in events if e["event_type"] == "synthetic_file_access")
+        served = next(e for e in events if e["event_type"] == "synthetic_file_access" and e["attributes"]["asset_id"] == "customer_data.csv")
         assert served["attributes"]["sha256"] == hashlib.sha256(data).hexdigest()
         assert "DGLAB-Portal-4471" not in (state / "logs/web.json").read_text()
         print(f"PASS: live HTTP login/search/download/hidden route; {len(events)} schema-valid events; atomic state replacement observed; UID 1000, read-only root, no privileges/capabilities")
