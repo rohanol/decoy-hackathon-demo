@@ -1233,6 +1233,8 @@ export function ChakraView() {
       ? shown.chords.find((chord) => chord.link.link_id === selection.linkId)
       : undefined;
   const deepest = shown.depth ? RINGS.find((ring) => ring.id === shown.depth) : undefined;
+  // Until a source exists there is nothing to show: no lure map, no legend.
+  const empty = incidents !== null && incident === null;
 
   return (
     <div className="page">
@@ -1319,11 +1321,21 @@ export function ChakraView() {
                     view={cameraView}
                     autoRotate={autoRotate && !reducedMotion}
                     animate={!reducedMotion}
+                    empty={empty}
                     onSelect={setSelection}
                   />
                 </Suspense>
               </ErrorBoundary>
 
+              {empty ? (
+                <div className="c3empty">
+                  <span className="c3empty__title">No source has touched a decoy yet</span>
+                  <span className="c3empty__text">
+                    The moment one does, its path through the decoys draws here.
+                  </span>
+                </div>
+              ) : (
+              <>
               <div className="c3hud c3hud--stats" aria-live="polite">
                 <span className="c3hud__label">Deepest ring reached</span>
                 <AnimatePresence mode="popLayout" initial={false}>
@@ -1376,6 +1388,8 @@ export function ChakraView() {
               </div>
 
               <div className="c3hud c3hud--hint">Drag to orbit · scroll to zoom · click a lure</div>
+              </>
+              )}
             </div>
           ) : (
             <Wheel
@@ -1396,10 +1410,13 @@ export function ChakraView() {
             onPlaying={setPlaying}
           />
 
+          {empty ? null : (
           <div className="legend chakra__legend">
-            <span className="legend__item">
-              <span className="clegend clegend--untouched" /> not reached
-            </span>
+            {mode === '2d' ? (
+              <span className="legend__item">
+                <span className="clegend clegend--untouched" /> not reached
+              </span>
+            ) : null}
             <span className="legend__item">
               <span className="clegend clegend--touched" /> reached
             </span>
@@ -1416,6 +1433,7 @@ export function ChakraView() {
               <span className="legend__swatch legend__swatch--confirmed" /> analyst-confirmed
             </span>
           </div>
+          )}
         </div>
 
         <aside className="chakra__panel" aria-live="polite">
@@ -1445,6 +1463,14 @@ export function ChakraView() {
                   onBack={() => setSelection(null)}
                   onDecide={() => setDeciding(selectedChord.link)}
                 />
+              ) : empty ? (
+                <div className="cpanel">
+                  <div className="cpanel__eyebrow">Waiting for a source</div>
+                  <p className="cpanel__text">
+                    Each decoy a source reaches appears in the funnel as it happens, deeper rings
+                    for deeper steps. Click any of them to see the events behind it.
+                  </p>
+                </div>
               ) : (
                 <SummaryPanel
                   model={shown}
@@ -1458,7 +1484,7 @@ export function ChakraView() {
         </aside>
       </section>
 
-      <p className="graph__note">
+      <p className="graph__note" hidden={empty}>
         Radius is depth into the planted fiction; numbers are the order this source first reached
         each lure. A lit lure cites real event ids, a red ring cites a backend finding, and a chord
         is a link the backend reported. A confirmed link means the same source followed the planted
